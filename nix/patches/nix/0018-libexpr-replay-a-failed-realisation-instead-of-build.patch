@@ -1,4 +1,4 @@
-From 776dd780599c81777eb47aff838d17c529e8f967 Mon Sep 17 00:00:00 2001
+From 29e5b754fef695b51e686f0925b4f4da612f68e5 Mon Sep 17 00:00:00 2001
 From: Dennis Wuitz <dennish@wuitz.de>
 Date: Thu, 8 Oct 2026 03:51:37 +0200
 Subject: [PATCH] libexpr: replay a failed realisation instead of building it
@@ -14,23 +14,24 @@ of the store.
 Keep the exception per EvalState and rethrow it for the rest of the
 evaluator's lifetime.
 ---
- src/libexpr-tests/import-from-derivation.cc | 69 +++++++++++++++++++++
- src/libexpr-tests/meson.build               |  1 +
- src/libexpr/eval.cc                         |  1 +
- src/libexpr/include/nix/expr/eval.hh        |  6 ++
- src/libexpr/primops.cc                      | 17 ++++-
- 5 files changed, 93 insertions(+), 1 deletion(-)
+ src/libexpr-tests/import-from-derivation.cc | 110 ++++++++++++++++++++
+ src/libexpr-tests/meson.build               |   1 +
+ src/libexpr/eval.cc                         |   1 +
+ src/libexpr/include/nix/expr/eval.hh        |   6 ++
+ src/libexpr/primops.cc                      |  17 ++-
+ 5 files changed, 134 insertions(+), 1 deletion(-)
  create mode 100644 src/libexpr-tests/import-from-derivation.cc
 
 diff --git a/src/libexpr-tests/import-from-derivation.cc b/src/libexpr-tests/import-from-derivation.cc
 new file mode 100644
-index 000000000..7aed3b25a
+index 000000000..7978b0f23
 --- /dev/null
 +++ b/src/libexpr-tests/import-from-derivation.cc
-@@ -0,0 +1,69 @@
+@@ -0,0 +1,110 @@
 +#include <gtest/gtest.h>
 +
 +#include "nix/expr/tests/libexpr.hh"
++#include "nix/store/build.hh"
 +#include "nix/store/globals.hh"
 +#include "nix/store/store-open.hh"
 +#include "nix/store/tests/forwarding-store.hh"
@@ -38,17 +39,57 @@ index 000000000..7aed3b25a
 +
 +namespace nix {
 +
++struct FailingBuilder : Builder
++{
++    unsigned & buildAttempts;
++
++    FailingBuilder(unsigned & buildAttempts)
++        : buildAttempts(buildAttempts)
++    {
++    }
++
++    [[noreturn]] void fail()
++    {
++        buildAttempts++;
++        throw Error("the build failed");
++    }
++
++    void buildPaths(const std::vector<DerivedPath> & paths, BuildMode buildMode) override
++    {
++        fail();
++    }
++
++    std::vector<KeyedBuildResult>
++    buildPathsWithResults(const std::vector<DerivedPath> & paths, BuildMode buildMode) override
++    {
++        fail();
++    }
++
++    BuildResult buildDerivation(const StorePath & drvPath, const BasicDerivation & drv, BuildMode buildMode) override
++    {
++        fail();
++    }
++
++    void ensurePath(const StorePath & path) override
++    {
++        fail();
++    }
++
++    void repairPath(const StorePath & path) override
++    {
++        fail();
++    }
++};
++
 +struct FailingBuildStore : ForwardingStore
 +{
 +    unsigned buildAttempts = 0;
 +
 +    using ForwardingStore::ForwardingStore;
 +
-+    void
-+    buildPaths(const std::vector<DerivedPath> & paths, BuildMode buildMode, std::shared_ptr<Store> evalStore) override
++    ref<Builder> getBuilder(std::shared_ptr<Store> evalStore) override
 +    {
-+        buildAttempts++;
-+        throw Error("the build failed");
++        return make_ref<FailingBuilder>(buildAttempts);
 +    }
 +};
 +
@@ -98,10 +139,10 @@ index 000000000..7aed3b25a
 +
 +} // namespace nix
 diff --git a/src/libexpr-tests/meson.build b/src/libexpr-tests/meson.build
-index 88e89bbf7..685699857 100644
+index 73d3b1e61..289f6087b 100644
 --- a/src/libexpr-tests/meson.build
 +++ b/src/libexpr-tests/meson.build
-@@ -51,6 +51,7 @@ sources = files(
+@@ -57,6 +57,7 @@ sources = files(
    'error_traces.cc',
    'eval-cache.cc',
    'eval.cc',
@@ -110,10 +151,10 @@ index 88e89bbf7..685699857 100644
    'lazy-fetcher-attr.cc',
    'main.cc',
 diff --git a/src/libexpr/eval.cc b/src/libexpr/eval.cc
-index 1867f4da4..aef379be3 100644
+index 17171eaaa..42cf06518 100644
 --- a/src/libexpr/eval.cc
 +++ b/src/libexpr/eval.cc
-@@ -307,6 +307,7 @@ EvalState::EvalState(
+@@ -315,6 +315,7 @@ EvalState::EvalState(
      , debugStop(false)
      , trylevel(0)
      , rootedValidPaths(make_ref<decltype(rootedValidPaths)::element_type>())
@@ -122,10 +163,10 @@ index 1867f4da4..aef379be3 100644
      , fileEvalCache(make_ref<decltype(fileEvalCache)::element_type>())
      , positionToDocComment(make_ref<decltype(positionToDocComment)::element_type>())
 diff --git a/src/libexpr/include/nix/expr/eval.hh b/src/libexpr/include/nix/expr/eval.hh
-index 6e9675c9e..f626f309f 100644
+index 5a5dc658e..01df6776c 100644
 --- a/src/libexpr/include/nix/expr/eval.hh
 +++ b/src/libexpr/include/nix/expr/eval.hh
-@@ -478,6 +478,12 @@ public:
+@@ -531,6 +531,12 @@ public:
  
  private:
  
@@ -139,14 +180,14 @@ index 6e9675c9e..f626f309f 100644
       * A cache that maps paths to "resolved" paths for importing Nix
       * expressions, i.e. `/foo` to `/foo/default.nix`.
 diff --git a/src/libexpr/primops.cc b/src/libexpr/primops.cc
-index 5c71cae2f..5bcbbc288 100644
+index ed350789d..e0f6b67ea 100644
 --- a/src/libexpr/primops.cc
 +++ b/src/libexpr/primops.cc
-@@ -127,7 +127,22 @@ StringMap EvalState::realiseContext(const NixStringContext & context, StorePathS
+@@ -131,7 +131,22 @@ StringMap EvalState::realiseContext(const NixStringContext & context, StorePathS
      buildReqs.reserve(drvs.size());
      for (auto & d : drvs)
          buildReqs.emplace_back(DerivedPath{d});
--    buildStore->buildPaths(buildReqs, bmNormal, store);
+-    buildStore->getBuilder(store)->buildPaths(buildReqs, bmNormal);
 +
 +    /* A thunk that threw is forced again on its next use and would ask the
 +       store to build the same failing derivation again. Within this evaluation
@@ -157,7 +198,7 @@ index 5c71cae2f..5bcbbc288 100644
 +            std::rethrow_exception(*failed);
 +
 +    try {
-+        buildStore->buildPaths(buildReqs, bmNormal, store);
++        buildStore->getBuilder(store)->buildPaths(buildReqs, bmNormal);
 +    } catch (Error &) {
 +        if (drvs.size() == 1)
 +            failedRealisations->insert_or_assign(drvs.front().drvPath->getBaseStorePath(), std::current_exception());
@@ -166,3 +207,6 @@ index 5c71cae2f..5bcbbc288 100644
  
      StorePathSet outputsToCopyAndAllow;
  
+-- 
+2.56.0
+

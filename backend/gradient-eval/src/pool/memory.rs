@@ -40,10 +40,10 @@ const TOTAL_RAM_FALLBACK_BYTES: u64 = 4 * 1024 * 1024 * 1024;
 
 pub fn total_memory_bytes() -> u64 {
     use sysinfo::{MemoryRefreshKind, RefreshKind, System};
-    let sys = System::new_with_specifics(
+    let total = System::new_with_specifics(
         RefreshKind::nothing().with_memory(MemoryRefreshKind::nothing().with_ram()),
-    );
-    let total = sys.total_memory();
+    )
+    .map_or(0, |sys| sys.total_memory());
     if total == 0 {
         TOTAL_RAM_FALLBACK_BYTES
     } else {

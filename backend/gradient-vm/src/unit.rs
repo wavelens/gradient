@@ -7,7 +7,7 @@
 use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
-use zbus::zvariant::OwnedObjectPath;
+use zbus::OwnedObjectPath;
 
 use crate::state::GuestId;
 

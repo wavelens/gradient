@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use super::settings::{CacheSubscriptionItem, cache_subscription_items};
+use super::settings::cache_subscription_items;
 use crate::access::has_permission;
 use crate::api_spec::ProjectPath;
 use crate::endpoints::tasks::error_message_if_caller_can_edit_task;
@@ -12,75 +12,16 @@ use crate::error::{WebError, WebResult};
 use crate::helpers::ok_json;
 use crate::scope::{Member, ProjectScope};
 use axum::Json;
+pub use gradient_api_types::{
+    GitAccessReadiness, ProjectReadinessResponse, ProjectReadinessWorkers,
+    ProjectSubscriptionReadinessCache, ProjectTaskReadinessEntry, TaskRepositoryFetchStatus,
+    TeamReadinessEntry,
+};
 use gradient_db::WebDb;
 use gradient_db::lookup::by_ids;
 use gradient_types::permissions::Permission;
 use gradient_types::*;
-use serde::Serialize;
 use std::collections::{HashMap, HashSet};
-
-#[derive(Serialize, utoipa::ToSchema)]
-pub struct ProjectReadinessResponse {
-    pub ready: bool,
-    pub workers: ProjectReadinessWorkers,
-    pub cache: ProjectSubscriptionReadinessCache,
-    pub repository: GitAccessReadiness,
-}
-
-#[derive(Serialize, utoipa::ToSchema)]
-pub struct ProjectReadinessWorkers {
-    pub ready: bool,
-    pub registered: usize,
-    pub teams: Vec<TeamReadinessEntry>,
-    pub teams_granted_without_workers: Vec<TeamReadinessEntry>,
-    pub teams_you_can_grant: Vec<TeamReadinessEntry>,
-}
-
-#[derive(Serialize, utoipa::ToSchema)]
-pub struct TeamReadinessEntry {
-    pub name: String,
-    pub display_name: String,
-    pub workers: usize,
-}
-
-#[derive(Serialize, utoipa::ToSchema)]
-pub struct ProjectSubscriptionReadinessCache {
-    pub ready: bool,
-    pub subscriptions: Vec<CacheSubscriptionItem>,
-}
-
-#[derive(Serialize, utoipa::ToSchema)]
-pub struct GitAccessReadiness {
-    pub status: TaskRepositoryFetchStatus,
-    pub tasks: Vec<ProjectTaskReadinessEntry>,
-}
-
-#[derive(Serialize, utoipa::ToSchema)]
-pub struct ProjectTaskReadinessEntry {
-    pub name: String,
-    pub display_name: String,
-    pub status: TaskRepositoryFetchStatus,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub error: Option<String>,
-}
-
-#[derive(Serialize, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug, utoipa::ToSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum TaskRepositoryFetchStatus {
-    Verified,
-    Unchecked,
-    Failing,
-}
-
-impl TaskRepositoryFetchStatus {
-    fn of(task: &MTask) -> Self {
-        match (task.last_fetch_at, &task.last_fetch_error) {
-            (None, _) => Self::Unchecked,
-            (Some(_), Some(_)) => Self::Failing,
-            (Some(_), None) => Self::Verified,
-        }
-    }
-}
 
 async fn active_worker_counts(db: &WebDb, teams: &[TeamId]) -> WebResult<HashMap<TeamId, usize>> {
     let mut counts = HashMap::new();
@@ -168,7 +109,7 @@ async fn repository_readiness(
         .await?
         .into_iter()
         .map(|task| ProjectTaskReadinessEntry {
-            status: TaskRepositoryFetchStatus::of(&task),
+            status: TaskRepositoryFetchStatus::from(&task),
             error: error_message_if_caller_can_edit_task(task.last_fetch_error, can_edit),
             name: task.name,
             display_name: task.display_name,

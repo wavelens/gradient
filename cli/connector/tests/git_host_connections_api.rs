@@ -41,7 +41,7 @@ fn connection_response(generated_secret: Option<&str>) -> serde_json::Value {
         "base_url": "https://git.example.com", "has_secret": true, "has_access_token": false,
         "access_token_refreshes_automatically": false,
         "allowed_ips": [], "receives_events": true, "reports_status": false,
-        "created_by": USER, "created_at": "2026-11-11T00:00:00Z", "managed": false,
+        "created_by": USER, "created_at": "2026-11-11T00:00:00", "managed": false,
         "webhook_url": "https://gradient.example/api/v1/hooks/forgejo",
         "generated_secret": generated_secret
     })
@@ -84,7 +84,10 @@ async fn test_list_uses_the_path_of_each_owner_and_decodes_owner() {
         .list(&GitHostConnectionSetOwner::Team("ops".into()))
         .await
         .unwrap();
-    assert_eq!(team[0].owner, GitHostConnectionOwner::Team("ops".into()));
+    assert_eq!(
+        team[0].owner,
+        GitHostConnectionOwner::Team { name: "ops".into() }
+    );
     let project = api
         .list(&GitHostConnectionSetOwner::Project("web".into()))
         .await
@@ -114,22 +117,22 @@ async fn test_create_puts_body_and_returns_generated_secret() {
         .create(
             &GitHostConnectionSetOwner::Project("web".into()),
             &CreateGitHostConnectionRequest {
-                name: IndexName("forgejo".into()),
+                name: IndexName::try_from("forgejo".to_owned()).expect("valid name"),
                 git_host_type: "forgejo".into(),
                 base_url: Some("https://git.example.com".into()),
-                receives_events: Some(true),
+                receives_events: true,
                 access_token: None,
                 allowed_ips: None,
                 display_name: None,
                 installation_id: None,
-                reports_status: None,
+                reports_status: false,
                 secret: None,
             },
         )
         .await
         .unwrap();
     assert_eq!(created.generated_secret.as_deref(), Some("generated"));
-    assert!(created.webhook_url.is_some());
+    assert!(created.connection.webhook_url.is_some());
 }
 
 #[tokio::test]
@@ -162,7 +165,7 @@ async fn test_get_update_delete_and_deliveries_address_one_connection() {
         .respond_with(ok(serde_json::json!([{
             "id": DELIVERY, "event": "push", "status_code": 202, "result": "queued",
             "repository": "org/repo", "tasks_scanned": 2, "queued": 1,
-            "created_at": "2026-11-11T00:00:00Z"
+            "created_at": "2026-11-11T00:00:00"
         }])))
         .expect(1)
         .mount(&server)
@@ -171,7 +174,10 @@ async fn test_get_update_delete_and_deliveries_address_one_connection() {
     let client = client(&server);
     let api = client.git_host_connections();
     let owner = GitHostConnectionSetOwner::Team("ops".into());
-    assert_eq!(api.get(&owner, CONNECTION).await.unwrap().name, "forgejo");
+    assert_eq!(
+        api.get(&owner, CONNECTION).await.unwrap().connection.name,
+        "forgejo"
+    );
     api.update(
         &owner,
         CONNECTION,
@@ -227,8 +233,8 @@ async fn test_check_and_tasks_address_one_connection() {
 fn repository_grant_response_json() -> serde_json::Value {
     serde_json::json!({
         "id": REPOSITORY_GRANT_UUID, "project": USER, "project_name": "web",
-        "repository_owner": "org", "repository_name": "repo", "source": "api",
-        "created_by": USER, "created_at": "2026-11-11T00:00:00Z"
+        "repository_owner": "org", "repository_name": "repo", "source": "admin",
+        "created_by": USER, "created_at": "2026-11-11T00:00:00"
     })
 }
 

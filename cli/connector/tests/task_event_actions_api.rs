@@ -90,7 +90,7 @@ async fn creating_send_web_request_action_posts_tagged_config_and_returns_one_ti
                     token: None,
                 },
                 events: vec!["evaluation.completed".into()],
-                active: Some(true),
+                active: true,
             },
         )
         .await

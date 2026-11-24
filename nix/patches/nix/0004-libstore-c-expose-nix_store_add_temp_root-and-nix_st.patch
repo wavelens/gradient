@@ -1,4 +1,4 @@
-From 2092cf93a57cc6706bcc273007b5aedcccfe3a59 Mon Sep 17 00:00:00 2001
+From 6dfeef2eab09782089a080ba3bed6795f8839048 Mon Sep 17 00:00:00 2001
 From: Dennis Wuitz <dennish@wuitz.de>
 Date: Sat, 13 Jun 2026 17:48:24 +0200
 Subject: [PATCH] libstore-c: expose nix_store_add_temp_root and
@@ -10,16 +10,31 @@ collection. Expose the temporary roots of `Store` and the permanent
 roots of `LocalFSStore`; the latter fails on a store without a local
 filesystem.
 ---
- src/libstore-c/nix_api_store.cc     | 32 +++++++++++++++
- src/libstore-c/nix_api_store.h      | 30 ++++++++++++++
- src/libstore-tests/nix_api_store.cc | 64 +++++++++++++++++++++++++++++
- 3 files changed, 126 insertions(+)
+ doc/manual/rl-next/c-api-gc-roots.md |  7 +++
+ src/libstore-c/nix_api_store.cc      | 32 ++++++++++++++
+ src/libstore-c/nix_api_store.h       | 30 +++++++++++++
+ src/libstore-tests/nix_api_store.cc  | 64 ++++++++++++++++++++++++++++
+ 4 files changed, 133 insertions(+)
+ create mode 100644 doc/manual/rl-next/c-api-gc-roots.md
 
+diff --git a/doc/manual/rl-next/c-api-gc-roots.md b/doc/manual/rl-next/c-api-gc-roots.md
+new file mode 100644
+index 000000000..b2c98f311
+--- /dev/null
++++ b/doc/manual/rl-next/c-api-gc-roots.md
+@@ -0,0 +1,7 @@
++---
++synopsis: "C API: `nix_store_add_temp_root` and `nix_store_add_perm_root`"
++---
++
++The new functions `nix_store_add_temp_root()` and `nix_store_add_perm_root()` in `nix_api_store.h` register a
++temporary and a permanent garbage collector root for a store path.
++A permanent root is a symlink at the given location and is only available on local filesystem stores.
 diff --git a/src/libstore-c/nix_api_store.cc b/src/libstore-c/nix_api_store.cc
-index fbb3c4185..276164012 100644
+index b4eb9e345..e6a7cf69d 100644
 --- a/src/libstore-c/nix_api_store.cc
 +++ b/src/libstore-c/nix_api_store.cc
-@@ -99,6 +99,38 @@ nix_store_get_version(nix_c_context * context, Store * store, nix_get_string_cal
+@@ -100,6 +100,38 @@ nix_store_get_version(nix_c_context * context, Store * store, nix_get_string_cal
      NIXC_CATCH_ERRS
  }
  
@@ -100,7 +115,7 @@ index e60a7d6c0..ebade943f 100644
   * @brief Create a `nix_derivation` from a JSON representation of that derivation.
   *
 diff --git a/src/libstore-tests/nix_api_store.cc b/src/libstore-tests/nix_api_store.cc
-index 0162684da..663e008fc 100644
+index e51263563..59f1104f7 100644
 --- a/src/libstore-tests/nix_api_store.cc
 +++ b/src/libstore-tests/nix_api_store.cc
 @@ -1,5 +1,7 @@
@@ -111,7 +126,7 @@ index 0162684da..663e008fc 100644
  #include <nlohmann/json.hpp>
  
  #include "nix_api_util.h"
-@@ -977,4 +979,66 @@ TEST_F(nix_api_store_test, nix_derivation_clone)
+@@ -985,4 +987,66 @@ TEST_F(nix_api_store_test, nix_derivation_clone)
      nix_derivation_free(drv2);
  }
  
@@ -178,3 +193,6 @@ index 0162684da..663e008fc 100644
 +}
 +
  } // namespace nixC
+-- 
+2.56.0
+

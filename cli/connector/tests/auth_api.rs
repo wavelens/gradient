@@ -24,7 +24,7 @@ async fn basic_login_returns_token() {
         .basic_login(connector::api::MakeLoginRequest {
             loginname: "user".into(),
             password: "pass".into(),
-            remember_me: None,
+            remember_me: false,
         })
         .await
         .unwrap();

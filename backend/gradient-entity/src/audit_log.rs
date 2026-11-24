@@ -34,3 +34,16 @@ pub enum Relation {
 }
 
 impl ActiveModelBehavior for ActiveModel {}
+
+impl From<Model> for gradient_api_types::AuditLogEntry {
+    fn from(entry: Model) -> Self {
+        Self {
+            id: entry.id.to_string(),
+            event: entry.event,
+            ip: entry.ip,
+            user_agent: entry.user_agent,
+            metadata: entry.metadata,
+            created_at: entry.created_at.and_utc().to_rfc3339(),
+        }
+    }
+}

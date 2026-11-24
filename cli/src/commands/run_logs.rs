@@ -17,7 +17,7 @@ const INTERRUPTED_EXIT_CODE: i32 = 130;
 struct FollowedJob {
     id: String,
     attr: String,
-    printed: u64,
+    printed: usize,
     lines: LinePrefixer,
     finished: bool,
     streaming_terminal_escape_filter: StreamingTerminalEscapeSequenceFilter,

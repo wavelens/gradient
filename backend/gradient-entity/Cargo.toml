@@ -21,6 +21,7 @@ workspace = true
 testing = []
 
 [dependencies]
+gradient-api-types = { workspace = true }
 chrono     = { workspace = true }
 futures    = { workspace = true }
 num_enum   = { workspace = true }

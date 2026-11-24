@@ -11,42 +11,26 @@ use crate::helpers::ok_json;
 use crate::refusal::SharedRefusal;
 use axum::Json;
 use chrono::NaiveDateTime;
+pub use gradient_api_types::{PendingInvitationItem, RevokeInvitationRequest};
 use gradient_db::WebDb;
 use gradient_types::*;
-use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
-pub struct PendingInvitationItem {
-    pub user: String,
-    pub name: String,
-    pub role: String,
-    pub created_at: NaiveDateTime,
-    pub expires_at: NaiveDateTime,
-}
-
-impl PendingInvitationItem {
-    pub fn new(
-        invitee_id: UserId,
-        invitee: Option<&MUser>,
-        role: String,
-        created_at: NaiveDateTime,
-        expires_at: NaiveDateTime,
-    ) -> Self {
-        Self {
-            user: invitee
-                .map(|u| u.username.clone())
-                .unwrap_or_else(|| invitee_id.to_string()),
-            name: invitee.map(|u| u.name.clone()).unwrap_or_default(),
-            role,
-            created_at,
-            expires_at,
-        }
+pub fn build_pending_invitation_item(
+    invitee_id: UserId,
+    invitee: Option<&MUser>,
+    role: String,
+    created_at: NaiveDateTime,
+    expires_at: NaiveDateTime,
+) -> PendingInvitationItem {
+    PendingInvitationItem {
+        user: invitee
+            .map(|u| u.username.clone())
+            .unwrap_or_else(|| invitee_id.to_string()),
+        name: invitee.map(|u| u.name.clone()).unwrap_or_default(),
+        role,
+        created_at,
+        expires_at,
     }
-}
-
-#[derive(Serialize, Deserialize, Debug, utoipa::ToSchema)]
-pub struct RevokeInvitationRequest {
-    pub user: String,
 }
 
 pub async fn find_invitation<T: InvitationTable>(
@@ -90,7 +74,7 @@ pub async fn list<O: Owner>(
                 .get(&fields.role)
                 .cloned()
                 .unwrap_or_else(|| fields.role.to_string());
-            PendingInvitationItem::new(
+            build_pending_invitation_item(
                 fields.user,
                 invitee.as_ref(),
                 role,

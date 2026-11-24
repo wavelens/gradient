@@ -139,7 +139,7 @@ async fn test_status_test_posts_and_decodes_the_attempt() {
         .respond_with(
             ResponseTemplate::new(200).set_body_json(ok(serde_json::json!({
                 "id": ATTEMPT, "event": "test", "success": true, "response_status": 201,
-                "delivered_at": "2026-11-11T00:00:00Z"
+                "delivered_at": "2026-11-11T00:00:00"
             }))),
         )
         .expect(1)

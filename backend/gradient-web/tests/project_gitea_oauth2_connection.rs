@@ -58,7 +58,7 @@ fn signed_cookie(session_id: SessionId, exp_offset: i64) -> String {
             "name": "codeberg",
             "display_name": "Codeberg",
         }),
-        &EncodingKey::from_secret(TEST_JWT_SECRET.as_bytes()),
+        &EncodingKey::from_secret(TEST_JWT_SECRET.as_bytes()).unwrap(),
     )
     .unwrap();
     format!("git_host_oauth_connect={jwt}")
@@ -114,7 +114,7 @@ async fn connect_redirects_to_the_git_host_with_pkce_and_a_signed_cookie() {
         .expect("connect cookie set");
     let claims = decode::<Value>(
         jwt,
-        &DecodingKey::from_secret(TEST_JWT_SECRET.as_bytes()),
+        &DecodingKey::from_secret(TEST_JWT_SECRET.as_bytes()).unwrap(),
         &Validation::new(Algorithm::HS256),
     )
     .unwrap()

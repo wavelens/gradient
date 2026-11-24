@@ -15,10 +15,11 @@ use axum::{Extension, Json};
 use gradient_core::ServerState;
 use gradient_db::exec_jobs::log_key;
 use gradient_types::*;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use std::sync::Arc;
 
 use super::ExecJobAccessContext;
+pub use gradient_api_types::ExecJobLog;
 
 #[derive(Debug, Deserialize, utoipa::IntoParams)]
 #[into_params(parameter_in = Query)]
@@ -26,28 +27,6 @@ pub struct ExecJobLogQuery {
     pub attempt: Option<i32>,
     pub node: Option<u32>,
     pub offset: Option<usize>,
-}
-
-#[derive(Serialize, Debug, PartialEq, Eq, utoipa::ToSchema)]
-pub struct ExecJobLog {
-    pub offset: usize,
-    pub log: String,
-    pub total_bytes: usize,
-}
-
-impl ExecJobLog {
-    fn after(mut full: String, offset: Option<usize>) -> Self {
-        let total_bytes = full.len();
-        let offset = offset
-            .filter(|&offset| full.is_char_boundary(offset))
-            .unwrap_or(0);
-        let log = full.split_off(offset);
-        Self {
-            offset,
-            log,
-            total_bytes,
-        }
-    }
 }
 
 #[utoipa::path(

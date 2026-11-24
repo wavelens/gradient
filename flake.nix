@@ -194,7 +194,7 @@
       };
 
       nix = final: prev: {
-        gradient-nix = ((prev.nixVersions.nixComponents_2_35.appendPatches (
+        gradient-nix = ((prev.nixVersions.nixComponents_2_36.appendPatches (
           # We would love someone getting this upstream!
           map (patch: ./nix/patches/nix + "/${patch}") (builtins.attrNames (builtins.readDir ./nix/patches/nix))
         )).overrideScope (finalScope: prevScope: { withAWS = false; })).nix-everything;

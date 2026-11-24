@@ -5,20 +5,12 @@
  */
 
 use super::workers::projects_granted_with_workers;
+pub use gradient_api_types::TeamDemand;
 use gradient_entity::evaluation::EvaluationStatus;
 use gradient_types::*;
 use sea_orm::sea_query::Query;
 use sea_orm::{ColumnTrait, ConnectionTrait, DbErr, EntityTrait, QueryFilter};
-use serde::Serialize;
 use std::collections::BTreeMap;
-
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, utoipa::ToSchema)]
-pub struct TeamDemand {
-    pub builds: Vec<UnmetRequirement>,
-    pub network: u32,
-    pub secrets: u32,
-    pub eval: u32,
-}
 
 pub async fn team_demand(
     db: &impl ConnectionTrait,

@@ -89,7 +89,7 @@ pub(crate) fn sign_claims<T: Serialize>(
     encode(
         &Header::default(),
         claims,
-        &EncodingKey::from_secret(jwt_secret.expose().as_bytes()),
+        &EncodingKey::from_secret(jwt_secret.expose().as_bytes())?,
     )
 }
 
@@ -99,7 +99,7 @@ pub(crate) fn verify_claims<T: DeserializeOwned>(
 ) -> jsonwebtoken::errors::Result<T> {
     decode::<T>(
         token,
-        &DecodingKey::from_secret(jwt_secret.expose().as_bytes()),
+        &DecodingKey::from_secret(jwt_secret.expose().as_bytes())?,
         &Validation::default(),
     )
     .map(|data| data.claims)

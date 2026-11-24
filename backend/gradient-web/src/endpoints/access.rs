@@ -18,82 +18,18 @@ use crate::permissions::PermissionMask;
 use crate::scope::{CacheScope, Member, ProjectScope, Requires, can};
 use axum::extract::State;
 use axum::{Extension, Json};
+pub use gradient_api_types::{
+    AccessReason, PersonAccessReason, PersonWithAccessToProjectOrCache, TeamNameAndDisplayName,
+    UserAccessSummary, UserAccessibleProjectOrCacheRow, UserTeamMembership,
+};
 use gradient_core::ServerState;
 use gradient_db::WebDb;
 use gradient_db::access::{DirectMembershipsOfUser, RevokedUserAccessCounts};
 use gradient_db::lookup::by_ids;
 use gradient_types::*;
 use sea_orm::{ConnectionTrait, TransactionTrait};
-use serde::Serialize;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, utoipa::ToSchema)]
-pub struct TeamNameAndDisplayName {
-    pub name: String,
-    pub display_name: String,
-}
-
-impl From<&MTeam> for TeamNameAndDisplayName {
-    fn from(team: &MTeam) -> Self {
-        Self {
-            name: team.name.clone(),
-            display_name: team.display_name.clone(),
-        }
-    }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, utoipa::ToSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum AccessReason {
-    Direct,
-    Team,
-    Owner,
-    Superuser,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, utoipa::ToSchema)]
-pub struct PersonAccessReason {
-    pub kind: AccessReason,
-    pub team: Option<TeamNameAndDisplayName>,
-    pub role: Option<String>,
-    pub applies: bool,
-    pub managed: bool,
-}
-
-#[derive(Debug, Serialize, utoipa::ToSchema)]
-pub struct PersonWithAccessToProjectOrCache {
-    pub user: String,
-    pub user_display_name: String,
-    pub role: Option<String>,
-    pub permissions: Vec<String>,
-    pub reasons: Vec<PersonAccessReason>,
-}
-
-#[derive(Debug, Serialize, utoipa::ToSchema)]
-pub struct UserAccessibleProjectOrCacheRow {
-    pub name: String,
-    pub display_name: String,
-    pub owner_team: Option<TeamNameAndDisplayName>,
-    pub role: Option<String>,
-    pub reasons: Vec<PersonAccessReason>,
-}
-
-#[derive(Debug, Serialize, utoipa::ToSchema)]
-pub struct UserTeamMembership {
-    pub name: String,
-    pub display_name: String,
-    pub role: TeamRole,
-    pub source: TeamMemberSource,
-}
-
-#[derive(Debug, Serialize, utoipa::ToSchema)]
-pub struct UserAccessSummary {
-    pub superuser: bool,
-    pub projects: Vec<UserAccessibleProjectOrCacheRow>,
-    pub caches: Vec<UserAccessibleProjectOrCacheRow>,
-    pub teams: Vec<UserTeamMembership>,
-}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct RoleAccess {

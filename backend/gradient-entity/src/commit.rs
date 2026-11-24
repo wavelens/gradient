@@ -9,10 +9,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::ids::{CommitId, ProjectId, UserId};
 
-#[derive(
-    Clone, Debug, Default, PartialEq, DeriveEntityModel, Deserialize, Serialize, utoipa::ToSchema,
-)]
-#[schema(as = Commit)]
+#[derive(Clone, Debug, Default, PartialEq, DeriveEntityModel, Deserialize, Serialize)]
 #[sea_orm(table_name = "commit")]
 pub struct Model {
     #[sea_orm(primary_key)]
@@ -29,3 +26,17 @@ pub struct Model {
 pub enum Relation {}
 
 impl ActiveModelBehavior for ActiveModel {}
+
+impl From<Model> for gradient_api_types::Commit {
+    fn from(commit: Model) -> Self {
+        Self {
+            id: commit.id,
+            message: commit.message,
+            hash: commit.hash,
+            author: commit.author,
+            author_name: commit.author_name,
+            project: commit.project,
+            fetched_at: commit.fetched_at,
+        }
+    }
+}

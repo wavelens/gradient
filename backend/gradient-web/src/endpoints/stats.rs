@@ -11,13 +11,14 @@ use crate::helpers::ok_json;
 use crate::scope::{CacheScope, Readable};
 use axum::Json;
 use axum::extract::State;
+pub use gradient_api_types::{CacheMetricPoint, CacheStatsResponse, StorageMetricPoint};
 use gradient_core::ServerState;
 use gradient_db::metrics::cache_traffic;
 use gradient_db::metrics::cache_traffic::CacheTraffic;
 use gradient_entity::metric_rollup::RollupGranularity;
 use gradient_types::*;
 use gradient_util::telemetry::metric;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use std::sync::Arc;
 
 #[derive(Deserialize, Default, Clone, Copy, Debug, PartialEq, Eq, utoipa::ToSchema)]
@@ -43,35 +44,6 @@ pub struct TrafficParams {
     /// `total` counts every NAR transfer of the cache. `external` counts only NARs sent over the HTTP binary cache and the `/proto` cache session.
     #[serde(default)]
     pub traffic: TrafficKind,
-}
-
-#[derive(Serialize, utoipa::ToSchema)]
-pub struct CacheMetricPoint {
-    pub time: String,
-    pub bytes: i64,
-    pub requests: i64,
-}
-
-#[derive(Serialize, utoipa::ToSchema)]
-pub struct StorageMetricPoint {
-    pub time: String,
-    pub packages: i64,
-    pub bytes: i64,
-}
-
-#[derive(Serialize, utoipa::ToSchema)]
-pub struct CacheStatsResponse {
-    pub total_bytes: i64,
-    pub total_nar_bytes: i64,
-    pub total_packages: i64,
-    pub storage_minutes: Vec<StorageMetricPoint>,
-    pub storage_hours: Vec<StorageMetricPoint>,
-    pub storage_days: Vec<StorageMetricPoint>,
-    pub storage_weeks: Vec<StorageMetricPoint>,
-    pub minutes: Vec<CacheMetricPoint>,
-    pub hours: Vec<CacheMetricPoint>,
-    pub days: Vec<CacheMetricPoint>,
-    pub weeks: Vec<CacheMetricPoint>,
 }
 
 /// The request path must never touch the `cache_metric` row (#644).

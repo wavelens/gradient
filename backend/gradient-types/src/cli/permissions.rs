@@ -4,24 +4,9 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use clap::{Args, ValueEnum};
+use clap::Args;
+pub use gradient_api_types::CreatePermission;
 use gradient_derive::config_group;
-use serde::{Deserialize, Serialize};
-
-#[derive(
-    ValueEnum, Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Default, utoipa::ToSchema,
-)]
-#[serde(rename_all = "lowercase")]
-#[value(rename_all = "lowercase")]
-pub enum CreatePermission {
-    /// Nobody via the API. Only the declarative state import may create them.
-    None,
-    /// Superusers only.
-    Superusers,
-    /// Any authenticated user.
-    #[default]
-    Everyone,
-}
 
 #[config_group("permissions")]
 #[derive(Args, Debug, Clone)]

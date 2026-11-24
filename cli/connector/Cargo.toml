@@ -20,6 +20,7 @@ path = "src/lib.rs"
 [dependencies]
 bytes               = { workspace = true }
 futures             = { workspace = true }
+gradient-api-types  = { workspace = true }
 reqwest             = { workspace = true, features = ["json", "query", "stream"] }
 reqwest-streams     = { workspace = true }
 rustls              = { workspace = true }
@@ -29,14 +30,6 @@ serde_json          = { workspace = true }
 tokio               = { workspace = true }
 tokio-tungstenite   = { workspace = true }
 uuid                = { workspace = true }
-
-[build-dependencies]
-prettyplease = { workspace = true }
-schemars     = { version = "0.8" }
-serde_json   = { workspace = true }
-syn          = { workspace = true }
-typify       = { workspace = true }
-yaml_serde   = { workspace = true }
 
 [dev-dependencies]
 wiremock = { workspace = true }

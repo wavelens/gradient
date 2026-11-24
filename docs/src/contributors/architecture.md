@@ -127,6 +127,7 @@ The workspace root is `gradient-server`. All backend crates live under `backend/
 | Binaries | `worker` | `gradient-worker` |
 | | `daemon` | Mock Nix daemon for VM tests |
 | Shared | `types` | IDs, runtime config, events, entity aliases |
+| | `api-types` | Request and response types of the REST API that the CLI shares |
 | | `util` | Shutdown, supervision, HTTP clients, logging, metrics setup |
 | | `test-support` | Shared test fixtures, see [Tests](tests.md#test-support) |
 
@@ -149,6 +150,7 @@ The workspace root is `gradient-server`. All backend crates live under `backend/
 ## CLI
 
 - The `cli/` workspace contains two crates: `gradient-cli`, the binary named `gradient`, and `connector`, a typed client for the REST API.
+- The `connector` crate can use `backend/gradient-api-types` as a path dependency for the types of the REST API. The server can build the OpenAPI spec from the same types.
 - The optional `eval` feature points at `backend/gradient-eval` as a path dependency, so local evaluation work against that crate.
 - Settings live in `$XDG_CONFIG_HOME/gradient/accounts.toml`, which resolves to `~/.config/gradient/accounts.toml`. A `config.toml` in the same directory is the single-login file of older CLI versions: the CLI reads it only while `accounts.toml` is missing and never writes it. On macOS, an existing legacy native path takes precedence and stays in use.
 

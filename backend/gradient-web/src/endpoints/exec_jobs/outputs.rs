@@ -18,37 +18,16 @@ use axum::extract::State;
 use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::response::Response;
 use axum::{Extension, Json};
-use chrono::NaiveDateTime;
 use futures::stream::{BoxStream, Stream, StreamExt};
 use gradient_core::ServerState;
 use gradient_db::exec_jobs::outputs;
 use gradient_storage::NarStore;
 use gradient_types::*;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use std::sync::Arc;
 
 use super::ExecJobAccessContext;
-
-#[derive(Serialize, Debug, utoipa::ToSchema)]
-pub struct ExecJobOutputView {
-    pub path: String,
-    pub size: i64,
-    pub content_type: String,
-    pub created_at: NaiveDateTime,
-    pub updated_at: NaiveDateTime,
-}
-
-impl From<MExecJobOutput> for ExecJobOutputView {
-    fn from(row: MExecJobOutput) -> Self {
-        Self {
-            path: row.path,
-            size: row.size,
-            content_type: row.content_type,
-            created_at: row.created_at,
-            updated_at: row.updated_at,
-        }
-    }
-}
+pub use gradient_api_types::ExecJobOutputView;
 
 #[derive(Debug, Deserialize, utoipa::IntoParams)]
 #[into_params(parameter_in = Query)]

@@ -1,4 +1,4 @@
-From 1f517fa14680eda7c1b95d184a0dd76284d792c8 Mon Sep 17 00:00:00 2001
+From 9b670482405597213d7e9858e0e38be16598b95b Mon Sep 17 00:00:00 2001
 From: Dennis Wuitz <dennish@wuitz.de>
 Date: Sun, 25 Oct 2026 00:55:49 +0200
 Subject: [PATCH] libexpr: evaluate a failed attribute again instead of caching
@@ -14,12 +14,28 @@ failing evaluation.
 Drop the Failed rows and the CachedEvalError they were reported with.
 Rows written by older versions are read as absent.
 ---
- src/libexpr-tests/eval-cache.cc            | 11 +++++
- src/libexpr/eval-cache.cc                  | 53 +---------------------
- src/libexpr/include/nix/expr/eval-cache.hh | 42 ++---------------
- src/nix/main.cc                            | 10 +---
- 4 files changed, 19 insertions(+), 97 deletions(-)
+ .../rl-next/eval-cache-no-cached-failures.md  |  8 +++
+ src/libexpr-tests/eval-cache.cc               | 11 ++++
+ src/libexpr/eval-cache.cc                     | 53 +------------------
+ src/libexpr/include/nix/expr/eval-cache.hh    | 42 ++-------------
+ src/nix/main.cc                               | 10 +---
+ 5 files changed, 27 insertions(+), 97 deletions(-)
+ create mode 100644 doc/manual/rl-next/eval-cache-no-cached-failures.md
 
+diff --git a/doc/manual/rl-next/eval-cache-no-cached-failures.md b/doc/manual/rl-next/eval-cache-no-cached-failures.md
+new file mode 100644
+index 000000000..2c02dfad5
+--- /dev/null
++++ b/doc/manual/rl-next/eval-cache-no-cached-failures.md
+@@ -0,0 +1,8 @@
++---
++synopsis: The flake evaluation cache no longer stores failures
++issues: 3872
++---
++
++An attribute whose evaluation failed is evaluated again on the next use instead of being recorded in the evaluation cache.
++A failure that does not repeat, such as an interrupted import from derivation or an evaluator that ran out of memory,
++no longer follows the flake until its cache is deleted.
 diff --git a/src/libexpr-tests/eval-cache.cc b/src/libexpr-tests/eval-cache.cc
 index e2cfb8ea8..c671e4f2d 100644
 --- a/src/libexpr-tests/eval-cache.cc
@@ -41,10 +57,10 @@ index e2cfb8ea8..c671e4f2d 100644
 +
  } // namespace nix
 diff --git a/src/libexpr/eval-cache.cc b/src/libexpr/eval-cache.cc
-index 56d09f86c..3b8b6e7dc 100644
+index eb8881dea..a0c6948ef 100644
 --- a/src/libexpr/eval-cache.cc
 +++ b/src/libexpr/eval-cache.cc
-@@ -12,30 +12,6 @@
+@@ -13,30 +13,6 @@
  
  namespace nix::eval_cache {
  
@@ -75,7 +91,7 @@ index 56d09f86c..3b8b6e7dc 100644
  static const char * schema = R"sql(
  create table if not exists Attributes (
      parent      integer not null,
-@@ -290,20 +266,6 @@ struct AttrDb
+@@ -291,20 +267,6 @@ struct AttrDb
          });
      }
  
@@ -96,7 +112,7 @@ index 56d09f86c..3b8b6e7dc 100644
      std::optional<std::pair<AttrId, AttrValue>> getAttr(AttrKey key)
      {
          auto state(_state->lock());
-@@ -344,7 +306,7 @@ struct AttrDb
+@@ -345,7 +307,7 @@ struct AttrDb
          case AttrType::Misc:
              return {{rowId, misc_t()}};
          case AttrType::Failed:
@@ -105,7 +121,7 @@ index 56d09f86c..3b8b6e7dc 100644
          default:
              throw Error("unexpected type in evaluation cache");
          }
-@@ -436,8 +398,6 @@ void AttrCursor::fetchCachedValue()
+@@ -437,8 +399,6 @@ void AttrCursor::fetchCachedValue()
  {
      if (!cachedValue)
          cachedValue = root->db->getAttr(getKey());
@@ -114,7 +130,7 @@ index 56d09f86c..3b8b6e7dc 100644
  }
  
  AttrPath AttrCursor::getAttrPath() const
-@@ -473,14 +433,7 @@ Value & AttrCursor::forceValue()
+@@ -474,14 +434,7 @@ Value & AttrCursor::forceValue()
  
      auto & v = getValue();
  
@@ -129,8 +145,8 @@ index 56d09f86c..3b8b6e7dc 100644
 +    root->state.forceValue(v, noPos);
  
      if (root->db && (!cachedValue || std::get_if<placeholder_t>(&cachedValue->second))) {
-         if (v.type() == nString)
-@@ -527,8 +480,6 @@ std::shared_ptr<AttrCursor> AttrCursor::maybeGetAttr(Symbol name)
+         if (v.type() == nString) {
+@@ -532,8 +485,6 @@ std::shared_ptr<AttrCursor> AttrCursor::maybeGetAttr(Symbol name)
                  if (attr) {
                      if (std::get_if<missing_t>(&attr->second))
                          return nullptr;
@@ -228,10 +244,10 @@ index 8f7042c83..37084f143 100644
      void fetchCachedValue();
  
 diff --git a/src/nix/main.cc b/src/nix/main.cc
-index 963bc07ce..f9ec6093b 100644
+index c3ee28a15..58883873a 100644
 --- a/src/nix/main.cc
 +++ b/src/nix/main.cc
-@@ -19,7 +19,6 @@
+@@ -20,7 +20,6 @@
  #include "nix/util/terminal.hh"
  #include "nix/util/users.hh"
  #include "nix/cmd/network-proxy.hh"
@@ -239,7 +255,7 @@ index 963bc07ce..f9ec6093b 100644
  #include "nix/flake/flake.hh"
  #include "nix/flake/settings.hh"
  
-@@ -577,14 +576,7 @@ void mainWrapped(int argc, char ** argv)
+@@ -588,14 +587,7 @@ void mainWrapped(int argc, char ** argv)
          evalSettings.pureEval = false;
      }
  
@@ -255,3 +271,6 @@ index 963bc07ce..f9ec6093b 100644
  }
  
  } // namespace nix
+-- 
+2.56.0
+

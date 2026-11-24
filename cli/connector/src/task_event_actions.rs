@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use crate::api::{
-    ActionResponse, CreateActionRequest, CreateActionResponse, DeletedResponse,
-    DeliveryDetailTaskActionDeliveryId, DeliveryListItem, UpdateActionRequest,
+    ActionResponse, CreateActionRequest, CreateActionResponse, DeletedResponse, DeliveryDetail,
+    DeliveryListItem, TaskActionDeliveryId, UpdateActionRequest,
 };
 use crate::http::encode_url_component;
 use crate::{Client, ConnectorError, http};
@@ -107,7 +107,7 @@ impl TaskActionsApi<'_> {
         id: &str,
         limit: Option<u64>,
         offset: Option<u64>,
-    ) -> Result<Vec<DeliveryListItem>, ConnectorError> {
+    ) -> Result<Vec<DeliveryListItem<TaskActionDeliveryId>>, ConnectorError> {
         let mut req = self.request(
             Method::GET,
             project,
@@ -129,7 +129,7 @@ impl TaskActionsApi<'_> {
         task: &str,
         id: &str,
         delivery_id: &str,
-    ) -> Result<DeliveryDetailTaskActionDeliveryId, ConnectorError> {
+    ) -> Result<DeliveryDetail<TaskActionDeliveryId>, ConnectorError> {
         let req = self.request(
             Method::GET,
             project,

@@ -27,6 +27,7 @@ use gradient_util::http_base_url::ValidatedHttpBaseUrl;
 use tokio::sync::{OnceCell, Semaphore};
 
 use crate::upstream::{SampleKind, breakers};
+pub use gradient_api_types::ProtocolProbe;
 
 const LOG_FETCH_TIMEOUT: Duration = Duration::from_secs(10);
 const PROTOCOL_PROBE_TIMEOUT: Duration = Duration::from_secs(10);
@@ -390,14 +391,6 @@ async fn read_capped(mut stream: BoxStream<'static, reqwest::Result<Bytes>>) -> 
         body.push_str("\n[truncated]\n");
     }
     Some(body)
-}
-
-#[derive(Debug, Clone, PartialEq, serde::Serialize, utoipa::ToSchema)]
-pub struct ProtocolProbe {
-    pub ok: bool,
-    pub status: Option<u16>,
-    pub latency_ms: u64,
-    pub error: Option<String>,
 }
 
 pub async fn probe_protocol(

@@ -1,4 +1,4 @@
-From b3bd518d9a4c28af40688633f877028e1063bbd3 Mon Sep 17 00:00:00 2001
+From bf92b36f5fc9b9476f0803113f74887a7e9e38ab Mon Sep 17 00:00:00 2001
 From: Dennis Wuitz <dennish@wuitz.de>
 Date: Thu, 8 Oct 2026 11:03:35 +0200
 Subject: [PATCH] libexpr: let the embedder realise an import from derivation
@@ -14,15 +14,32 @@ With a hook set, the failed-realisation memo stays off: the embedder
 decides how long a failure holds, since its evaluator can outlive one
 evaluation.
 ---
+ doc/manual/rl-next/c-api-realise-hook.md      |  9 +++++
  src/libexpr-c/nix_api_expr.cc                 | 23 ++++++++++++
  src/libexpr-c/nix_api_expr.h                  | 29 +++++++++++++++
  src/libexpr-tests/nix_api_expr.cc             | 35 +++++++++++++++++++
  src/libexpr/include/nix/expr/eval-settings.hh | 10 ++++++
  src/libexpr/primops.cc                        |  7 ++--
- 5 files changed, 102 insertions(+), 2 deletions(-)
+ 6 files changed, 111 insertions(+), 2 deletions(-)
+ create mode 100644 doc/manual/rl-next/c-api-realise-hook.md
 
+diff --git a/doc/manual/rl-next/c-api-realise-hook.md b/doc/manual/rl-next/c-api-realise-hook.md
+new file mode 100644
+index 000000000..a0c437437
+--- /dev/null
++++ b/doc/manual/rl-next/c-api-realise-hook.md
+@@ -0,0 +1,9 @@
++---
++synopsis: "C API: `nix_eval_state_builder_set_realise_hook`"
++---
++
++The new function `nix_eval_state_builder_set_realise_hook()` in `nix_api_expr.h` installs a callback that realises the
++derivations of an import from derivation in place of the store.
++An embedder with a build system of its own can build them there; the outputs only have to be valid in the
++evaluation store when the callback returns.
++In C++, the same hook is `EvalSettings::realiseHook`.
 diff --git a/src/libexpr-c/nix_api_expr.cc b/src/libexpr-c/nix_api_expr.cc
-index 5b5859ee7..7b6f34069 100644
+index 6b50ae18d..c69a13868 100644
 --- a/src/libexpr-c/nix_api_expr.cc
 +++ b/src/libexpr-c/nix_api_expr.cc
 @@ -205,6 +205,29 @@ nix_err nix_eval_state_builder_set_setting(
@@ -56,7 +73,7 @@ index 5b5859ee7..7b6f34069 100644
  {
      if (context)
 diff --git a/src/libexpr-c/nix_api_expr.h b/src/libexpr-c/nix_api_expr.h
-index 6091282fb..877dbcad6 100644
+index b07b045a9..7012a4404 100644
 --- a/src/libexpr-c/nix_api_expr.h
 +++ b/src/libexpr-c/nix_api_expr.h
 @@ -245,6 +245,35 @@ nix_err nix_eval_state_builder_set_lookup_path(
@@ -96,10 +113,10 @@ index 6091282fb..877dbcad6 100644
   * @brief Create a new Nix language evaluator state
   * @ingroup libexpr_init
 diff --git a/src/libexpr-tests/nix_api_expr.cc b/src/libexpr-tests/nix_api_expr.cc
-index 8ffa8ea49..dbf45cbaa 100644
+index 5125e02e1..eb386ab46 100644
 --- a/src/libexpr-tests/nix_api_expr.cc
 +++ b/src/libexpr-tests/nix_api_expr.cc
-@@ -722,4 +722,39 @@ TEST_F(nix_api_expr_test, nix_eval_state_get_stats)
+@@ -818,4 +818,39 @@ TEST_F(nix_api_expr_test, nix_eval_state_get_stats)
      ASSERT_GE(after.nr_lookups, before.nr_lookups);
  }
  
@@ -140,7 +157,7 @@ index 8ffa8ea49..dbf45cbaa 100644
 +
  } // namespace nixC
 diff --git a/src/libexpr/include/nix/expr/eval-settings.hh b/src/libexpr/include/nix/expr/eval-settings.hh
-index d8a1fb973..f9ae78427 100644
+index bd32a519d..15a2dc6f1 100644
 --- a/src/libexpr/include/nix/expr/eval-settings.hh
 +++ b/src/libexpr/include/nix/expr/eval-settings.hh
 @@ -3,6 +3,7 @@
@@ -151,7 +168,7 @@ index d8a1fb973..f9ae78427 100644
  #include "nix/util/configuration.hh"
  #include "nix/util/source-path.hh"
  
-@@ -96,6 +97,15 @@ public:
+@@ -101,6 +102,15 @@ public:
  
      std::vector<PrimOp> extraPrimOps;
  
@@ -168,21 +185,24 @@ index d8a1fb973..f9ae78427 100644
          Enable built-in functions that allow executing native code.
  
 diff --git a/src/libexpr/primops.cc b/src/libexpr/primops.cc
-index 5bcbbc288..9846cecf8 100644
+index e0f6b67ea..dd7b34bc0 100644
 --- a/src/libexpr/primops.cc
 +++ b/src/libexpr/primops.cc
-@@ -137,9 +137,12 @@ StringMap EvalState::realiseContext(const NixStringContext & context, StorePathS
+@@ -141,9 +141,12 @@ StringMap EvalState::realiseContext(const NixStringContext & context, StorePathS
              std::rethrow_exception(*failed);
  
      try {
--        buildStore->buildPaths(buildReqs, bmNormal, store);
+-        buildStore->getBuilder(store)->buildPaths(buildReqs, bmNormal);
 +        if (settings.realiseHook)
 +            settings.realiseHook(drvs);
 +        else
-+            buildStore->buildPaths(buildReqs, bmNormal, store);
++            buildStore->getBuilder(store)->buildPaths(buildReqs, bmNormal);
      } catch (Error &) {
 -        if (drvs.size() == 1)
 +        if (drvs.size() == 1 && !settings.realiseHook)
              failedRealisations->insert_or_assign(drvs.front().drvPath->getBaseStorePath(), std::current_exception());
          throw;
      }
+-- 
+2.56.0
+

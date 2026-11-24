@@ -1,4 +1,4 @@
-From c01de1eea0010c14f9131f9232455ce1b4bd091c Mon Sep 17 00:00:00 2001
+From 11ab771aa2f3a934f08706e3e8d979a03f54c52f Mon Sep 17 00:00:00 2001
 From: Dennis Wuitz <dennish@wuitz.de>
 Date: Sun, 25 Oct 2026 00:49:01 +0200
 Subject: [PATCH] libflake-c: expose the evaluation cache of a locked flake
@@ -14,6 +14,7 @@ other value for the regular value API. nix_eval_cache_checkpoint()
 folds the write-ahead log into the database file, for a consumer that
 copies the file elsewhere.
 ---
+ doc/manual/rl-next/c-api-eval-cache.md        |  11 ++
  src/libexpr/eval-cache.cc                     |  12 ++
  src/libexpr/include/nix/expr/eval-cache.hh    |   8 +
  src/libflake-c/meson.build                    |   3 +
@@ -22,17 +23,35 @@ copies the file elsewhere.
  src/libflake-c/nix_api_eval_cache_internal.hh |  13 ++
  src/libflake-tests/meson.build                |   1 +
  src/libflake-tests/nix_api_eval_cache.cc      | 168 ++++++++++++++++
- 8 files changed, 542 insertions(+)
+ 9 files changed, 553 insertions(+)
+ create mode 100644 doc/manual/rl-next/c-api-eval-cache.md
  create mode 100644 src/libflake-c/nix_api_eval_cache.cc
  create mode 100644 src/libflake-c/nix_api_eval_cache.h
  create mode 100644 src/libflake-c/nix_api_eval_cache_internal.hh
  create mode 100644 src/libflake-tests/nix_api_eval_cache.cc
 
+diff --git a/doc/manual/rl-next/c-api-eval-cache.md b/doc/manual/rl-next/c-api-eval-cache.md
+new file mode 100644
+index 000000000..2186ae8ff
+--- /dev/null
++++ b/doc/manual/rl-next/c-api-eval-cache.md
+@@ -0,0 +1,11 @@
++---
++synopsis: "C API: walk the evaluation cache of a locked flake"
++---
++
++The new header `nix_api_eval_cache.h` exposes the evaluation cache of a locked flake.
++`nix_eval_cache_open()` opens the cache that the `nix` command uses for the flake, and a `nix_attr_cursor` walks its
++attributes: `nix_attr_cursor_maybe_get_attr()`, `nix_attr_cursor_get_attrs()`, `nix_attr_cursor_is_derivation()`,
++`nix_attr_cursor_get_drv_path()`, `nix_attr_cursor_get_string()`, `nix_attr_cursor_get_bool()`,
++`nix_attr_cursor_get_list_of_strings()` and `nix_attr_cursor_force_value()`.
++Attributes already in the cache are read without evaluation, the rest are evaluated and cached.
++`nix_eval_cache_checkpoint()` folds the write-ahead log of the cache into its database file.
 diff --git a/src/libexpr/eval-cache.cc b/src/libexpr/eval-cache.cc
-index 7422cd095..695ee875a 100644
+index 5a8362453..6cae38202 100644
 --- a/src/libexpr/eval-cache.cc
 +++ b/src/libexpr/eval-cache.cc
-@@ -373,6 +373,18 @@ ref<AttrCursor> EvalCache::getRoot()
+@@ -390,6 +390,18 @@ ref<AttrCursor> EvalCache::getRoot()
      return make_ref<AttrCursor>(ref(shared_from_this()), std::nullopt);
  }
  
@@ -71,7 +90,7 @@ index 0feb7d564..8f7042c83 100644
  
  enum AttrType {
 diff --git a/src/libflake-c/meson.build b/src/libflake-c/meson.build
-index 4fef3ea00..d4b79cd5a 100644
+index be528635e..65752fd4f 100644
 --- a/src/libflake-c/meson.build
 +++ b/src/libflake-c/meson.build
 @@ -34,12 +34,15 @@ subdir('nix-meson-build-support/subprojects')
@@ -459,10 +478,10 @@ index 000000000..e448ae9f2
 +    nix::ref<nix::eval_cache::AttrCursor> cursor;
 +};
 diff --git a/src/libflake-tests/meson.build b/src/libflake-tests/meson.build
-index 00b592195..c1be5e28e 100644
+index 5c67f6640..940301391 100644
 --- a/src/libflake-tests/meson.build
 +++ b/src/libflake-tests/meson.build
-@@ -37,6 +37,7 @@ subdir('nix-meson-build-support/common')
+@@ -43,6 +43,7 @@ subdir('nix-meson-build-support/common')
  
  sources = files(
    'flakeref.cc',
@@ -644,3 +663,6 @@ index 000000000..ae7b1fa07
 +}
 +
 +} // namespace nixC
+-- 
+2.56.0
+

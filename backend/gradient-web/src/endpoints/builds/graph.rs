@@ -15,46 +15,13 @@ use axum::{Extension, Json};
 use gradient_core::ServerState;
 use gradient_types::*;
 use sea_orm::ConnectionTrait;
-use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use super::BuildAccessContext;
+pub use gradient_api_types::{BuildGraph, DependencyEdge, DependencyGraphNode};
 
 const GRAPH_NODE_CAP: usize = 500;
-
-#[derive(Serialize, Deserialize, Debug, PartialEq, utoipa::ToSchema)]
-pub struct DependencyGraphNode {
-    pub id: DerivationId,
-    pub build: Option<BuildJobId>,
-    pub name: String,
-    pub path: String,
-    pub status: Option<String>,
-    pub build_time_ms: Option<i64>,
-    pub build_started_at: Option<chrono::NaiveDateTime>,
-}
-
-#[derive(Serialize, Deserialize, Debug, PartialEq, utoipa::ToSchema)]
-pub struct DependencyEdge {
-    pub source: DerivationId,
-    pub target: DerivationId,
-}
-
-impl From<MDerivationDependency> for DependencyEdge {
-    fn from(edge: MDerivationDependency) -> Self {
-        Self {
-            source: edge.dependency,
-            target: edge.derivation,
-        }
-    }
-}
-
-#[derive(Serialize, Deserialize, Debug, utoipa::ToSchema)]
-pub struct BuildGraph {
-    pub root: DerivationId,
-    pub nodes: Vec<DependencyGraphNode>,
-    pub edges: Vec<DependencyEdge>,
-}
 
 pub async fn dependency_graph<C: ConnectionTrait>(
     db: &C,

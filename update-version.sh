@@ -25,12 +25,13 @@ REPO_ROOT="$(cd "$(dirname "$0")" && pwd)"
 # ── TOML manifests ────────────────────────────────────────────────────────────
 # Only files that define literal `version = "X.Y.Z"` appear in this list.
 # The backend subcrates inherit `version.workspace = true` from backend/Cargo.toml.
-# gradient-eval and gradient-wildcard are the exceptions.
-# Both crates are self-contained.
+# gradient-api-types, gradient-eval and gradient-wildcard are the exceptions.
+# All three crates are self-contained.
 # A separate cli workspace can use a path dependency on them without the backend workspace root.
 
 TOML_FILES=(
     backend/Cargo.toml
+    backend/gradient-api-types/Cargo.toml
     backend/gradient-eval/Cargo.toml
     backend/gradient-wildcard/Cargo.toml
     cli/Cargo.toml

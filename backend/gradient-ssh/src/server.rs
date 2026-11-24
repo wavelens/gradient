@@ -10,8 +10,10 @@ use crate::gateway_user::{GatewayTarget, gateway_shell_kind};
 use crate::roots::Roots;
 use crate::session::{Session, SshHandles};
 use gradient_types::events::access_recheck::wait_until_access_check_fails;
-use russh::keys::{PrivateKey, PublicKey};
-use russh::server::{Auth, ChannelOpenHandle, Handle, Msg, Session as SshSession};
+use russh::keys::PrivateKey;
+use russh::server::{
+    Auth, ChannelOpenHandle, Handle, Msg, Session as SshSession, VerifiedPublicKey,
+};
 use russh::{Channel, ChannelId, ChannelOpenFailure, Disconnect, MethodKind, MethodSet, Pty};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -175,8 +177,12 @@ impl Drop for Connection {
 impl russh::server::Handler for Connection {
     type Error = russh::Error;
 
-    async fn auth_publickey(&mut self, user: &str, key: &PublicKey) -> Result<Auth, Self::Error> {
-        let fingerprint = fingerprint(key);
+    async fn auth_publickey(
+        &mut self,
+        user: &str,
+        key: VerifiedPublicKey<'_>,
+    ) -> Result<Auth, Self::Error> {
+        let fingerprint = fingerprint(key.public_key);
         match authorize(&self.handles, user, &fingerprint).await {
             Ok(session) => {
                 self.session = Some(session);

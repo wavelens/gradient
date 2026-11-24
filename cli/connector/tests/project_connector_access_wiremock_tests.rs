@@ -209,8 +209,8 @@ async fn grant_team_access_to_project_sends_the_grant() {
             GrantProjectRequest {
                 team: "ops".into(),
                 role: Some("View".into()),
-                users: Some(true),
-                workers: Some(false),
+                users: true,
+                workers: false,
             },
         )
         .await

@@ -4,38 +4,24 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use crate::codec::Proto;
+use crate::codec::{Proto, impl_proto_for_shared_struct};
 use serde::{Deserialize as SerdeDeserialize, Serialize as SerdeSerialize};
+
+pub use gradient_api_types::{BuildProduct, GradientCapabilities};
+
+impl_proto_for_shared_struct!(GradientCapabilities {
+    core: bool,
+    federate: bool,
+    eval: bool,
+    build: bool,
+    cache: bool,
+    network: bool,
+    secrets: bool,
+    exec: bool,
+});
 
 pub use crate::exec::*;
 pub use crate::port_ranges::*;
-
-#[derive(
-    Proto, SerdeSerialize, SerdeDeserialize, Debug, Clone, PartialEq, Default, utoipa::ToSchema,
-)]
-pub struct GradientCapabilities {
-    pub core: bool,
-    pub federate: bool,
-    pub eval: bool,
-    pub build: bool,
-    pub cache: bool,
-    pub network: bool,
-    pub secrets: bool,
-    pub exec: bool,
-}
-
-impl std::ops::BitOrAssign for GradientCapabilities {
-    fn bitor_assign(&mut self, rhs: Self) {
-        self.core |= rhs.core;
-        self.federate |= rhs.federate;
-        self.eval |= rhs.eval;
-        self.build |= rhs.build;
-        self.cache |= rhs.cache;
-        self.network |= rhs.network;
-        self.secrets |= rhs.secrets;
-        self.exec |= rhs.exec;
-    }
-}
 
 #[derive(Proto, Debug, Clone, PartialEq)]
 pub enum Job {
@@ -538,14 +524,13 @@ pub struct DerivationOutput {
     pub path: String,
 }
 
-#[derive(Proto, Debug, Clone, PartialEq)]
-pub struct BuildProduct {
-    pub file_type: String,
-    pub subtype: String,
-    pub name: String,
-    pub path: String,
-    pub size: Option<u64>,
-}
+impl_proto_for_shared_struct!(BuildProduct {
+    file_type: String,
+    subtype: String,
+    name: String,
+    path: String,
+    size: Option<u64>
+});
 
 #[derive(Proto, Debug, Clone, PartialEq)]
 pub struct BuildOutput {

@@ -1,4 +1,4 @@
-From 54b37045d118b10efadf66f76329813eaf2efdf2 Mon Sep 17 00:00:00 2001
+From 36e66dc366e1f2f9ce0c8442c5bbf8f401537297 Mon Sep 17 00:00:00 2001
 From: Dennis Wuitz <dennish@wuitz.de>
 Date: Sun, 4 Oct 2026 11:04:28 +0200
 Subject: [PATCH] libstore: add build-resource-usage worker protocol feature
@@ -7,11 +7,27 @@ When negotiated, BuildResult carries memoryPeak, ioReadBytes,
 ioWriteBytes and oomKills after cpuSystem, each as an optional 64-bit
 number.
 ---
+ doc/manual/rl-next/build-resource-usage.md    |  8 +++
  src/libstore-tests/worker-protocol.cc         | 72 +++++++++++++++++++
  .../include/nix/store/worker-protocol.hh      |  8 +++
  src/libstore/worker-protocol.cc               | 37 ++++++++++
- 3 files changed, 117 insertions(+)
+ 4 files changed, 125 insertions(+)
+ create mode 100644 doc/manual/rl-next/build-resource-usage.md
 
+diff --git a/doc/manual/rl-next/build-resource-usage.md b/doc/manual/rl-next/build-resource-usage.md
+new file mode 100644
+index 000000000..8fa4d0ed8
+--- /dev/null
++++ b/doc/manual/rl-next/build-resource-usage.md
+@@ -0,0 +1,8 @@
++---
++synopsis: "Build results report peak memory, block I/O and out-of-memory kills"
++---
++
++With `use-cgroups`, a build result now carries `memoryPeak`, `ioReadBytes`, `ioWriteBytes` and `oomKills` next to
++the CPU times, read from the `memory.peak`, `io.stat` and `memory.events` files of the build cgroup.
++The fields appear in the JSON build result and, when both sides negotiate the `build-resource-usage` feature,
++in the worker protocol.
 diff --git a/src/libstore-tests/worker-protocol.cc b/src/libstore-tests/worker-protocol.cc
 index 91acde738..fc8b1c372 100644
 --- a/src/libstore-tests/worker-protocol.cc
@@ -94,12 +110,12 @@ index 91acde738..fc8b1c372 100644
 +
  } // namespace nix
 diff --git a/src/libstore/include/nix/store/worker-protocol.hh b/src/libstore/include/nix/store/worker-protocol.hh
-index d09d30421..55ae493f0 100644
+index dca316233..e73344ed4 100644
 --- a/src/libstore/include/nix/store/worker-protocol.hh
 +++ b/src/libstore/include/nix/store/worker-protocol.hh
-@@ -135,6 +135,12 @@ struct WorkerProto
+@@ -156,6 +156,12 @@ struct WorkerProto
       */
-     static constexpr std::string_view featureDisableSetOptions = "disable-set-options";
+     static constexpr std::string_view featureAddTempRoots = "addTempRoots";
  
 +    /**
 +     * Feature for transmitting the peak memory, block I/O and
@@ -110,7 +126,7 @@ index d09d30421..55ae493f0 100644
      /**
       * A unidirectional read connection, to be used by the read half of the
       * canonical serializers below.
-@@ -349,6 +355,8 @@ DECLARE_WORKER_SERIALISER(std::optional<TrustedFlag>);
+@@ -377,6 +383,8 @@ DECLARE_WORKER_SERIALISER(std::optional<TrustedFlag>);
  template<>
  DECLARE_WORKER_SERIALISER(std::optional<std::chrono::microseconds>);
  template<>
@@ -120,18 +136,18 @@ index d09d30421..55ae493f0 100644
  
  template<>
 diff --git a/src/libstore/worker-protocol.cc b/src/libstore/worker-protocol.cc
-index 37aa4e31b..c82c37c27 100644
+index 00e2bcbe9..256e4ceab 100644
 --- a/src/libstore/worker-protocol.cc
 +++ b/src/libstore/worker-protocol.cc
-@@ -29,6 +29,7 @@ const WorkerProto::Version WorkerProto::latest = {
-                 WorkerProto::featureRealisationWithPath,
-             },
+@@ -28,6 +28,7 @@ const WorkerProto::Version WorkerProto::latest = {
+             std::string{WorkerProto::featureRealisationWithPath},
              std::string{WorkerProto::featureDeleteDeadSpecificReferrers},
+             std::string{WorkerProto::featureAddTempRoots},
 +            std::string{WorkerProto::featureBuildResourceUsage},
          },
  };
  
-@@ -191,6 +192,30 @@ void WorkerProto::Serialise<std::optional<std::chrono::microseconds>>::write(
+@@ -205,6 +206,30 @@ void WorkerProto::Serialise<std::optional<std::chrono::microseconds>>::write(
      }
  }
  
@@ -162,7 +178,7 @@ index 37aa4e31b..c82c37c27 100644
  DerivedPath WorkerProto::Serialise<DerivedPath>::read(const StoreDirConfig & store, WorkerProto::ReadConn conn)
  {
      auto s = readString(conn.from);
-@@ -264,6 +289,12 @@ BuildResult WorkerProto::Serialise<BuildResult>::read(const StoreDirConfig & sto
+@@ -317,6 +342,12 @@ BuildResult WorkerProto::Serialise<BuildResult>::read(const StoreDirConfig & sto
          res.cpuUser = WorkerProto::Serialise<std::optional<std::chrono::microseconds>>::read(store, conn);
          res.cpuSystem = WorkerProto::Serialise<std::optional<std::chrono::microseconds>>::read(store, conn);
      }
@@ -175,7 +191,7 @@ index 37aa4e31b..c82c37c27 100644
  
      if (conn.version.features.contains(WorkerProto::featureRealisationWithPath)) {
          success.builtOutputs = WorkerProto::Serialise<std::map<OutputName, UnkeyedRealisation>>::read(store, conn);
-@@ -315,6 +346,12 @@ void WorkerProto::Serialise<BuildResult>::write(
+@@ -368,6 +399,12 @@ void WorkerProto::Serialise<BuildResult>::write(
              WorkerProto::write(store, conn, res.cpuUser);
              WorkerProto::write(store, conn, res.cpuSystem);
          }
@@ -188,3 +204,6 @@ index 37aa4e31b..c82c37c27 100644
  
          if (conn.version.features.contains(WorkerProto::featureRealisationWithPath)) {
              WorkerProto::write(store, conn, builtOutputs);
+-- 
+2.56.0
+

@@ -8,87 +8,19 @@ use std::sync::Arc;
 
 use axum::Json;
 use axum::extract::State;
-use chrono::NaiveDateTime;
 use gradient_core::ServerState;
 use gradient_db::maintenance::admin_tasks;
-use gradient_db::maintenance::storage_usage::{self, CacheStorageUsageRow};
+use gradient_db::maintenance::storage_usage::{self};
 use gradient_types::*;
-use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::endpoints::board_subjects::{BoardProject, board_projects};
 use crate::error::{WebError, WebResult};
 use crate::helpers::ok_json;
-
-#[derive(Serialize, utoipa::ToSchema)]
-pub struct CacheStorageSummary {
-    pub id: CacheId,
-    pub name: String,
-    pub display_name: String,
-    pub max_storage_gb: i32,
-    pub packages: i64,
-    pub bytes: i64,
-}
-
-impl From<CacheStorageUsageRow> for CacheStorageSummary {
-    fn from(row: CacheStorageUsageRow) -> Self {
-        Self {
-            id: row.cache,
-            name: row.name,
-            display_name: row.display_name,
-            max_storage_gb: row.max_storage_gb,
-            packages: row.packages,
-            bytes: row.bytes,
-        }
-    }
-}
-
-#[derive(Serialize, utoipa::ToSchema)]
-pub struct ProjectStoredBytes {
-    pub project: BoardProject,
-    pub packages: i64,
-    pub bytes: i64,
-}
-
-#[derive(Serialize, utoipa::ToSchema)]
-pub struct TaskStoredBytes {
-    pub id: TaskId,
-    pub name: String,
-    pub display_name: String,
-    pub project: BoardProject,
-    pub keep_evaluations: i32,
-    pub evaluations: i64,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub oldest_evaluation_at: Option<NaiveDateTime>,
-    pub packages: i64,
-    pub bytes: i64,
-}
-
-#[derive(Serialize, Deserialize, Default, utoipa::ToSchema)]
-#[serde(default)]
-pub struct DeepGarbageCollectionStats {
-    #[serde(skip_deserializing)]
-    pub finished_at: Option<NaiveDateTime>,
-    pub nars_scanned: u64,
-    pub orphan_nars_removed: u64,
-    pub blobs_scanned: u64,
-    pub orphan_blobs_removed: u64,
-    pub logs_scanned: u64,
-    pub orphan_logs_removed: u64,
-}
-
-#[derive(Serialize, utoipa::ToSchema)]
-pub struct AdminStorageResponse {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub disk_total_bytes: Option<u64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub disk_free_bytes: Option<u64>,
-    pub caches: Vec<CacheStorageSummary>,
-    pub projects: Vec<ProjectStoredBytes>,
-    pub tasks: Vec<TaskStoredBytes>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub last_deep_gc: Option<DeepGarbageCollectionStats>,
-}
+pub use gradient_api_types::{
+    AdminStorageResponse, CacheStorageSummary, DeepGarbageCollectionStats, ProjectStoredBytes,
+    TaskStoredBytes,
+};
 
 #[utoipa::path(
     get,

@@ -30,6 +30,7 @@ path = [
     "**/Cargo.lock",
     "**/*.json",
     "flake.lock",
+    "frontend/pnpm-lock.yaml",
     "backend/gradient-ssh/testdata/**",
     "backend/gradient-wire/schema/*.txt",
     "nix/tests/bench/evalbench/fixtures/**/*.jsonl",

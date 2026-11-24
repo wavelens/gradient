@@ -37,7 +37,7 @@ let
       (lib.fileset.fileFilter (f: f.hasExt "nix") evalSrc)
       (mdFiles evalSrc)
       (craneLib.fileset.commonCargoSources (repoRoot + "/backend/gradient-wildcard"))
-      (repoRoot + "/docs/gradient-api.yaml")
+      (craneLib.fileset.commonCargoSources (repoRoot + "/backend/gradient-api-types"))
     ];
   };
 

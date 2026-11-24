@@ -58,12 +58,13 @@ pub async fn poll_evaluation_until_terminal(
 }
 
 fn evaluation_status_line_note(eval: &EvaluationResponse) -> Option<String> {
-    match eval.abort_reason {
+    match &eval.history.abort_reason {
         Some(AbortReason::User) => eval
+            .history
             .aborted_by
             .as_ref()
             .map(|user| format!("aborted by {user}")),
-        Some(AbortReason::Superseded) => eval.superseded_by.as_ref().map(|evaluation| {
+        Some(AbortReason::Superseded) => eval.history.superseded_by.as_ref().map(|evaluation| {
             format!("A newer push to the branch replaced this evaluation with {evaluation}")
         }),
         Some(AbortReason::NoConnectedWorkerCanBuildRequiredSystems) => {
@@ -71,8 +72,9 @@ fn evaluation_status_line_note(eval: &EvaluationResponse) -> Option<String> {
         }
         None if eval_is_terminal(eval.status) => None,
         None => eval
+            .history
             .expected_duration_ms
-            .map(|ms| format!("about {} minutes on average", (ms + 59_999) / 60_000)),
+            .map(|ms| format!("about {} minutes on average", ms.div_ceil(60_000))),
     }
 }
 
@@ -91,10 +93,10 @@ pub async fn print_status_changes_and_exit(
                 "evaluation": eval.id,
                 "status": eval.status,
                 "error": eval.error,
-                "abort_reason": eval.abort_reason,
-                "aborted_by": eval.aborted_by,
-                "superseded_by": eval.superseded_by,
-                "expected_duration_ms": eval.expected_duration_ms,
+                "abort_reason": eval.history.abort_reason,
+                "aborted_by": eval.history.aborted_by,
+                "superseded_by": eval.history.superseded_by,
+                "expected_duration_ms": eval.history.expected_duration_ms,
             }));
             let line = format!("Evaluation {}: {}", eval.id, eval.status);
             out.human(match evaluation_status_line_note(eval) {

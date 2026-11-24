@@ -31,6 +31,9 @@ use axum::{Extension, Json};
 use gradient_types::events::EventOwner;
 use gradient_types::events::audit::Action;
 
+pub use gradient_api_types::{
+    MakeProjectRequest, PatchProjectRequest, ProjectResponse, ProjectSummary,
+};
 use gradient_core::ServerState;
 use gradient_db::lookup::by_id;
 use gradient_db::projects::ProjectEvaluationProgressCounts;
@@ -40,82 +43,34 @@ use gradient_types::consts::BASE_ROLE_ADMIN_ID;
 use gradient_types::*;
 use sea_orm::ActiveValue::Set;
 use sea_orm::TransactionTrait;
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use std::collections::HashMap;
 use std::sync::Arc;
 
-#[derive(Serialize, Deserialize, Debug, utoipa::ToSchema)]
-pub struct MakeProjectRequest {
-    pub name: ProjectName,
-    pub display_name: ProjectDisplayName,
-    pub description: String,
-    pub public: Option<bool>,
-    pub hide_build_requests: Option<bool>,
-    #[serde(default)]
-    pub owner_team: Option<String>,
-}
-
-#[derive(Serialize, Deserialize, Debug, utoipa::ToSchema)]
-pub struct PatchProjectRequest {
-    pub name: Option<ProjectName>,
-    pub display_name: Option<String>,
-    pub description: Option<String>,
-    pub hide_build_requests: Option<bool>,
-    pub allow_exec_in_build_requests: Option<bool>,
-    /// Omitted fields leave the owner team unchanged. A team name can set the owner team. JSON null can clear the owner team.
-    #[serde(
-        default,
-        deserialize_with = "crate::helpers::deserialize_optional_field"
-    )]
-    pub owner_team: Option<Option<String>>,
-}
-
-#[derive(Serialize, utoipa::ToSchema)]
-pub struct ProjectSummary {
-    pub id: ProjectId,
-    pub name: String,
-    pub display_name: String,
-    pub description: String,
-    pub public_key: Option<String>,
-    pub public: bool,
-    pub hide_build_requests: bool,
-    pub allow_exec_in_build_requests: bool,
-    pub managed: bool,
-    pub owner_team: Option<TeamNameAndDisplayName>,
-    pub created_by: UserId,
-    pub created_at: chrono::NaiveDateTime,
-    pub running_evaluations: i64,
-    pub waiting_evaluations: i64,
-    pub role: Option<String>,
-    pub permissions: Vec<Permission>,
-}
-
-impl ProjectSummary {
-    fn new(
-        project: MProject,
-        owner_team: Option<TeamNameAndDisplayName>,
-        evaluations: ProjectEvaluationProgressCounts,
-        role: Option<String>,
-        permissions: PermissionMask,
-    ) -> Self {
-        Self {
-            owner_team,
-            id: project.id,
-            name: project.name,
-            display_name: project.display_name,
-            description: project.description,
-            public_key: Some(project.public_key),
-            public: project.public,
-            hide_build_requests: project.hide_build_requests,
-            allow_exec_in_build_requests: project.allow_exec_in_build_requests,
-            managed: project.managed,
-            created_by: project.created_by,
-            created_at: project.created_at,
-            running_evaluations: evaluations.running,
-            waiting_evaluations: evaluations.waiting,
-            role,
-            permissions: mask_to_vec(permissions),
-        }
+fn build_project_summary_from_row_teams_progress_and_caller(
+    project: MProject,
+    owner_team: Option<TeamNameAndDisplayName>,
+    evaluations: ProjectEvaluationProgressCounts,
+    role: Option<String>,
+    permissions: PermissionMask,
+) -> ProjectSummary {
+    ProjectSummary {
+        owner_team,
+        id: project.id,
+        name: project.name,
+        display_name: project.display_name,
+        description: project.description,
+        public_key: Some(project.public_key),
+        public: project.public,
+        hide_build_requests: project.hide_build_requests,
+        allow_exec_in_build_requests: project.allow_exec_in_build_requests,
+        managed: project.managed,
+        created_by: project.created_by,
+        created_at: project.created_at,
+        running_evaluations: evaluations.running,
+        waiting_evaluations: evaluations.waiting,
+        role,
+        permissions: mask_to_vec(permissions),
     }
 }
 
@@ -140,47 +95,27 @@ impl From<MProject> for PublicProjectSummary {
     }
 }
 
-#[derive(Serialize, utoipa::ToSchema)]
-pub struct ProjectResponse {
-    pub id: ProjectId,
-    pub name: String,
-    pub display_name: String,
-    pub description: String,
-    pub public_key: Option<String>,
-    pub public: bool,
-    pub hide_build_requests: bool,
-    pub allow_exec_in_build_requests: bool,
-    pub managed: bool,
-    pub owner_team: Option<TeamNameAndDisplayName>,
-    pub created_by: UserId,
-    pub created_at: chrono::NaiveDateTime,
-    pub role: Option<String>,
-    pub permissions: Vec<Permission>,
-}
-
-impl ProjectResponse {
-    fn new(
-        project: MProject,
-        owner_team: Option<TeamNameAndDisplayName>,
-        role: Option<String>,
-        permissions: PermissionMask,
-    ) -> Self {
-        Self {
-            owner_team,
-            id: project.id,
-            name: project.name,
-            display_name: project.display_name,
-            description: project.description,
-            public_key: Some(project.public_key),
-            public: project.public,
-            hide_build_requests: project.hide_build_requests,
-            allow_exec_in_build_requests: project.allow_exec_in_build_requests,
-            managed: project.managed,
-            created_by: project.created_by,
-            created_at: project.created_at,
-            role,
-            permissions: mask_to_vec(permissions),
-        }
+fn build_project_response_api_body_from_project_owner_team_names_caller_role_and_permission_mask(
+    project: MProject,
+    owner_team: Option<TeamNameAndDisplayName>,
+    role: Option<String>,
+    permissions: PermissionMask,
+) -> ProjectResponse {
+    ProjectResponse {
+        owner_team,
+        id: project.id,
+        name: project.name,
+        display_name: project.display_name,
+        description: project.description,
+        public_key: Some(project.public_key),
+        public: project.public,
+        hide_build_requests: project.hide_build_requests,
+        allow_exec_in_build_requests: project.allow_exec_in_build_requests,
+        managed: project.managed,
+        created_by: project.created_by,
+        created_at: project.created_at,
+        role,
+        permissions: mask_to_vec(permissions),
     }
 }
 
@@ -266,7 +201,13 @@ pub async fn get(
             ),
             None => (None, 0),
         };
-        ProjectSummary::new(project, owner_team, evaluations, role, permissions)
+        build_project_summary_from_row_teams_progress_and_caller(
+            project,
+            owner_team,
+            evaluations,
+            role,
+            permissions,
+        )
     });
 
     Ok(ok_json(listing))
@@ -455,7 +396,7 @@ pub async fn get_project(
         .into_values()
         .next();
 
-    Ok(ok_json(ProjectResponse::new(
+    Ok(ok_json(build_project_response_api_body_from_project_owner_team_names_caller_role_and_permission_mask(
         project,
         owner_team,
         role,

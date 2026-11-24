@@ -3,9 +3,9 @@
 
 use crate::api::{
     CreateTriggerRequest, CreatedEntityResponse, DuplicateTaskRequest, EntryPointMetricsResponse,
-    EvaluationSummary, MakeTaskRequest, PaginatedEntryPoints, PaginatedTaskResponse,
-    PatchTaskRequest, TaskDetailsResponse, TaskMetricsResponse, TaskResponse,
-    TransferOwnershipRequest, TriggerConfig, TriggerOut, UpdateTriggerRequest,
+    EvaluationSummary, MakeTaskRequest, Paginated, PaginatedEntryPoints, PatchTaskRequest,
+    TaskDetailsResponse, TaskMetricsResponse, TaskResponse, TransferOwnershipRequest,
+    TriggerConfig, TriggerOut, UpdateTriggerRequest,
 };
 use crate::http::encode_url_component;
 use crate::{Client, ConnectorError, http};
@@ -14,13 +14,13 @@ use reqwest::Method;
 pub struct TasksApi<'a>(pub(crate) &'a Client);
 
 impl TasksApi<'_> {
-    pub async fn list(&self, project: &str) -> Result<PaginatedTaskResponse, ConnectorError> {
+    pub async fn list(&self, project: &str) -> Result<Paginated<TaskResponse>, ConnectorError> {
         let (items, total) = self
             .0
             .fetch_all_pages_and_total_count(&format!("tasks/{}", encode_url_component(project)))
             .await?;
-        Ok(PaginatedTaskResponse {
-            per_page: i64::try_from(items.len()).unwrap_or(i64::MAX),
+        Ok(Paginated {
+            per_page: u64::try_from(items.len()).unwrap_or(u64::MAX),
             page: 1,
             total,
             items,

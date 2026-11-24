@@ -1,4 +1,4 @@
-From 9b96d76d930e3730a1caa867f9f30dbf323b116e Mon Sep 17 00:00:00 2001
+From 20fc7504cf9bf4243e8fce3427f9b202addd0b8b Mon Sep 17 00:00:00 2001
 From: Dennis Wuitz <dennish@wuitz.de>
 Date: Sat, 7 Nov 2026 21:25:02 +0100
 Subject: [PATCH] libflake: include rev in flake fingerprint
@@ -9,10 +9,10 @@ A path flake can carry the source git commit via `rev`, and `self.rev` and `self
  1 file changed, 2 insertions(+)
 
 diff --git a/src/libflake/flake.cc b/src/libflake/flake.cc
-index bd3ea4a..7d93676 100644
+index d9f9f7d29..f5f4e896e 100644
 --- a/src/libflake/flake.cc
 +++ b/src/libflake/flake.cc
-@@ -1009,6 +1009,8 @@ std::optional<Fingerprint> LockedFlake::getFingerprint(Store & store, const fetc
+@@ -1019,6 +1019,8 @@ std::optional<Fingerprint> LockedFlake::getFingerprint(Store & store, const fetc
      }
      if (auto lastModified = flake.lockedRef.input.getLastModified())
          *fingerprint += fmt(";lastModified=%d", *lastModified);
@@ -21,3 +21,6 @@ index bd3ea4a..7d93676 100644
  
      // FIXME: as an optimization, if the flake contains a lock file
      // and we haven't changed it, then it's sufficient to use
+-- 
+2.56.0
+

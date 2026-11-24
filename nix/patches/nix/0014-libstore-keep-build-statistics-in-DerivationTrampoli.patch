@@ -1,4 +1,4 @@
-From aef7c68c5e6061066f4f5a667a56945caddd0193 Mon Sep 17 00:00:00 2001
+From ab4e43495242a910d1a038d38d2362b690d2c906 Mon Sep 17 00:00:00 2001
 From: Dennis Wuitz <dennish@wuitz.de>
 Date: Sun, 4 Oct 2026 11:04:22 +0200
 Subject: [PATCH] libstore: keep build statistics in DerivationTrampolineGoal
@@ -9,22 +9,23 @@ only, so timesBuilt, startTime, stopTime, cpuUser and cpuSystem never
 reached clients of Worker::buildDerivation, e.g. daemon clients using
 BuildDerivation.
 ---
- src/libstore/build/derivation-trampoline-goal.cc | 13 ++++++++++---
- 1 file changed, 10 insertions(+), 3 deletions(-)
+ .../build/derivation-trampoline-goal.cc       | 25 ++++++++++---------
+ 1 file changed, 13 insertions(+), 12 deletions(-)
 
 diff --git a/src/libstore/build/derivation-trampoline-goal.cc b/src/libstore/build/derivation-trampoline-goal.cc
-index 14864ed05..726a2dc6b 100644
+index 89d2f2b35..c303e8335 100644
 --- a/src/libstore/build/derivation-trampoline-goal.cc
 +++ b/src/libstore/build/derivation-trampoline-goal.cc
-@@ -184,6 +184,7 @@ Goal::Co DerivationTrampolineGoal::haveDerivation(StorePath drvPath, Derivation
+@@ -209,7 +209,7 @@ Goal::Co<DerivationTrampolineGoal::Result> DerivationTrampolineGoal::haveDerivat
          /* Report the exit status of *some* failing goal. This might not be strictly
             correct, since multiple subgoals can fail independently, but this should be
             a good enough heuristic without --keep-going. */
-+        buildResult = g->buildResult;
-         co_return doneFailure(exitCode, *failure);
+-        co_return Result{exitCode, BuildResult{.inner = *failure}};
++        co_return Result{exitCode, g->buildResult};
      }
  
-@@ -198,8 +199,6 @@ Goal::Co DerivationTrampolineGoal::haveDerivation(StorePath drvPath, Derivation
+     SingleDrvOutputs outputs;
+@@ -223,8 +223,6 @@ Goal::Co<DerivationTrampolineGoal::Result> DerivationTrampolineGoal::haveDerivat
      for (const auto & success : successes)
          std::ranges::copy(success.builtOutputs, std::inserter(outputs, outputs.end()));
  
@@ -33,21 +34,35 @@ index 14864ed05..726a2dc6b 100644
      /* Aggregate the status code. If some outputs we already valid, but we had
         to build/substitute the other ones, report it as the smallest common
         denominator. */
-@@ -224,8 +223,16 @@ Goal::Co DerivationTrampolineGoal::haveDerivation(StorePath drvPath, Derivation
+@@ -249,16 +247,19 @@ Goal::Co<DerivationTrampolineGoal::Result> DerivationTrampolineGoal::haveDerivat
          return toPriority(a) < toPriority(b);
      };
  
+-    co_return Result{
+-        ecSuccess,
+-        BuildResult{
+-            .inner =
+-                BuildResult::Success{
+-                    .status = std::ranges::min(statuses, compareSuccesses),
+-                    .builtOutputs = std::move(outputs),
+-                },
+-        },
 +    /* Keep the statistics (build times, CPU usage) of the goal that did the
 +       most work, `Worker::buildDerivation` reports them to daemon clients. */
 +    const auto & mostWork = *std::ranges::min_element(concreteDrvGoals, compareSuccesses, [](const GoalPtr & goal) {
 +        return goal->buildResult.tryGetSuccess()->status;
 +    });
 +
-+    buildResult = mostWork->buildResult;
-+
-     co_return doneSuccess({
--        .status = std::ranges::min(statuses, compareSuccesses),
++    BuildResult result = mostWork->buildResult;
++    result.inner = BuildResult::Success{
 +        .status = mostWork->buildResult.tryGetSuccess()->status,
-         .builtOutputs = std::move(outputs),
-     });
++        .builtOutputs = std::move(outputs),
+     };
++
++    co_return Result{ecSuccess, std::move(result)};
  }
+ 
+ } // namespace nix
+-- 
+2.56.0
+

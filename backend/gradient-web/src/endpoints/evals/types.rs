@@ -4,48 +4,15 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use crate::endpoints::tasks::EvaluationTriggerSummary;
-use gradient_entity::evaluation::{AbortReason, EvaluationKind};
-use gradient_types::ids::*;
-use gradient_types::{
-    EvaluationProgress, MEntryPoint, MEvaluation, MEvaluationMessage, WaitingReason,
+pub use gradient_api_types::{
+    BuildItem, EntryPointBrief, EvaluationAbortReplacementRetryPhaseStartsAndExpectedDuration,
+    EvaluationAction, EvaluationMessageResponse, EvaluationPhaseStartTimestamps,
+    EvaluationResponse, MakeEvaluationRequest, PaginatedBuilds,
 };
-use serde::{Deserialize, Serialize};
-
-#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, utoipa::ToSchema)]
-#[serde(rename_all = "lowercase")]
-pub enum EvaluationAction {
-    Abort,
-}
-
-#[derive(Serialize, Deserialize, Debug, utoipa::ToSchema)]
-pub struct MakeEvaluationRequest {
-    pub method: EvaluationAction,
-}
-
-#[derive(Serialize, Deserialize, Debug, utoipa::ToSchema)]
-pub struct BuildItem {
-    pub id: BuildJobId,
-    pub name: String,
-    pub status: String,
-    pub has_artefacts: bool,
-    pub updated_at: chrono::NaiveDateTime,
-    pub build_time_ms: Option<i64>,
-    pub build_started_at: Option<chrono::NaiveDateTime>,
-    pub dispatched_job: Option<DispatchedJobId>,
-    pub depth: u32,
-    pub prioritized: bool,
-    pub ifd: bool,
-    pub continued_in_evaluation: Option<EvaluationId>,
-    pub entry_points: Vec<String>,
-}
-
-#[derive(Serialize, Debug, utoipa::ToSchema)]
-pub struct PaginatedBuilds {
-    pub builds: Vec<BuildItem>,
-    pub total: usize,
-    pub active_count: usize,
-}
+use gradient_entity::evaluation::EvaluationKind;
+use gradient_types::ids::*;
+use gradient_types::{MEntryPoint, MEvaluation, MEvaluationMessage};
+use serde::Deserialize;
 
 #[derive(Deserialize, Debug, Default, utoipa::IntoParams)]
 #[into_params(parameter_in = Query)]
@@ -55,130 +22,58 @@ pub struct BuildsQuery {
     pub scope: Option<BuildJobId>,
 }
 
-#[derive(Serialize, Debug, utoipa::ToSchema)]
-pub struct EvaluationResponse {
-    pub id: EvaluationId,
-    pub task: Option<TaskId>,
-    pub project_name: String,
-    pub task_name: Option<String>,
-    pub task_display_name: Option<String>,
-    pub repository: String,
-    pub commit: String,
-    pub wildcard: String,
-    pub only_evaluate: bool,
-    pub status: gradient_entity::evaluation::EvaluationStatus,
-    pub previous: Option<EvaluationId>,
-    pub next: Option<EvaluationId>,
-    pub created_at: chrono::NaiveDateTime,
-    pub started_at: Option<chrono::NaiveDateTime>,
-    pub finished_at: Option<chrono::NaiveDateTime>,
-    pub updated_at: chrono::NaiveDateTime,
-    pub error_count: u64,
-    pub warning_count: u64,
-    pub error: Option<String>,
-    pub entry_points: Vec<EntryPointBrief>,
-    pub prioritized: bool,
-    pub trigger: Option<EvaluationTriggerSummary>,
-    pub triggered_by: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub waiting_reason: Option<WaitingReason>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub progress: Option<EvaluationProgress>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub expected_thunks: Option<u64>,
-    #[serde(flatten)]
-    pub history: EvaluationAbortReplacementRetryPhaseStartsAndExpectedDuration,
-}
-
-#[derive(Serialize, Deserialize, Debug, Default, PartialEq, utoipa::ToSchema)]
-pub struct EvaluationPhaseStartTimestamps {
-    pub fetch: Option<chrono::NaiveDateTime>,
-    pub eval_flake: Option<chrono::NaiveDateTime>,
-    pub eval_derivation: Option<chrono::NaiveDateTime>,
-    pub building: Option<chrono::NaiveDateTime>,
-}
-
-#[derive(Serialize, Deserialize, Debug, Default, PartialEq, utoipa::ToSchema)]
-pub struct EvaluationAbortReplacementRetryPhaseStartsAndExpectedDuration {
-    pub abort_reason: Option<AbortReason>,
-    pub aborted_by: Option<String>,
-    pub superseded_by: Option<EvaluationId>,
-    pub retry_of: Option<EvaluationId>,
-    pub phase_started_at: EvaluationPhaseStartTimestamps,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub expected_duration_ms: Option<u64>,
-}
-
-impl EvaluationAbortReplacementRetryPhaseStartsAndExpectedDuration {
-    pub fn new(
-        evaluation: &MEvaluation,
-        aborted_by: Option<String>,
-        expected_duration_ms: Option<u64>,
-    ) -> Self {
-        Self {
-            abort_reason: evaluation.abort_reason,
-            aborted_by,
-            superseded_by: evaluation.superseded_by,
-            retry_of: evaluation
-                .previous
-                .filter(|_| evaluation.kind == EvaluationKind::Retry),
-            phase_started_at: EvaluationPhaseStartTimestamps {
-                fetch: evaluation.fetch_started_at,
-                eval_flake: evaluation.eval_flake_started_at,
-                eval_derivation: evaluation.eval_drv_started_at,
-                building: evaluation.building_started_at,
-            },
-            expected_duration_ms: expected_duration_ms.filter(|_| evaluation.status.is_active()),
-        }
+pub fn new_evaluation_abort_replacement_retry_phase_starts_and_expected_duration(
+    evaluation: &MEvaluation,
+    aborted_by: Option<String>,
+    expected_duration_ms: Option<u64>,
+) -> EvaluationAbortReplacementRetryPhaseStartsAndExpectedDuration {
+    EvaluationAbortReplacementRetryPhaseStartsAndExpectedDuration {
+        abort_reason: evaluation.abort_reason,
+        aborted_by,
+        superseded_by: evaluation.superseded_by,
+        retry_of: evaluation
+            .previous
+            .filter(|_| evaluation.kind == EvaluationKind::Retry),
+        phase_started_at: EvaluationPhaseStartTimestamps {
+            fetch: evaluation.fetch_started_at,
+            eval_flake: evaluation.eval_flake_started_at,
+            eval_derivation: evaluation.eval_drv_started_at,
+            building: evaluation.building_started_at,
+        },
+        expected_duration_ms: expected_duration_ms.filter(|_| evaluation.status.is_active()),
     }
 }
 
-#[derive(Serialize, Debug, utoipa::ToSchema)]
-pub struct EntryPointBrief {
-    pub id: EntryPointId,
-    pub eval: String,
-    pub build_status: gradient_entity::build::BuildStatus,
-}
-
-impl EntryPointBrief {
-    pub fn new(
-        entry_point: MEntryPoint,
-        build_status: gradient_entity::build::BuildStatus,
-    ) -> Self {
-        Self {
-            id: entry_point.id,
-            eval: entry_point.eval,
-            build_status,
-        }
+pub fn entry_point_brief_from_row_and_build_status(
+    entry_point: MEntryPoint,
+    build_status: gradient_entity::build::BuildStatus,
+) -> EntryPointBrief {
+    EntryPointBrief {
+        id: entry_point.id,
+        eval: entry_point.eval,
+        build_status,
     }
 }
 
-#[derive(Serialize, Debug, utoipa::ToSchema)]
-pub struct EvaluationMessageResponse {
-    pub id: EvaluationMessageId,
-    pub level: gradient_entity::evaluation_message::MessageLevel,
-    pub message: String,
-    pub source: Option<String>,
-    pub created_at: chrono::NaiveDateTime,
-    pub entry_points: Vec<EntryPointId>,
-}
-
-impl EvaluationMessageResponse {
-    pub fn new(message: MEvaluationMessage, entry_points: Vec<EntryPointId>) -> Self {
-        Self {
-            id: message.id,
-            level: message.level,
-            message: message.message,
-            source: message.source,
-            created_at: message.created_at,
-            entry_points,
-        }
+pub fn evaluation_message_response_from_message_row_and_entry_point_ids(
+    message: MEvaluationMessage,
+    entry_points: Vec<EntryPointId>,
+) -> EvaluationMessageResponse {
+    EvaluationMessageResponse {
+        id: message.id,
+        level: message.level,
+        message: message.message,
+        source: message.source,
+        created_at: message.created_at,
+        entry_points,
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use gradient_entity::evaluation::AbortReason;
+    use gradient_types::EvaluationProgress;
 
     fn response(progress: Option<EvaluationProgress>) -> serde_json::Value {
         serde_json::to_value(EvaluationResponse {
@@ -250,7 +145,7 @@ mod tests {
             status: EvaluationStatus::Building,
             ..Default::default()
         };
-        let running = EvaluationAbortReplacementRetryPhaseStartsAndExpectedDuration::new(
+        let running = new_evaluation_abort_replacement_retry_phase_starts_and_expected_duration(
             &retry,
             None,
             Some(600_000),
@@ -266,7 +161,7 @@ mod tests {
             ..Default::default()
         };
         let body = serde_json::to_value(
-            EvaluationAbortReplacementRetryPhaseStartsAndExpectedDuration::new(
+            new_evaluation_abort_replacement_retry_phase_starts_and_expected_duration(
                 &replaced,
                 None,
                 Some(600_000),

@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use crate::api::{
-    CreateWebhookRequest, CreateWebhookResponse, DeletedResponse, DeliveryDetailWebhookDeliveryId,
-    DeliveryListItemWebhookDeliveryId, RotatedSecret, UpdateWebhookRequest, WebhookResponse,
+    CreateWebhookRequest, CreateWebhookResponse, DeletedResponse, DeliveryDetail, DeliveryListItem,
+    RotatedSecret, UpdateWebhookRequest, WebhookDeliveryId, WebhookResponse,
 };
 use crate::http::encode_url_component;
 use crate::{Client, ConnectorError, http};
@@ -118,7 +118,7 @@ impl WebhooksApi<'_> {
         id: &str,
         limit: Option<u64>,
         offset: Option<u64>,
-    ) -> Result<Vec<DeliveryListItemWebhookDeliveryId>, ConnectorError> {
+    ) -> Result<Vec<DeliveryListItem<WebhookDeliveryId>>, ConnectorError> {
         let mut req = self.request(
             Method::GET,
             owner,
@@ -138,7 +138,7 @@ impl WebhooksApi<'_> {
         owner: &WebhookResource,
         id: &str,
         delivery_id: &str,
-    ) -> Result<DeliveryDetailWebhookDeliveryId, ConnectorError> {
+    ) -> Result<DeliveryDetail<WebhookDeliveryId>, ConnectorError> {
         Self::send(self.request(
             Method::GET,
             owner,
@@ -168,7 +168,7 @@ impl WebhooksApi<'_> {
         &self,
         owner: &WebhookResource,
         id: &str,
-    ) -> Result<DeliveryListItemWebhookDeliveryId, ConnectorError> {
+    ) -> Result<DeliveryListItem<WebhookDeliveryId>, ConnectorError> {
         Self::send(self.request(
             Method::POST,
             owner,

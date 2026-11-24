@@ -1183,7 +1183,8 @@ fn send_live_metrics(
             )
         });
         let (m, build_peak_ram_mb) = match sampled.await {
-            Ok(sampled) => sampled,
+            Ok((Some(m), build_peak_ram_mb)) => (m, build_peak_ram_mb),
+            Ok((None, _)) => return,
             Err(e) => {
                 debug!(error = %e, "host_dynamic sampling task failed");
                 return;

@@ -21,19 +21,21 @@ pub(crate) use summaries::{
 };
 
 use crate::audit::Audit;
-use crate::endpoints::tasks::repository::TaskCommitStatusPostAttempt;
 use crate::error::{WebError, WebResult};
 use crate::helpers::OptionExt;
 use crate::ip_allowlist::normalize_allowed_ips;
-use crate::names::GitHostConnectionName;
 use crate::refusal::{Change, SharedRefusal};
 use crate::resource::Resource;
 use anyhow::Context;
+pub use gradient_api_types::{
+    CreateGitHostConnectionRequest, GitHostConnectionResponse, GitHostConnectionSummary,
+    GitHostConnectionTaskResponse, GitHostConnectionTestResponse, IncomingWebhookDeliveryResponse,
+    PatchGitHostConnectionRequest, RepositoryFit,
+};
 use gradient_ci::CiContext;
 use gradient_ci::actions::{encrypt_secret_with_file, new_webhook_secret};
 use gradient_db::git_host_connections::{self as connections, GitHostConnectionOwnerByDatabaseId};
 use gradient_db::lookup::{by_id, lock_for_admin_change};
-use gradient_entity::incoming_webhook_delivery::DeliveryResult;
 use gradient_git_host::repository_fit::GitHostConnectionAddress;
 use gradient_types::events::EventOwner;
 use gradient_types::events::audit::Action;
@@ -43,158 +45,23 @@ use gradient_types::git_host::{
 use gradient_types::*;
 use gradient_util::http_base_url::{ValidatedHttpBaseUrl, urls_differ_in_scheme_host_or_port};
 use sea_orm::TransactionTrait;
-use serde::{Deserialize, Serialize};
 
-#[derive(Serialize, Debug, utoipa::ToSchema)]
-pub struct GitHostConnectionResponse {
-    #[serde(flatten)]
-    pub connection: GitHostConnectionSummary,
-    pub has_secret: bool,
-    pub has_access_token: bool,
-    pub allowed_ips: Vec<String>,
-    pub installation_id: Option<i64>,
-    pub created_by: UserId,
-    pub created_at: chrono::NaiveDateTime,
-    pub generated_secret: Option<String>,
-}
-
-#[derive(Serialize, Debug, Clone, utoipa::ToSchema)]
-pub struct GitHostConnectionSummary {
-    pub id: GitHostConnectionId,
-    pub owner: GitHostConnectionOwner,
-    pub name: String,
-    pub display_name: String,
-    pub git_host_type: String,
-    pub base_url: Option<String>,
-    pub receives_events: bool,
-    pub reports_status: bool,
-    #[schema(required = false, default = false)]
-    pub can_manage: bool,
-    #[schema(required = false, default = false)]
-    pub managed: bool,
-    pub account_login: Option<String>,
-    pub github_installation_id: Option<i64>,
-    pub webhook_url: Option<String>,
-    pub access_token_expires_at: Option<chrono::NaiveDateTime>,
-    #[schema(required = false, default = false)]
-    pub access_token_refreshes_automatically: bool,
-    pub last_delivery: Option<IncomingWebhookDeliveryResponse>,
-    #[schema(required = false, default = 0)]
-    pub refused_signature_count: i64,
-    pub last_refused_signature_at: Option<chrono::NaiveDateTime>,
-    pub last_status_post: Option<TaskCommitStatusPostAttempt>,
-    #[schema(required = false, default = 0)]
-    pub task_count: u64,
-    pub repository_fit: Option<RepositoryFit>,
-}
-
-#[derive(Serialize, Debug, Clone, PartialEq, Eq, utoipa::ToSchema)]
-pub struct RepositoryFit {
-    pub fits: bool,
-    pub can_be_selected: bool,
-    pub reason: Option<String>,
-}
-
-impl RepositoryFit {
-    pub(crate) fn of(repository: &str, connection: &MGitHostConnection) -> Self {
-        match check_task_repository_url_can_use_git_host_connection(repository, connection) {
-            Err(reason) => Self {
-                fits: false,
-                can_be_selected: false,
-                reason: Some(reason),
-            },
-            Ok(()) => Self {
-                fits: true,
-                can_be_selected: true,
-                reason: None,
-            },
-        }
+pub(crate) fn repository_fit_for_git_host_connection(
+    repository: &str,
+    connection: &MGitHostConnection,
+) -> RepositoryFit {
+    match check_task_repository_url_can_use_git_host_connection(repository, connection) {
+        Err(reason) => RepositoryFit {
+            fits: false,
+            can_be_selected: false,
+            reason: Some(reason),
+        },
+        Ok(()) => RepositoryFit {
+            fits: true,
+            can_be_selected: true,
+            reason: None,
+        },
     }
-}
-
-#[derive(Serialize, Debug, utoipa::ToSchema)]
-pub struct GitHostConnectionTaskResponse {
-    pub id: TaskId,
-    pub project: String,
-    pub name: String,
-    pub display_name: String,
-    pub repository: String,
-    pub report_status: bool,
-}
-
-#[derive(Serialize, Debug, utoipa::ToSchema)]
-pub struct GitHostConnectionTestResponse {
-    pub success: bool,
-    pub account: Option<String>,
-    pub error: Option<String>,
-}
-
-#[derive(Serialize, Debug, Clone, utoipa::ToSchema)]
-pub struct IncomingWebhookDeliveryResponse {
-    pub id: IncomingWebhookDeliveryId,
-    pub event: String,
-    pub status_code: i16,
-    pub result: DeliveryResult,
-    pub detail: Option<String>,
-    pub repository: Option<String>,
-    pub tasks_scanned: i32,
-    pub queued: i32,
-    pub created_at: chrono::NaiveDateTime,
-}
-
-impl From<gradient_entity::incoming_webhook_delivery::Model> for IncomingWebhookDeliveryResponse {
-    fn from(m: gradient_entity::incoming_webhook_delivery::Model) -> Self {
-        Self {
-            id: m.id,
-            event: m.event,
-            status_code: m.status_code,
-            result: m.result,
-            detail: m.detail,
-            repository: m.repository,
-            tasks_scanned: m.tasks_scanned,
-            queued: m.queued,
-            created_at: m.created_at,
-        }
-    }
-}
-
-#[derive(Deserialize, Debug, utoipa::ToSchema)]
-pub struct CreateGitHostConnectionRequest {
-    pub name: GitHostConnectionName,
-    #[serde(default)]
-    pub display_name: Option<String>,
-    pub git_host_type: String,
-    #[serde(default)]
-    pub base_url: Option<String>,
-    #[serde(default)]
-    pub access_token: Option<String>,
-    #[serde(default)]
-    pub secret: Option<String>,
-    #[serde(default = "default_true")]
-    pub receives_events: bool,
-    #[serde(default)]
-    pub reports_status: bool,
-    #[serde(default)]
-    pub allowed_ips: Option<Vec<String>>,
-    #[serde(default)]
-    pub installation_id: Option<i64>,
-}
-
-fn default_true() -> bool {
-    true
-}
-
-#[derive(Deserialize, Debug, utoipa::ToSchema)]
-pub struct PatchGitHostConnectionRequest {
-    pub name: Option<GitHostConnectionName>,
-    pub display_name: Option<String>,
-    pub git_host_type: Option<String>,
-    pub base_url: Option<String>,
-    pub secret: Option<String>,
-    pub access_token: Option<String>,
-    pub allowed_ips: Option<Vec<String>>,
-    pub receives_events: Option<bool>,
-    pub reports_status: Option<bool>,
 }
 
 pub(crate) const DELIVERY_LIST_LIMIT: u64 = 50;
@@ -827,7 +694,7 @@ pub(crate) fn repository_fits_connection_with_known_host(
     repository: &str,
     connection: &MGitHostConnection,
 ) -> bool {
-    RepositoryFit::of(repository, connection).fits
+    repository_fit_for_git_host_connection(repository, connection).fits
 }
 
 pub(crate) fn read_checked_git_host_connection_base_url_or_host_type_default(
@@ -951,7 +818,7 @@ mod tests {
 
     #[test]
     fn connection_without_base_url_does_not_fit_and_cannot_be_selected() {
-        let fit = RepositoryFit::of(
+        let fit = repository_fit_for_git_host_connection(
             "https://git.example.com/acme/infra",
             &connection(GitHostType::Forgejo, None),
         );
@@ -963,7 +830,7 @@ mod tests {
                 .is_some_and(|reason| reason.contains("base_url")),
             "{fit:?}"
         );
-        let other_host = RepositoryFit::of(
+        let other_host = repository_fit_for_git_host_connection(
             "https://github.com/acme/infra",
             &connection(GitHostType::Gitea, Some("https://git.example.com")),
         );

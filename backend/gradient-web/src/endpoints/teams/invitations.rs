@@ -8,6 +8,7 @@ use super::members::role_label;
 use crate::api_spec::TeamPath;
 use crate::audit::Audit;
 use crate::endpoints::membership::find_user_by_username;
+use crate::endpoints::membership::invitations::build_pending_invitation_item;
 use crate::endpoints::membership::invitations::{PendingInvitationItem, RevokeInvitationRequest};
 use crate::error::{WebError, WebResult};
 use crate::extractors::JsonBody;
@@ -37,7 +38,7 @@ pub async fn get_team_invitations(
     let items: Vec<PendingInvitationItem> = rows
         .iter()
         .map(|(inv, invitee)| {
-            PendingInvitationItem::new(
+            build_pending_invitation_item(
                 inv.user,
                 invitee.as_ref(),
                 role_label(inv.role).to_string(),

@@ -16,6 +16,7 @@ use crate::permissions::{
 use crate::refusal::SharedRefusal;
 use crate::resource::Resource;
 use crate::scope::{Member, ProjectScope, Readable, Requires, RequiresUnmanaged, can};
+pub use gradient_api_types::ProjectRoleOwner;
 use gradient_db::WebDb;
 use gradient_db::access::DirectMembershipsOfUser;
 use gradient_notify::InviteScope;
@@ -24,21 +25,9 @@ use gradient_types::events::audit::Action;
 use gradient_types::*;
 use sea_orm::ActiveValue::Set;
 use sea_orm::{ConnectionTrait, RelationDef, RelationTrait};
-use serde::Serialize;
 use std::collections::HashMap;
 
 pub struct ProjectOwner;
-
-#[derive(Serialize, Debug, utoipa::ToSchema)]
-pub struct ProjectRoleOwner {
-    project: Option<ProjectId>,
-}
-
-impl From<Option<ProjectId>> for ProjectRoleOwner {
-    fn from(project: Option<ProjectId>) -> Self {
-        Self { project }
-    }
-}
 
 impl Table for EProjectUser {
     type Row = MProjectUser;

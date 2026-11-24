@@ -570,7 +570,7 @@ async fn inactive_user_session_returns_403() {
     let token = jsonwebtoken::encode(
         &jsonwebtoken::Header::default(),
         &claims,
-        &jsonwebtoken::EncodingKey::from_secret(b"test-jwt-secret"),
+        &jsonwebtoken::EncodingKey::from_secret(b"test-jwt-secret").expect("jwt key"),
     )
     .expect("encode jwt");
 

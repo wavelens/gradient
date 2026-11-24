@@ -40,8 +40,8 @@ impl From<&GitHostConnectionOwner> for GitHostConnectionSetOwner {
     fn from(owner: &GitHostConnectionOwner) -> Self {
         match owner {
             GitHostConnectionOwner::Instance => Self::Instance,
-            GitHostConnectionOwner::Team(team) => Self::Team(team.clone()),
-            GitHostConnectionOwner::Project(project) => Self::Project(project.clone()),
+            GitHostConnectionOwner::Team { name } => Self::Team(name.clone()),
+            GitHostConnectionOwner::Project { name } => Self::Project(name.clone()),
         }
     }
 }

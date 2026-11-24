@@ -88,7 +88,7 @@ fn unmet_parts(unmet: &ExecUnmet) -> Vec<String> {
     );
     parts.extend(unmet.labels.iter().map(|label| format!("label {label}")));
     parts.extend(unmet.devices.iter().map(device_label));
-    parts.extend(unmet.guest.iter().flat_map(guest_parts));
+    parts.extend(guest_parts(&unmet.guest));
     parts.extend(unmet.mounts.iter().map(|mount| format!("mount {mount}")));
     if unmet.nodes > 1 {
         parts.push(format!("{} workers in one zone", unmet.nodes));
@@ -102,10 +102,10 @@ fn unmet_parts(unmet: &ExecUnmet) -> Vec<String> {
             .iter()
             .map(|name| format!("worker secret {name}")),
     );
-    if unmet.network == Some(true) {
+    if unmet.network {
         parts.push("a worker that allows network".to_owned());
     }
-    if unmet.ssh == Some(true) {
+    if unmet.ssh {
         parts.push("a worker that allows SSH".to_owned());
     }
     parts.extend(unmet.ports.iter().map(|port| format!("port {port}")));

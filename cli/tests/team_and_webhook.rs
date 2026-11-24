@@ -88,7 +88,7 @@ async fn adding_a_member_invites_with_the_member_role_by_default() {
         &server,
         "POST",
         "teams/ops/members",
-        Some(json!({"user": "bob", "role": "member"})),
+        Some(json!({"user": "bob", "role": "member", "add_as_member_immediately": false})),
         json!("Invitation sent"),
     )
     .await;
@@ -182,7 +182,8 @@ async fn webhook_create_sends_every_event_pattern() {
         Some(json!({
             "name": "notify",
             "url": "https://example.com/hook",
-            "events": ["build.failed", "evaluation.*"]
+            "events": ["build.failed", "evaluation.*"],
+            "active": true
         })),
         json!({"webhook": webhook(), "secret": "whsec"}),
     )

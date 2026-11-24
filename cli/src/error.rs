@@ -6,6 +6,7 @@
 
 use crate::output::ExitKind;
 use connector::ConnectorError;
+use connector::api::NameError;
 use std::fmt::{self, Display};
 use std::io;
 use std::path::PathBuf;
@@ -77,6 +78,8 @@ pub enum CliError {
     )]
     DownloadsPathIsSymlinkOrNotDirectory(PathBuf),
     #[error(transparent)]
+    InvalidName(#[from] NameError),
+    #[error(transparent)]
     Api(#[from] ConnectorError),
 }
 
@@ -101,7 +104,8 @@ impl CliError {
             | Self::NotAnInteger(_)
             | Self::ReadInput(..)
             | Self::DownloadTargetFileAlreadyExists(_)
-            | Self::DownloadsPathIsSymlinkOrNotDirectory(_) => ExitKind::Usage,
+            | Self::DownloadsPathIsSymlinkOrNotDirectory(_)
+            | Self::InvalidName(_) => ExitKind::Usage,
             Self::NotLoggedIn => ExitKind::Unauthorized,
             Self::AuthorizationExpired
             | Self::TerminalUi(_)

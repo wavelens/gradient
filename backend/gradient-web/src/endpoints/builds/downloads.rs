@@ -24,11 +24,12 @@ use gradient_storage::nar_extract::{
     ExtractError, Extracted, extract_path_from_reader, nar_reader_from_stream,
 };
 use gradient_types::*;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use std::sync::Arc;
 
 use super::BuildAccessContext;
 use crate::endpoints::{archive_headers, build_product_headers};
+pub use gradient_api_types::BuildProduct;
 
 fn relative_in_output(full: &str, output_root: &str) -> String {
     let prefix = format!("{}/", output_root);
@@ -170,27 +171,6 @@ async fn product_response(
         Err(e) => {
             tracing::error!(%build_id, %filename, %rel, error = %e, "Failed to extract path from NAR");
             Err(anyhow::anyhow!("Failed to extract path from NAR").into())
-        }
-    }
-}
-
-#[derive(Serialize, Deserialize, Debug, utoipa::ToSchema)]
-pub struct BuildProduct {
-    pub file_type: String,
-    pub subtype: String,
-    pub name: String,
-    pub path: String,
-    pub size: Option<u64>,
-}
-
-impl From<MBuildProduct> for BuildProduct {
-    fn from(product: MBuildProduct) -> Self {
-        Self {
-            file_type: product.file_type,
-            subtype: product.subtype,
-            name: product.name,
-            path: product.path,
-            size: product.size.map(|s| s as u64),
         }
     }
 }

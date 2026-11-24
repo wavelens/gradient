@@ -12,6 +12,9 @@ use crate::resource::Resource;
 use crate::scope::{Readable, TaskScope};
 use axum::Json;
 use axum::extract::State;
+pub use gradient_api_types::{
+    EntryPointMetricPoint, EntryPointMetricsResponse, TaskMetricPoint, TaskMetricsResponse,
+};
 use gradient_core::ServerState;
 use gradient_db::WebDb;
 use gradient_db::graph::{
@@ -21,27 +24,9 @@ use gradient_db::graph::{
 use gradient_db::lookup::by_ids;
 use gradient_db::store_path_content_variant_reader_choice::StorePathContentVariantReader;
 use gradient_types::*;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use std::collections::HashMap;
 use std::sync::Arc;
-
-#[derive(Serialize, Deserialize, Debug, utoipa::ToSchema)]
-pub struct TaskMetricPoint {
-    pub evaluation_id: EvaluationId,
-    pub created_at: chrono::NaiveDateTime,
-    pub build_time_total_ms: i64,
-    pub eval_time_ms: Option<i64>,
-    pub output_size_bytes: Option<i64>,
-    pub closure_size_bytes: Option<i64>,
-    pub runtime_closure_size_bytes: Option<i64>,
-    pub dependencies_count: i64,
-}
-
-#[derive(Serialize, Deserialize, Debug, utoipa::ToSchema)]
-pub struct TaskMetricsResponse {
-    pub keep_evaluations: i32,
-    pub points: Vec<TaskMetricPoint>,
-}
 
 #[utoipa::path(
     get,
@@ -180,26 +165,6 @@ async fn derivation_metrics(
 #[into_params(parameter_in = Query)]
 pub struct EntryPointMetricsQuery {
     pub eval: String,
-}
-
-#[derive(Serialize, Deserialize, Debug, utoipa::ToSchema)]
-pub struct EntryPointMetricPoint {
-    pub evaluation_id: EvaluationId,
-    pub build_id: BuildJobId,
-    pub created_at: chrono::NaiveDateTime,
-    pub build_status: gradient_entity::build::BuildStatus,
-    pub build_time_ms: Option<i64>,
-    pub output_size_bytes: Option<i64>,
-    pub closure_size_bytes: Option<i64>,
-    pub runtime_closure_size_bytes: Option<i64>,
-    pub dependencies_count: i64,
-}
-
-#[derive(Serialize, Deserialize, Debug, utoipa::ToSchema)]
-pub struct EntryPointMetricsResponse {
-    pub eval: String,
-    pub keep_evaluations: i32,
-    pub points: Vec<EntryPointMetricPoint>,
 }
 
 #[utoipa::path(

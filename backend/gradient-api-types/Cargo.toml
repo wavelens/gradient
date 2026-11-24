@@ -1,0 +1,34 @@
+# SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+#
+# SPDX-License-Identifier: AGPL-3.0-only
+
+# This manifest is self-contained and doesn't inherit from a workspace. The separate gradient-cli workspace can use this crate as a path dependency.
+[package]
+name = "gradient-api-types"
+version = "2.0.1"
+edition = "2024"
+license = "AGPL-3.0-only"
+authors = ["Wavelens GmbH <info@wavelens.io>"]
+repository = "https://github.com/wavelens/gradient"
+publish = false
+
+[lib]
+name = "gradient_api_types"
+path = "src/lib.rs"
+doctest = false
+
+[features]
+server-only-sea-orm-and-trait-derives = ["dep:clap", "dep:num_enum", "dep:sea-orm"]
+
+[dependencies]
+chrono     = { version = "0.4", default-features = false, features = ["clock", "serde", "std"] }
+serde      = { version = "1", default-features = false, features = ["std", "derive"] }
+serde_json = { version = "1.0", default-features = false, features = ["std"] }
+utoipa     = { version = "6", default-features = false, features = ["macros", "chrono", "uuid", "preserve_order"] }
+uuid       = { version = "1.23", default-features = false, features = ["std", "v7", "serde"] }
+cron       = { version = "0.17", default-features = false }
+thiserror  = { version = "2.0", default-features = false }
+
+clap       = { version = "4.6", default-features = false, features = ["std", "derive"], optional = true }
+num_enum   = { version = "0.7", default-features = false, optional = true }
+sea-orm    = { version = "2.0", default-features = false, features = ["macros", "with-chrono", "with-json", "with-uuid"], optional = true }

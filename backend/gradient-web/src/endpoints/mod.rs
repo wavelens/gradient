@@ -51,19 +51,14 @@ pub mod yearly_instance_summary;
 use crate::error::{WebError, WebResult};
 use anyhow::Context;
 use axum::extract::{Json, State};
+pub use gradient_api_types::{ChunkReceived, GiteaOAuthAppConfig, LoginProviderInfo, ServerConfig};
 use gradient_core::ServerState;
 use gradient_git_host::github_app::GitHubAppPageUrlCache;
+use gradient_types::BaseResponse;
 use gradient_types::config::GitHubAppConfig;
-use gradient_types::{BaseResponse, CreatePermission};
 use gradient_util::http::HttpClientForUserSuppliedUrls;
 use gradient_util::shutdown::Shutdown;
-use serde::Serialize;
 use std::sync::Arc;
-
-#[derive(Serialize, utoipa::ToSchema)]
-pub struct ChunkReceived {
-    pub received: u64,
-}
 
 /// `sandbox` is dropping a build-controlled response into a unique opaque origin. Its script is
 /// reaching the API as nobody. A same-origin `fetch` would otherwise carry the session cookie and
@@ -162,50 +157,6 @@ pub async fn get_health() -> WebResult<Json<BaseResponse<String>>> {
     };
 
     Ok(Json(res))
-}
-
-#[derive(Serialize, utoipa::ToSchema)]
-pub struct LoginProviderInfo {
-    pub id: String,
-    pub label: String,
-}
-
-#[derive(Serialize, utoipa::ToSchema)]
-pub struct GiteaOAuthAppConfig {
-    pub git_host_type: String,
-    pub instance_base_url: String,
-}
-
-#[derive(Serialize, utoipa::ToSchema)]
-pub struct ServerConfig {
-    pub version: String,
-    pub commit: Option<String>,
-    pub oidc_enabled: bool,
-    pub login_providers: Vec<LoginProviderInfo>,
-    pub password_login_enabled: bool,
-    pub registration_enabled: bool,
-    pub email_verification_enabled: bool,
-    pub smtp_enabled: bool,
-    pub quic: bool,
-    pub create_project: CreatePermission,
-    pub create_team: CreatePermission,
-    pub create_cache: CreatePermission,
-    pub github_app_enabled: bool,
-    pub github_app_page_url: Option<String>,
-    pub github_app_install_url: Option<String>,
-    pub gitea_oauth_app: Option<GiteaOAuthAppConfig>,
-    pub ssh_enabled: bool,
-    pub ssh_port: Option<u16>,
-    pub gradient_ci_enabled: bool,
-    pub gradient_ci_url: String,
-    pub serve_url: String,
-    pub logo_url: Option<String>,
-    pub exec_enabled: bool,
-    pub public_listing: bool,
-    pub max_keep_evaluations_per_task: Option<i32>,
-    /// Limit for cached NAR storage across the instance, in GB (`cache.maxStorageGb`). This field does not exist when the limit is off.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub max_cached_nar_storage_gb: Option<u32>,
 }
 
 #[utoipa::path(

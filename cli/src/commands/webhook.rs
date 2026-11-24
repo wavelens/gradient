@@ -12,7 +12,8 @@ use crate::input::{client_from_config, confirm_delete};
 use crate::output::Output;
 use clap::{Args, Subcommand};
 use connector::api::{
-    CreateWebhookRequest, DeliveryListItemWebhookDeliveryId, UpdateWebhookRequest, WebhookResponse,
+    CreateWebhookRequest, DeliveryListItem, UpdateWebhookRequest, WebhookDeliveryId,
+    WebhookResponse,
 };
 use connector::webhooks::WebhookResource;
 
@@ -149,7 +150,7 @@ fn print_webhook_line(out: Output, webhook: &WebhookResponse) {
                 .as_deref()
                 .map(|error| format!(": {error}"))
                 .unwrap_or_default();
-            format!("{result}{status} at {}{error}", last.delivered_at)
+            format!("{result}{status} at {:?}{error}", last.delivered_at)
         }
     };
     out.human(format!(
@@ -158,7 +159,7 @@ fn print_webhook_line(out: Output, webhook: &WebhookResponse) {
     ));
 }
 
-fn print_webhook_delivery_attempt_line(out: Output, attempt: &DeliveryListItemWebhookDeliveryId) {
+fn print_webhook_delivery_attempt_line(out: Output, attempt: &DeliveryListItem<WebhookDeliveryId>) {
     let result = if attempt.success { "ok" } else { "failed" };
     let status = attempt
         .response_status
@@ -169,7 +170,7 @@ fn print_webhook_delivery_attempt_line(out: Output, attempt: &DeliveryListItemWe
         .map(|error| format!(": {error}"))
         .unwrap_or_default();
     out.human(format!(
-        "{} {} {result} {status} {}ms at {}{error}",
+        "{} {} {result} {status} {}ms at {:?}{error}",
         attempt.id, attempt.event, attempt.duration_ms, attempt.delivered_at
     ));
 }
@@ -215,7 +216,7 @@ pub async fn run_webhook_subcommand<WebhookOwnerArgs: Args>(
                 name,
                 url,
                 events,
-                active,
+                active: active.unwrap_or(true),
             };
             match webhooks.create(&webhooks_for(&owner), body).await {
                 Ok(created) => {
@@ -340,18 +341,7 @@ pub async fn run_webhook_subcommand<WebhookOwnerArgs: Args>(
         {
             Ok(attempt) => {
                 out.ok(&attempt);
-                print_webhook_delivery_attempt_line(
-                    out,
-                    &DeliveryListItemWebhookDeliveryId {
-                        id: attempt.id,
-                        event: attempt.event,
-                        success: attempt.success,
-                        response_status: attempt.response_status,
-                        error_message: attempt.error_message,
-                        duration_ms: attempt.duration_ms,
-                        delivered_at: attempt.delivered_at,
-                    },
-                );
+                print_webhook_delivery_attempt_line(out, &attempt.item);
                 out.human("");
                 out.human(attempt.request_body);
                 if let Some(response) = attempt.response_body {

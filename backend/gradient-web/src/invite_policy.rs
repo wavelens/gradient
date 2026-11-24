@@ -5,17 +5,9 @@
  */
 
 use chrono::{Duration, NaiveDateTime};
+pub use gradient_api_types::{InviteItem, InviteKind};
 use gradient_types::consts::INVITATION_VALIDITY_DAYS;
 use gradient_types::ids::UserId;
-use serde::Serialize;
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, utoipa::ToSchema)]
-#[serde(rename_all = "lowercase")]
-pub enum InviteKind {
-    Project,
-    Cache,
-    Team,
-}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum InviteDecision {
@@ -45,20 +37,6 @@ pub fn evaluate_invite(
 
 pub fn invitation_expiry(now: NaiveDateTime) -> NaiveDateTime {
     now + Duration::days(INVITATION_VALIDITY_DAYS)
-}
-
-#[derive(Clone, Debug, Serialize, utoipa::ToSchema)]
-pub struct InviteItem {
-    pub kind: InviteKind,
-    pub token: String,
-    pub scope: String,
-    pub scope_display_name: String,
-    /// The role name for project and cache invitations. For team invitations this is the team role value, `admin` or `member`.
-    pub role: String,
-    pub invited_by: String,
-    pub invited_by_display_name: Option<String>,
-    pub created_at: NaiveDateTime,
-    pub expires_at: NaiveDateTime,
 }
 
 pub fn merge_invites(mut all: Vec<InviteItem>) -> Vec<InviteItem> {

@@ -33,3 +33,16 @@ pub enum Relation {
 }
 
 impl ActiveModelBehavior for ActiveModel {}
+
+impl From<Model> for gradient_api_types::FlakeInputOverrideOut {
+    fn from(m: Model) -> Self {
+        Self {
+            id: m.id,
+            task: m.task,
+            input_name: m.input_name,
+            url: m.url,
+            created_at: m.created_at,
+            updated_at: m.updated_at,
+        }
+    }
+}

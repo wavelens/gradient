@@ -205,7 +205,11 @@ pub fn print_git_host_connection_line(out: Output, connection: &GitHostConnectio
     ));
 }
 
-fn print_git_host_connection_fields(out: Output, connection: &GitHostConnectionResponse) {
+fn print_git_host_connection_fields(
+    out: Output,
+    git_host_connection_response: &GitHostConnectionResponse,
+) {
+    let connection = &git_host_connection_response.connection;
     let yes_no = |set: bool| if set { "yes" } else { "no" };
     out.human(format!(
         "{} ({}): {}",
@@ -222,10 +226,10 @@ fn print_git_host_connection_fields(out: Output, connection: &GitHostConnectionR
     if let Some(url) = &connection.webhook_url {
         out.human(format!("Webhook URL: {url}"));
     }
-    if !connection.allowed_ips.is_empty() {
+    if !git_host_connection_response.allowed_ips.is_empty() {
         out.human(format!(
             "Allowed IP addresses: {}",
-            connection.allowed_ips.join(", ")
+            git_host_connection_response.allowed_ips.join(", ")
         ));
     }
     out.human(format!(
@@ -238,17 +242,17 @@ fn print_git_host_connection_fields(out: Output, connection: &GitHostConnectionR
     ));
     out.human(format!(
         "Webhook secret configured: {}",
-        yes_no(connection.has_secret)
+        yes_no(git_host_connection_response.has_secret)
     ));
     out.human(format!(
         "Access token setting: {}",
-        yes_no(connection.has_access_token)
+        yes_no(git_host_connection_response.has_access_token)
     ));
     if let Some(account) = &connection.account_login {
         out.human(format!("Account: {account}"));
     }
     if let Some(expires_at) = &connection.access_token_expires_at {
-        out.human(format!("Access token expires: {expires_at}"));
+        out.human(format!("Access token expires: {expires_at:?}"));
     }
     if let Some(delivery) = &connection.last_delivery {
         out.human("Last event");
@@ -256,7 +260,7 @@ fn print_git_host_connection_fields(out: Output, connection: &GitHostConnectionR
     }
     if let Some(refused_at) = &connection.last_refused_signature_at {
         out.human(format!(
-            "Refused signatures: {}, last at {refused_at}",
+            "Refused signatures: {}, last at {refused_at:?}",
             connection.refused_signature_count
         ));
     }
@@ -265,7 +269,10 @@ fn print_git_host_connection_fields(out: Output, connection: &GitHostConnectionR
             .error_message
             .as_deref()
             .map_or_else(|| "ok".to_owned(), |error| format!("failed: {error}"));
-        out.human(format!("Last status post: {} {result}", post.delivered_at));
+        out.human(format!(
+            "Last status post: {:?} {result}",
+            post.delivered_at
+        ));
     }
     out.human(format!("Tasks that use this: {}", connection.task_count));
     if connection.managed {
@@ -290,7 +297,7 @@ pub fn print_incoming_webhook_delivery_line(
         .map(|detail| format!(": {detail}"))
         .unwrap_or_default();
     out.human(format!(
-        "{} {} {} {}{repository}{detail}",
+        "{:?} {} {} {}{repository}{detail}",
         delivery.created_at, delivery.event, delivery.status_code, delivery.result
     ));
 }
@@ -415,8 +422,8 @@ pub async fn resolve_git_host_connection_available_to_project(
         return id;
     }
     let closest_owner_first = |connection: &GitHostConnectionSummary| match connection.owner {
-        GitHostConnectionOwner::Project(_) => 0,
-        GitHostConnectionOwner::Team(_) => 1,
+        GitHostConnectionOwner::Project { .. } => 0,
+        GitHostConnectionOwner::Team { .. } => 1,
         GitHostConnectionOwner::Instance => 2,
     };
     client
@@ -467,15 +474,15 @@ pub async fn run_git_host_connection_subcommand(
             settings,
         } => {
             let body = CreateGitHostConnectionRequest {
-                name: IndexName(name),
+                name: IndexName::try_from(name).unwrap_or_else(|e| out.fail(e)),
                 git_host_type: host_type,
                 allowed_ips: settings.allowed_ips(),
                 display_name: settings.display_name,
                 base_url: settings.base_url,
                 access_token: settings.access_token,
                 secret: settings.secret,
-                receives_events: settings.receives_events,
-                reports_status: settings.reports_status,
+                receives_events: settings.receives_events.unwrap_or(true),
+                reports_status: settings.reports_status.unwrap_or_default(),
                 installation_id,
             };
             let created = connections
@@ -523,7 +530,7 @@ pub async fn run_git_host_connection_subcommand(
             )
             .await;
             let body = PatchGitHostConnectionRequest {
-                name: name.map(IndexName),
+                name: name.map(|name| IndexName::try_from(name).unwrap_or_else(|e| out.fail(e))),
                 git_host_type: host_type,
                 allowed_ips: settings.allowed_ips(),
                 display_name: settings.display_name,

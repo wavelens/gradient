@@ -12,7 +12,6 @@ use crate::resource::Resource;
 use anyhow::Context;
 use axum::extract::State;
 use axum::{Extension, Json};
-use chrono::NaiveDateTime;
 use gradient_core::ServerState;
 use gradient_db::WebDb;
 use gradient_entity::worker_registration::{
@@ -20,129 +19,79 @@ use gradient_entity::worker_registration::{
 };
 use gradient_pool::WorkerInfo;
 use gradient_scheduler::Scheduler;
-use gradient_scheduler::connection_failures::{ConnectionFailure, ConnectionFailures};
+use gradient_scheduler::connection_failures::ConnectionFailures;
 use gradient_types::events::EventOwner;
 use gradient_types::events::audit::Action;
 use gradient_types::frontend_page_urls;
 use gradient_types::ids::*;
 use gradient_types::permissions::Permission;
 use gradient_types::{BaseResponse, MTeam, MTeamWorker};
-use gradient_wire::types::GradientCapabilities;
 use sea_orm::ActiveValue::Set;
-use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
 use super::refusal::ProjectRefusal;
 use crate::endpoints::worker_setup::WorkerRegistrationResponse;
+use crate::endpoints::worker_setup::make_new_worker_registration_response_with_nixos_config;
 use crate::error::{WebError, WebResult};
 use crate::helpers::{OptionExt, ok_json};
 use crate::password_hashing_and_wrong_sign_in_attempts::compute_argon2_hash_for_new_password_on_blocking_pool_with_limited_semaphore_permit;
 use crate::refusal::SharedRefusal;
 use crate::scope::{Member, ProjectScope, Requires, can};
+pub use gradient_api_types::{
+    PatchWorkerRequest, ProjectWorkerEntry, RegisterWorkerRequest, WorkerConnection,
+    WorkerConnectionEntry, WorkerLiveInfo, WorkerMetricsResponse, WorkerSamplePoint,
+    WorkerTestResponse,
+};
 
-fn default_true() -> bool {
-    true
-}
-
-#[derive(Deserialize, utoipa::ToSchema)]
-pub struct RegisterWorkerRequest {
-    pub url: Option<String>,
-    pub display_name: String,
-    #[serde(default = "default_true")]
-    pub enable_network: bool,
-    #[serde(default = "default_true")]
-    pub enable_secrets: bool,
-    #[serde(default)]
-    pub enable_exec: bool,
-    #[serde(default = "default_true")]
-    pub enable_eval: bool,
-    #[serde(default = "default_true")]
-    pub enable_build: bool,
-}
-
-#[derive(Serialize, utoipa::ToSchema)]
-pub struct ProjectWorkerEntry {
-    pub worker_id: String,
-    pub display_name: String,
-    pub registered_at: NaiveDateTime,
-    pub active: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub url: Option<String>,
-    pub created_by: Option<UserId>,
-    pub enable_network: bool,
-    pub enable_secrets: bool,
-    pub enable_exec: bool,
-    pub enable_eval: bool,
-    pub enable_build: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub team: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub team_display_name: Option<String>,
-    pub gradient_ci: bool,
-    #[serde(flatten)]
-    pub connection: WorkerConnection,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub live: Option<WorkerLiveInfo>,
-}
-
-impl ProjectWorkerEntry {
-    fn of_registration(
-        registration: MWorkerRegistration,
-        connection: WorkerConnection,
-        live: Option<WorkerLiveInfo>,
-    ) -> Self {
-        Self {
-            worker_id: registration.worker_id,
-            display_name: registration.display_name,
-            registered_at: registration.created_at,
-            active: registration.active,
-            url: registration.url,
-            created_by: registration.created_by,
-            enable_network: registration.enable_network,
-            enable_secrets: registration.enable_secrets,
-            enable_exec: registration.enable_exec,
-            enable_eval: registration.enable_eval,
-            enable_build: registration.enable_build,
-            team: None,
-            team_display_name: None,
-            gradient_ci: registration.gradient_ci,
-            connection,
-            live,
-        }
-    }
-
-    fn of_team_worker(
-        team: MTeam,
-        worker: MTeamWorker,
-        connection: WorkerConnection,
-        live: Option<WorkerLiveInfo>,
-    ) -> Self {
-        Self {
-            worker_id: worker.worker_id,
-            display_name: worker.display_name,
-            registered_at: worker.created_at,
-            active: worker.active,
-            url: worker.url,
-            created_by: worker.created_by,
-            enable_network: worker.enable_network,
-            enable_secrets: worker.enable_secrets,
-            enable_exec: worker.enable_exec,
-            enable_eval: worker.enable_eval,
-            enable_build: worker.enable_build,
-            team: Some(team.name),
-            team_display_name: Some(team.display_name),
-            gradient_ci: worker.gradient_ci,
-            connection,
-            live,
-        }
+fn project_worker_entry_from_team_worker_row_connection_state_and_live_status(
+    team: MTeam,
+    worker: MTeamWorker,
+    connection: WorkerConnection,
+    live: Option<WorkerLiveInfo>,
+) -> ProjectWorkerEntry {
+    ProjectWorkerEntry {
+        worker_id: worker.worker_id,
+        display_name: worker.display_name,
+        registered_at: worker.created_at,
+        active: worker.active,
+        url: worker.url,
+        created_by: worker.created_by,
+        enable_network: worker.enable_network,
+        enable_secrets: worker.enable_secrets,
+        enable_exec: worker.enable_exec,
+        enable_eval: worker.enable_eval,
+        enable_build: worker.enable_build,
+        team: Some(team.name),
+        team_display_name: Some(team.display_name),
+        gradient_ci: worker.gradient_ci,
+        connection,
+        live,
     }
 }
 
-#[derive(Serialize, utoipa::ToSchema)]
-pub struct WorkerConnection {
-    pub connected: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub last_error: Option<ConnectionFailure>,
+fn build_project_worker_entry_from_registration_row_connection_state_and_live_worker_process_details(
+    registration: MWorkerRegistration,
+    connection: WorkerConnection,
+    live: Option<WorkerLiveInfo>,
+) -> ProjectWorkerEntry {
+    ProjectWorkerEntry {
+        worker_id: registration.worker_id,
+        display_name: registration.display_name,
+        registered_at: registration.created_at,
+        active: registration.active,
+        url: registration.url,
+        created_by: registration.created_by,
+        enable_network: registration.enable_network,
+        enable_secrets: registration.enable_secrets,
+        enable_exec: registration.enable_exec,
+        enable_eval: registration.enable_eval,
+        enable_build: registration.enable_build,
+        team: None,
+        team_display_name: None,
+        gradient_ci: registration.gradient_ci,
+        connection,
+        live,
+    }
 }
 
 pub(crate) fn worker_connection(
@@ -154,18 +103,6 @@ pub(crate) fn worker_connection(
         connected: live.contains_key(worker_id),
         last_error: failures.and_then(|f| f.last(worker_id)),
     }
-}
-
-#[derive(Deserialize, utoipa::ToSchema)]
-pub struct PatchWorkerRequest {
-    pub active: Option<bool>,
-    pub display_name: Option<String>,
-    pub enable_network: Option<bool>,
-    pub enable_secrets: Option<bool>,
-    pub enable_exec: Option<bool>,
-    pub enable_eval: Option<bool>,
-    pub enable_build: Option<bool>,
-    pub draining: Option<bool>,
 }
 
 pub(crate) fn patch_changes_capabilities(body: &PatchWorkerRequest) -> bool {
@@ -182,32 +119,6 @@ pub(crate) fn patch_changes_capabilities(body: &PatchWorkerRequest) -> bool {
 
 pub(crate) fn patch_edits_managed_fields(body: &PatchWorkerRequest) -> bool {
     body.display_name.is_some() || patch_changes_capabilities(body)
-}
-
-#[derive(Serialize, utoipa::ToSchema)]
-pub struct WorkerLiveInfo {
-    pub capabilities: GradientCapabilities,
-    pub architectures: Vec<String>,
-    pub system_features: Vec<String>,
-    pub max_concurrent_builds: u32,
-    pub assigned_job_count: usize,
-    pub draining: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub ram_total_mb: Option<u64>,
-}
-
-impl From<&WorkerInfo> for WorkerLiveInfo {
-    fn from(w: &WorkerInfo) -> Self {
-        Self {
-            capabilities: w.capabilities.clone(),
-            architectures: w.architectures.clone(),
-            system_features: w.system_features.clone(),
-            max_concurrent_builds: w.max_concurrent_builds,
-            assigned_job_count: w.assigned_job_count,
-            draining: w.draining,
-            ram_total_mb: (w.ram_total_mb > 0).then_some(w.ram_total_mb),
-        }
-    }
 }
 
 pub(crate) fn encrypt_token(crypt_file: &str, token: &str) -> WebResult<String> {
@@ -268,7 +179,7 @@ pub async fn post_project_worker(
     }
 
     let token = crate::endpoints::worker_tokens::issue();
-    let registration = WorkerRegistrationResponse::new(
+    let registration = make_new_worker_registration_response_with_nixos_config(
         &state.config.server.serve_url,
         &body,
         frontend_page_urls::project_workers_page_url(
@@ -394,7 +305,7 @@ pub async fn get_project_workers(
         .map(|reg| {
             let live = live_for(&reg.worker_id);
             let connection = worker_connection(&live_workers, failures, &reg.worker_id);
-            ProjectWorkerEntry::of_registration(reg, connection, live)
+            build_project_worker_entry_from_registration_row_connection_state_and_live_worker_process_details(reg, connection, live)
         })
         .collect();
 
@@ -403,65 +314,12 @@ pub async fn get_project_workers(
     entries.extend(team_workers.into_iter().map(|(team, worker)| {
         let live = live_for(&worker.worker_id);
         let connection = worker_connection(&live_workers, failures, &worker.worker_id);
-        ProjectWorkerEntry::of_team_worker(team, worker, connection, live)
+        project_worker_entry_from_team_worker_row_connection_state_and_live_status(
+            team, worker, connection, live,
+        )
     }));
 
     Ok(ok_json(entries))
-}
-
-#[derive(Serialize, utoipa::ToSchema)]
-pub struct WorkerSamplePoint {
-    pub at: NaiveDateTime,
-    pub cpu_usage_pct: Option<f32>,
-    pub ram_free_mb: Option<i64>,
-    pub ram_total_mb: Option<i64>,
-    pub disk_speed_mbps: Option<f32>,
-    pub upload_speed_mbps: Option<f32>,
-    pub download_speed_mbps: Option<f32>,
-    pub assigned_jobs: i32,
-    pub max_concurrent_builds: i32,
-    pub state: i16,
-}
-
-impl From<gradient_entity::worker_sample::Model> for WorkerSamplePoint {
-    fn from(sample: gradient_entity::worker_sample::Model) -> Self {
-        Self {
-            at: sample.at,
-            cpu_usage_pct: sample.cpu_usage_pct,
-            ram_free_mb: sample.ram_free_mb,
-            ram_total_mb: sample.ram_total_mb,
-            disk_speed_mbps: sample.disk_speed_mbps,
-            upload_speed_mbps: sample.upload_speed_mbps,
-            download_speed_mbps: sample.download_speed_mbps,
-            assigned_jobs: sample.assigned_jobs,
-            max_concurrent_builds: sample.max_concurrent_builds,
-            state: i16::from(sample.state),
-        }
-    }
-}
-
-#[derive(Serialize, utoipa::ToSchema)]
-pub struct WorkerConnectionEntry {
-    pub connected_at: NaiveDateTime,
-    pub disconnected_at: Option<NaiveDateTime>,
-}
-
-impl From<gradient_entity::worker_connection::Model> for WorkerConnectionEntry {
-    fn from(connection: gradient_entity::worker_connection::Model) -> Self {
-        Self {
-            connected_at: connection.connected_at,
-            disconnected_at: connection.disconnected_at,
-        }
-    }
-}
-
-#[derive(Serialize, utoipa::ToSchema)]
-pub struct WorkerMetricsResponse {
-    pub worker_id: String,
-    pub display_name: String,
-    pub samples: Vec<WorkerSamplePoint>,
-    pub connections: Vec<WorkerConnectionEntry>,
-    pub jobs_dispatched: u64,
 }
 
 #[utoipa::path(
@@ -532,14 +390,6 @@ pub async fn get_project_worker_metrics(
         connections,
         jobs_dispatched,
     }))
-}
-
-#[derive(Debug, Serialize, utoipa::ToSchema)]
-pub struct WorkerTestResponse {
-    pub ok: bool,
-    pub connected: bool,
-    pub authorized_for_project: bool,
-    pub message: String,
 }
 
 fn worker_test_result(connected: bool, authorized_for_project: bool) -> (bool, String) {
@@ -746,6 +596,7 @@ mod tests {
     use super::*;
     use gradient_pool::ProjectAccess;
     use gradient_scheduler::connection_failures::ConnectionDirection;
+    use gradient_wire::types::GradientCapabilities;
     use std::collections::HashSet;
 
     fn worker(authorized: Option<Vec<ProjectId>>) -> WorkerInfo {

@@ -8,67 +8,7 @@ use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
 
 use crate::ids::{TeamId, TeamUserId, UserId};
-
-#[derive(
-    Clone,
-    Copy,
-    Debug,
-    Default,
-    PartialEq,
-    Eq,
-    EnumIter,
-    DeriveActiveEnum,
-    Deserialize,
-    Serialize,
-    utoipa::ToSchema,
-)]
-#[sea_orm(rs_type = "i16", db_type = "SmallInteger")]
-#[serde(rename_all = "lowercase")]
-pub enum TeamRole {
-    #[sea_orm(num_value = 0)]
-    Admin,
-    #[default]
-    #[sea_orm(num_value = 1)]
-    Member,
-}
-
-impl TeamRole {
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::Admin => "admin",
-            Self::Member => "member",
-        }
-    }
-}
-
-#[derive(
-    Clone,
-    Copy,
-    Debug,
-    Default,
-    PartialEq,
-    Eq,
-    EnumIter,
-    DeriveActiveEnum,
-    Deserialize,
-    Serialize,
-    utoipa::ToSchema,
-)]
-#[sea_orm(rs_type = "i16", db_type = "SmallInteger")]
-#[serde(rename_all = "lowercase")]
-pub enum TeamMemberSource {
-    #[default]
-    #[sea_orm(num_value = 0)]
-    Api,
-    #[sea_orm(num_value = 1)]
-    State,
-    #[sea_orm(num_value = 2)]
-    #[serde(rename = "group")]
-    ScimGroup,
-    #[sea_orm(num_value = 3)]
-    #[serde(rename = "sign_in_group")]
-    SignInGroupSync,
-}
+pub use gradient_api_types::{TeamMemberSource, TeamRole};
 
 #[derive(Clone, Debug, Default, PartialEq, DeriveEntityModel, Deserialize, Serialize)]
 #[sea_orm(table_name = "team_user")]

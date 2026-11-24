@@ -30,9 +30,7 @@ pub mod workers;
 mod http;
 pub use http::{DownloadedBinaryFile, LiveUpdateEvent};
 
-pub mod api {
-    include!(concat!(env!("OUT_DIR"), "/api.rs"));
-}
+pub use gradient_api_types as api;
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -158,12 +156,7 @@ impl Client {
     pub(crate) async fn fetch_all_pages_and_total_count<T: serde::de::DeserializeOwned>(
         &self,
         endpoint: &str,
-    ) -> Result<(Vec<T>, i64), ConnectorError> {
-        #[derive(serde::Deserialize)]
-        struct Page<T> {
-            items: Vec<T>,
-            total: i64,
-        }
+    ) -> Result<(Vec<T>, u64), ConnectorError> {
         const PER_PAGE: u32 = 100;
 
         let mut items = Vec::new();
@@ -178,10 +171,10 @@ impl Client {
                 true,
             )?
             .query(&[("page", page), ("per_page", PER_PAGE)]);
-            let batch: Page<T> = http::decode(req.send().await?).await?;
+            let batch: api::Paginated<T> = http::decode(req.send().await?).await?;
             let received = batch.items.len();
             items.extend(batch.items);
-            if received == 0 || i64::try_from(items.len()).unwrap_or(i64::MAX) >= batch.total {
+            if received == 0 || u64::try_from(items.len()).unwrap_or(u64::MAX) >= batch.total {
                 return Ok((items, batch.total));
             }
             page += 1;

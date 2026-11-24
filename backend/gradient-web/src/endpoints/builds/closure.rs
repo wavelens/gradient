@@ -16,90 +16,50 @@ use axum::{Extension, Json};
 use gradient_core::ServerState;
 use gradient_db::store_path_content_variant_reader_choice::StorePathContentVariantReader;
 use gradient_types::*;
-use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
 
 use super::BuildAccessContext;
+pub use gradient_api_types::{ClosureEdge, ClosureGraph, ClosureNode};
 
 const CLOSURE_NODE_CAP: usize = 1000;
 
-#[derive(Serialize, Deserialize, Debug, PartialEq, utoipa::ToSchema)]
-pub struct ClosureNode {
-    pub id: String,
-    pub name: String,
-    pub path: String,
-    pub nar_size: Option<i64>,
-}
-
-impl ClosureNode {
-    fn of_derivation(derivation: MDerivation, nar_size: Option<i64>) -> Self {
-        Self {
-            id: derivation.id.to_string(),
-            path: derivation.drv_path(),
-            name: derivation.name,
-            nar_size,
-        }
+fn closure_node_from_derivation_row_and_nar_size(
+    derivation: MDerivation,
+    nar_size: Option<i64>,
+) -> ClosureNode {
+    ClosureNode {
+        id: derivation.id.to_string(),
+        path: derivation.drv_path(),
+        name: derivation.name,
+        nar_size,
     }
 }
 
-impl From<&MCachedPath> for ClosureNode {
-    fn from(path: &MCachedPath) -> Self {
-        Self {
-            id: path.hash.clone(),
-            name: path.package.clone(),
-            path: path.as_store_path().base(),
-            nar_size: Some(path.nar_size),
-        }
+fn replace_store_path_hashes_with_original_hashes(
+    mut graph: ClosureGraph,
+    mapper: &StorePathMapper,
+) -> ClosureGraph {
+    let original = |hash: &mut String| *hash = original_text(mapper, std::mem::take(hash));
+    graph.roots.iter_mut().for_each(original);
+    for node in &mut graph.nodes {
+        original(&mut node.id);
     }
+    for edge in &mut graph.edges {
+        original(&mut edge.source);
+        original(&mut edge.target);
+    }
+    rewrite_closure_graph_store_paths_to_original(graph, mapper)
 }
 
-#[derive(Serialize, Deserialize, Debug, PartialEq, utoipa::ToSchema)]
-pub struct ClosureEdge {
-    pub source: String,
-    pub target: String,
-}
-
-impl From<MDerivationDependency> for ClosureEdge {
-    fn from(edge: MDerivationDependency) -> Self {
-        Self {
-            source: edge.dependency.to_string(),
-            target: edge.derivation.to_string(),
-        }
+fn rewrite_closure_graph_store_paths_to_original(
+    mut graph: ClosureGraph,
+    mapper: &StorePathMapper,
+) -> ClosureGraph {
+    for node in &mut graph.nodes {
+        node.path = original_text(mapper, std::mem::take(&mut node.path));
     }
-}
-
-#[derive(Serialize, Deserialize, Debug, PartialEq, utoipa::ToSchema)]
-pub struct ClosureGraph {
-    pub roots: Vec<String>,
-    pub total_size_bytes: Option<i64>,
-    pub node_count: usize,
-    pub edge_count: usize,
-    pub truncated: bool,
-    pub nodes: Vec<ClosureNode>,
-    pub edges: Vec<ClosureEdge>,
-}
-
-impl ClosureGraph {
-    fn with_original_paths(mut self, mapper: &StorePathMapper) -> Self {
-        for node in &mut self.nodes {
-            node.path = original_text(mapper, std::mem::take(&mut node.path));
-        }
-        self
-    }
-
-    fn with_original_hashes(mut self, mapper: &StorePathMapper) -> Self {
-        let original = |hash: &mut String| *hash = original_text(mapper, std::mem::take(hash));
-        self.roots.iter_mut().for_each(original);
-        for node in &mut self.nodes {
-            original(&mut node.id);
-        }
-        for edge in &mut self.edges {
-            original(&mut edge.source);
-            original(&mut edge.target);
-        }
-        self.with_original_paths(mapper)
-    }
+    graph
 }
 
 pub async fn derivation_closure_reachable<C>(
@@ -145,7 +105,7 @@ where
         .into_iter()
         .map(|d| {
             let nar_size = size_by_drv.get(&d.id).copied();
-            ClosureNode::of_derivation(d, nar_size)
+            closure_node_from_derivation_row_and_nar_size(d, nar_size)
         })
         .collect();
 
@@ -298,7 +258,9 @@ pub async fn get_build_closure(
         vec![ctx.build_job.derivation],
     )
     .await?;
-    Ok(ok_json(graph.with_original_paths(&mapper)))
+    Ok(ok_json(rewrite_closure_graph_store_paths_to_original(
+        graph, &mapper,
+    )))
 }
 
 #[utoipa::path(
@@ -340,7 +302,9 @@ pub async fn get_eval_closure(
         roots,
     )
     .await?;
-    Ok(ok_json(graph.with_original_paths(&mapper)))
+    Ok(ok_json(rewrite_closure_graph_store_paths_to_original(
+        graph, &mapper,
+    )))
 }
 
 pub async fn build_runtime_closure_graph<C>(
@@ -422,7 +386,9 @@ pub async fn get_build_runtime_closure(
         seeds,
     )
     .await?;
-    Ok(ok_json(graph.with_original_hashes(&mapper)))
+    Ok(ok_json(replace_store_path_hashes_with_original_hashes(
+        graph, &mapper,
+    )))
 }
 
 #[utoipa::path(
@@ -466,7 +432,9 @@ pub async fn get_eval_runtime_closure(
         seeds,
     )
     .await?;
-    Ok(ok_json(graph.with_original_hashes(&mapper)))
+    Ok(ok_json(replace_store_path_hashes_with_original_hashes(
+        graph, &mapper,
+    )))
 }
 
 #[cfg(test)]

@@ -9,6 +9,7 @@ use std::time::Instant;
 
 use crate::count::clamp_to_u32;
 use sysinfo::{CpuRefreshKind, MemoryRefreshKind, RefreshKind, System};
+use tracing::warn;
 
 const BYTES_PER_MB: u64 = 1024 * 1024;
 
@@ -17,15 +18,22 @@ pub struct HostStatic {
     pub ram_total_mb: u64,
 }
 
+fn read_host(refreshes: RefreshKind) -> Option<System> {
+    System::new_with_specifics(refreshes)
+        .inspect_err(|error| warn!(%error, "Can't read CPU and memory of the host"))
+        .ok()
+}
+
 pub fn host_static() -> HostStatic {
-    let sys = System::new_with_specifics(
+    let sys = read_host(
         RefreshKind::nothing()
             .with_cpu(CpuRefreshKind::nothing())
             .with_memory(MemoryRefreshKind::nothing().with_ram()),
     );
+    let (cpus, total_memory) = sys.map_or((0, 0), |sys| (sys.cpus().len(), sys.total_memory()));
     HostStatic {
-        cpu_count: clamp_to_u32(sys.cpus().len().max(1)),
-        ram_total_mb: (sys.total_memory() / BYTES_PER_MB).max(1),
+        cpu_count: clamp_to_u32(cpus.max(1)),
+        ram_total_mb: (total_memory / BYTES_PER_MB).max(1),
     }
 }
 
@@ -36,20 +44,20 @@ pub struct HostDynamic {
 
 /// CPU usage needs two samples spaced by at least [`sysinfo::MINIMUM_CPU_UPDATE_INTERVAL`].
 /// This function is blocking for one short sleep to return a meaningful percentage.
-pub fn host_dynamic() -> HostDynamic {
-    let mut sys = System::new_with_specifics(
+pub fn host_dynamic() -> Option<HostDynamic> {
+    let mut sys = read_host(
         RefreshKind::nothing()
-            .with_cpu(CpuRefreshKind::nothing().with_cpu_usage())
+            .with_cpu(CpuRefreshKind::nothing().with_usage())
             .with_memory(MemoryRefreshKind::nothing().with_ram()),
-    );
+    )?;
     sys.refresh_cpu_all();
     std::thread::sleep(sysinfo::MINIMUM_CPU_UPDATE_INTERVAL);
     sys.refresh_cpu_all();
     sys.refresh_memory();
-    HostDynamic {
+    Some(HostDynamic {
         ram_free_mb: sys.available_memory() / BYTES_PER_MB,
         cpu_usage_pct: sys.global_cpu_usage(),
-    }
+    })
 }
 
 const BENCH_ITERATIONS: u64 = 5_000_000;

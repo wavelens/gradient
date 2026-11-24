@@ -18,6 +18,7 @@ use anyhow::Context;
 use axum::Extension;
 use axum::Json;
 use axum::extract::State;
+pub use gradient_api_types::{DispatchRequest, DispatchResponse, InputOverrideBody};
 use gradient_core::ServerState;
 use gradient_db::DbContext;
 use gradient_db::caches::capacity::project_caches_all_full;
@@ -30,7 +31,7 @@ use gradient_storage::NarStore;
 use gradient_storage::source_nar::{SourceNar, materialise_source_nar};
 use gradient_types::RuntimeConfig;
 use gradient_types::ids::{
-    CommitId, EvaluationFlakeInputOverrideId, EvaluationId, TaskId, UploadSessionId,
+    CommitId, EvaluationFlakeInputOverrideId, EvaluationId, UploadSessionId,
 };
 use gradient_types::input::{check_flake_input_override, check_manifest_path, decode_blake3_hex};
 use gradient_types::{
@@ -39,36 +40,9 @@ use gradient_types::{
     StorePathMapper, now,
 };
 use sea_orm::{ConnectionTrait, TransactionTrait};
-use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tempfile::TempDir;
 use tokio::fs;
-
-#[derive(Serialize, Deserialize, Debug, Clone, utoipa::ToSchema)]
-pub struct InputOverrideBody {
-    pub input_name: String,
-    pub url: String,
-}
-
-#[derive(Serialize, Deserialize, Debug, Default, utoipa::ToSchema)]
-pub struct DispatchRequest {
-    #[serde(default)]
-    pub target: Option<String>,
-    #[serde(default)]
-    pub system: Option<String>,
-    #[serde(default)]
-    pub input_overrides: Vec<InputOverrideBody>,
-    #[serde(default)]
-    pub run: Option<RunOptions>,
-}
-
-#[derive(Serialize, Deserialize, Debug, utoipa::ToSchema)]
-pub struct DispatchResponse {
-    pub evaluation: EvaluationId,
-    pub task: TaskId,
-    pub commit: CommitId,
-    pub cache: Option<String>,
-}
 
 #[utoipa::path(
     post,

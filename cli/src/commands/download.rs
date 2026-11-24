@@ -330,7 +330,7 @@ mod tests {
     fn make_tree() -> ArtefactTree {
         ArtefactTree {
             evaluation: EVALUATION.parse().unwrap(),
-            created_at: "2026-01-01T00:00:00Z".into(),
+            created_at: "2026-01-01T00:00:00".parse().unwrap(),
             entry_points: vec![
                 EntryPointArtefacts {
                     attr: "packages.x86_64-linux.my-app".into(),
@@ -341,7 +341,7 @@ mod tests {
                         store_path: "/nix/store/a".into(),
                         products: vec![ProductArtefact {
                             id: PRODUCT_A.parse().unwrap(),
-                            type_: "file".into(),
+                            file_type: "file".into(),
                             subtype: "".into(),
                             name: "default".into(),
                             path: "/p/my-app-1.0.tar.gz".into(),
@@ -358,7 +358,7 @@ mod tests {
                         store_path: "/nix/store/b".into(),
                         products: vec![ProductArtefact {
                             id: PRODUCT_B.parse().unwrap(),
-                            type_: "file".into(),
+                            file_type: "file".into(),
                             subtype: "".into(),
                             name: "default".into(),
                             path: "/p/cli-2.tgz".into(),

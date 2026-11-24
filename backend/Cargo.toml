@@ -2,8 +2,8 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 
 [workspace]
-members      = [".", "gradient-cache", "gradient-ci", "gradient-core", "gradient-daemon", "gradient-db", "gradient-derivation", "gradient-derive", "gradient-effects", "gradient-entity", "gradient-fixtures", "gradient-eval", "gradient-git-host", "gradient-graph", "gradient-guest-agent", "gradient-migration", "gradient-notify", "gradient-pool", "gradient-proto", "gradient-redact", "gradient-report", "gradient-scheduler", "gradient-secret", "gradient-sops", "gradient-sources", "gradient-ssh", "gradient-state", "gradient-storage", "gradient-test-support", "gradient-types", "gradient-util", "gradient-vm", "gradient-web", "gradient-wildcard", "gradient-wire", "gradient-worker", "gradient-worker-client"]
-default-members = [".", "gradient-cache", "gradient-ci", "gradient-core", "gradient-daemon", "gradient-db", "gradient-derivation", "gradient-derive", "gradient-effects", "gradient-entity", "gradient-fixtures", "gradient-eval", "gradient-git-host", "gradient-graph", "gradient-guest-agent", "gradient-migration", "gradient-notify", "gradient-pool", "gradient-proto", "gradient-redact", "gradient-report", "gradient-scheduler", "gradient-secret", "gradient-sops", "gradient-sources", "gradient-ssh", "gradient-state", "gradient-storage", "gradient-test-support", "gradient-types", "gradient-util", "gradient-vm", "gradient-web", "gradient-wildcard", "gradient-wire", "gradient-worker", "gradient-worker-client"]
+members      = [".", "gradient-api-types", "gradient-cache", "gradient-ci", "gradient-core", "gradient-daemon", "gradient-db", "gradient-derivation", "gradient-derive", "gradient-effects", "gradient-entity", "gradient-fixtures", "gradient-eval", "gradient-git-host", "gradient-graph", "gradient-guest-agent", "gradient-migration", "gradient-notify", "gradient-pool", "gradient-proto", "gradient-redact", "gradient-report", "gradient-scheduler", "gradient-secret", "gradient-sops", "gradient-sources", "gradient-ssh", "gradient-state", "gradient-storage", "gradient-test-support", "gradient-types", "gradient-util", "gradient-vm", "gradient-web", "gradient-wildcard", "gradient-wire", "gradient-worker", "gradient-worker-client"]
+default-members = [".", "gradient-api-types", "gradient-cache", "gradient-ci", "gradient-core", "gradient-daemon", "gradient-db", "gradient-derivation", "gradient-derive", "gradient-effects", "gradient-entity", "gradient-fixtures", "gradient-eval", "gradient-git-host", "gradient-graph", "gradient-guest-agent", "gradient-migration", "gradient-notify", "gradient-pool", "gradient-proto", "gradient-redact", "gradient-report", "gradient-scheduler", "gradient-secret", "gradient-sops", "gradient-sources", "gradient-ssh", "gradient-state", "gradient-storage", "gradient-test-support", "gradient-types", "gradient-util", "gradient-vm", "gradient-web", "gradient-wildcard", "gradient-wire", "gradient-worker", "gradient-worker-client"]
 resolver     = "2"
 
 [workspace.package]
@@ -35,6 +35,7 @@ gradient-daemon       = { path = "gradient-daemon" }
 gradient-db           = { path = "gradient-db" }
 gradient-derivation   = { path = "gradient-derivation" }
 gradient-effects      = { path = "gradient-effects" }
+gradient-api-types    = { path = "gradient-api-types", features = ["server-only-sea-orm-and-trait-derives"] }
 gradient-entity       = { path = "gradient-entity" }
 gradient-fixtures     = { path = "gradient-fixtures" }
 gradient-git-host     = { path = "gradient-git-host" }
@@ -73,7 +74,7 @@ tokio-test   = { version = "0.4", default-features = false }
 tokio-tungstenite = { version = "0.30", default-features = false, features = ["connect", "handshake", "rustls-tls-native-roots"] }
 tokio-util   = { version = "0.7", default-features = false }
 tokio-vsock  = { version = "0.7", default-features = false }
-zbus         = { version = "5", default-features = false, features = ["tokio"] }
+zbus         = { version = "6", default-features = false, features = ["proxy", "tokio"] }
 
 # Procedural macros
 proc-macro2 = { version = "1", default-features = false, features = ["proc-macro"] }
@@ -85,7 +86,7 @@ anyhow    = { version = "1.0", default-features = false, features = ["std"] }
 thiserror = { version = "2.0", default-features = false }
 
 # System / host metrics
-sysinfo = { version = "0.39", default-features = false, features = ["system"] }
+sysinfo = { version = "0.40", default-features = false, features = ["system"] }
 
 # Time / random / ids
 chrono = { version = "0.4", default-features = false, features = ["clock", "serde", "std"] }
@@ -110,11 +111,11 @@ hmac            = { version = "0.13", default-features = false }
 percent-encoding = { version = "2.3", default-features = false, features = ["std"] }
 rand_core       = { version = "0.10", default-features = false }
 sha2            = { version = "0.11", default-features = false }
-ssh-key         = { version = "0.6", default-features = false, features = ["ecdsa", "ed25519", "rand_core", "std"] }
+ssh-key         = { version = "0.7.0-rc.12", default-features = false, features = ["ecdsa", "ed25519", "rand_core", "std"] }
 aes-gcm         = { version = "0.11", default-features = false, features = ["aes", "alloc"] }
 age             = { version = "0.11", default-features = false, features = ["armor", "ssh"] }
-bech32          = { version = "0.9", default-features = false, features = ["std"] }
-curve25519-dalek = { version = "4", default-features = false }
+bech32          = { version = "0.12", default-features = false, features = ["std"] }
+curve25519-dalek = { version = "5", default-features = false }
 yaml_serde      = { version = "0.10", default-features = false }
 zeroize         = { version = "1", default-features = false, features = ["alloc"] }
 
@@ -151,7 +152,7 @@ sqlx-core         = { version = "0.9", default-features = false, features = ["ru
 # HTTP / networking
 axum                 = { version = "0.8", default-features = false }
 axum-streams         = { version = "0.30", default-features = false, features = ["json"] }
-axum_typed_multipart = { version = "0.16", default-features = false, features = ["tempfile_3"] }
+axum_typed_multipart = { version = "0.17", default-features = false, features = ["tempfile_3"] }
 badgelib             = { version = "0.5.0", default-features = false }
 email_address        = { version = "0.2", default-features = false }
 governor             = { version = "0.10", default-features = false, features = ["std"] }
@@ -160,7 +161,7 @@ http-body            = { version = "1.0", default-features = false }
 http-body-util       = { version = "0.1", default-features = false }
 hyper                = { version = "1", default-features = false, features = ["client", "http1"] }
 hyper-util           = { version = "0.1", default-features = false, features = ["tokio"] }
-jsonwebtoken         = { version = "11.0", default-features = false, features = ["aws_lc_rs"] }
+jsonwebtoken         = { version = "12", default-features = false, features = ["aws_lc_rs"] }
 lettre               = { version = "0.11", default-features = false, features = ["smtp-transport", "builder", "rustls", "rustls-native-certs", "aws-lc-rs", "tokio1-rustls"] }
 reqwest              = { version = "0.13", default-features = false, features = ["rustls", "json", "form", "stream", "charset", "http2", "multipart", "brotli", "gzip", "deflate", "zstd"] }
 tonic                = { version = "0.14", default-features = false, features = ["codegen"] }
@@ -181,7 +182,7 @@ sd-notify    = { version = "0.5", default-features = false }
 object_store = { version = "0.14", default-features = false, features = ["aws", "fs"] }
 
 # Harmonia (git deps)
-russh       = { version = "0.64", default-features = false, features = ["aws-lc-rs"] }
+russh       = { version = "0.65", default-features = false, features = ["aws-lc-rs"] }
 shell-words = { version = "1.1", default-features = false, features = ["std"] }
 socket2     = { version = "0.6", default-features = false }
 
@@ -200,11 +201,11 @@ harmonia-utils-hash            = { git = "https://github.com/DerDennisOP/harmoni
 harmonia-utils-io              = { git = "https://github.com/DerDennisOP/harmonia.git", branch = "build-resource-usage", default-features = false }
 harmonia-utils-signature       = { git = "https://github.com/DerDennisOP/harmonia.git", branch = "build-resource-usage", default-features = false }
 
-nix-bindings = { version = "0.2352", default-features = false }
+nix-bindings = { version = "0.2356", default-features = false }
 
 git-url-parse = { version = "0.6" }
 ipnet         = { version = "2.10", default-features = false, features = ["std"] }
-password-auth = { version = "1.0", default-features = false, features = ["argon2"] }
+password-auth = { version = "2", default-features = false, features = ["argon2"] }
 prometheus    = { version = "0.14", default-features = false, features = ["process"] }
 opentelemetry = { version = "0.33", default-features = false, features = ["metrics", "trace"] }
 opentelemetry_sdk = { version = "0.33", default-features = false, features = ["metrics", "trace"] }
@@ -248,7 +249,7 @@ debug = "line-tables-only"
 opt-level = 2
 
 [patch.crates-io]
-nix-bindings = { git = "https://github.com/DerDennisOP/nix-bindings", branch = "feat/nix-2.35.3" }
+nix-bindings = { git = "https://github.com/DerDennisOP/nix-bindings", branch = "feat/nix-2.36.0" }
 
 
 [package]

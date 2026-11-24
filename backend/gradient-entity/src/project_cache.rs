@@ -8,39 +8,7 @@ use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
 
 use crate::ids::{CacheId, ProjectCacheId, ProjectId};
-
-#[derive(
-    Debug,
-    Clone,
-    Default,
-    PartialEq,
-    Eq,
-    DeriveActiveEnum,
-    EnumIter,
-    Deserialize,
-    Serialize,
-    utoipa::ToSchema,
-)]
-#[sea_orm(rs_type = "i32", db_type = "Integer")]
-pub enum CacheSubscriptionMode {
-    #[default]
-    #[sea_orm(num_value = 0)]
-    ReadWrite,
-    #[sea_orm(num_value = 1)]
-    ReadOnly,
-    #[sea_orm(num_value = 2)]
-    WriteOnly,
-}
-
-impl CacheSubscriptionMode {
-    pub fn writes_build_outputs_to_cache(&self) -> bool {
-        matches!(self, Self::ReadWrite | Self::WriteOnly)
-    }
-
-    pub fn grants_no_access_beyond(&self, other: &Self) -> bool {
-        self == other || *other == Self::ReadWrite
-    }
-}
+pub use gradient_api_types::CacheSubscriptionMode;
 
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Deserialize, Serialize)]
 #[sea_orm(table_name = "project_cache")]

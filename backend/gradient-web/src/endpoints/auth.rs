@@ -14,7 +14,6 @@ use crate::authorization::{
 use crate::error::{ErrorCode, WebError, WebResult};
 use crate::extractors::{JsonBody, Query};
 use crate::helpers::{OptionExt, ok_json};
-use crate::names::UserDisplayName;
 use crate::refusal::{Refusal, RefusalStatus, SharedRefusal};
 use crate::resource::Resource;
 use anyhow::Context;
@@ -38,6 +37,10 @@ use crate::password_hashing_and_wrong_sign_in_attempts::{
     password_matches_account_hash_or_dummy_hash,
 };
 use chrono::Duration;
+pub use gradient_api_types::{
+    CheckUsernameRequest, CliDevicePollRequest, CliDeviceStartResponse, MakeLoginRequest,
+    MakeUserRequest,
+};
 use gradient_core::ServerState;
 use gradient_notify::{EmailSender, generate_token};
 use gradient_types::input::{InputError, validate_password, validate_username};
@@ -114,27 +117,6 @@ impl Refusal for AuthRefusal {
             _ => self.status().default_code(),
         }
     }
-}
-
-#[derive(Serialize, Deserialize, Debug, utoipa::ToSchema)]
-pub struct MakeLoginRequest {
-    pub loginname: String,
-    pub password: String,
-    #[serde(default)]
-    pub remember_me: bool,
-}
-
-#[derive(Serialize, Deserialize, Debug, utoipa::ToSchema)]
-pub struct MakeUserRequest {
-    pub username: String,
-    pub name: UserDisplayName,
-    pub email: String,
-    pub password: String,
-}
-
-#[derive(Serialize, Deserialize, Debug, utoipa::ToSchema)]
-pub struct CheckUsernameRequest {
-    pub username: String,
 }
 
 #[utoipa::path(
@@ -910,23 +892,6 @@ fn hash_device_code(raw: &str) -> String {
     let mut h = Sha256::new();
     h.update(raw.as_bytes());
     hex::encode(h.finalize())
-}
-
-#[derive(Serialize, Deserialize, Debug, utoipa::ToSchema)]
-pub struct CliDeviceStartResponse {
-    pub device_code: String,
-    pub user_code: String,
-    pub verification_uri: String,
-    /// Deprecated: same as `verification_uri`, with no code. The code in the link allowed an attacker to send a victim a link. One click approved the attacker's own sign-in. Browsers now always require the terminal code.
-    #[schema(deprecated)]
-    pub verification_uri_complete: String,
-    pub expires_in: i64,
-    pub interval: u64,
-}
-
-#[derive(Serialize, Deserialize, Debug, utoipa::ToSchema)]
-pub struct CliDevicePollRequest {
-    pub device_code: String,
 }
 
 #[derive(Serialize, Deserialize, Debug, utoipa::ToSchema)]

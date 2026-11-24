@@ -21,7 +21,8 @@ use clap::{Args, Subcommand};
 use clap_complete::engine::ArgValueCompleter;
 use connector::Client;
 use connector::api::{
-    DuplicateTaskRequest, EvaluationStatus, MakeTaskRequest, PatchTaskRequest, TriggerConfig,
+    ChangedFilePathFilter, DuplicateTaskRequest, EvaluationStatus, MakeTaskRequest,
+    PatchTaskRequest, TaskDisplayName, TaskName, TriggerConfig,
 };
 
 #[derive(Subcommand, Debug)]
@@ -370,7 +371,7 @@ pub struct TaskCreateTriggerFlags {
     excluded_changed_file_path_patterns: Vec<String>,
 }
 
-const DEFAULT_POLLING_INTERVAL_SECS: i32 = 300;
+const DEFAULT_POLLING_INTERVAL_SECS: u32 = 300;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CommandLineTrigger {
@@ -442,6 +443,10 @@ async fn build_optional_task_create_trigger_configs(
         triggers.push(CommandLineTrigger::Polling);
     }
 
+    let path_filter = ChangedFilePathFilter {
+        include_paths: changed_file_path_patterns,
+        exclude_paths: excluded_changed_file_path_patterns,
+    };
     let mut suggestions: Option<Vec<TriggerConfig>> = None;
     let mut configs = Vec::with_capacity(triggers.len());
     for trigger in triggers {
@@ -449,8 +454,7 @@ async fn build_optional_task_create_trigger_configs(
             CommandLineTrigger::Polling => TriggerConfig::Polling {
                 interval_secs: DEFAULT_POLLING_INTERVAL_SECS,
                 branch: branch.clone(),
-                include_paths: changed_file_path_patterns.clone(),
-                exclude_paths: excluded_changed_file_path_patterns.clone(),
+                path_filter: path_filter.clone(),
             },
             CommandLineTrigger::Cron(cron) => TriggerConfig::Time {
                 cron,
@@ -458,8 +462,7 @@ async fn build_optional_task_create_trigger_configs(
             },
             CommandLineTrigger::PostRequest => TriggerConfig::PostRequest {
                 branch: branch.clone(),
-                include_paths: changed_file_path_patterns.clone(),
-                exclude_paths: excluded_changed_file_path_patterns.clone(),
+                path_filter: path_filter.clone(),
             },
             CommandLineTrigger::Push | CommandLineTrigger::PullRequest => {
                 if suggestions.is_none() {
@@ -491,20 +494,17 @@ async fn build_optional_task_create_trigger_configs(
                     });
                 if let TriggerConfig::ReporterPush {
                     branches,
-                    include_paths,
-                    exclude_paths,
+                    path_filter: server_suggested_path_filter,
                     ..
                 }
                 | TriggerConfig::ReporterPullRequest {
                     branches,
-                    include_paths,
-                    exclude_paths,
+                    path_filter: server_suggested_path_filter,
                     ..
                 } = &mut config
                 {
                     *branches = branch.iter().cloned().collect();
-                    include_paths.clone_from(&changed_file_path_patterns);
-                    exclude_paths.clone_from(&excluded_changed_file_path_patterns);
+                    server_suggested_path_filter.clone_from(&path_filter);
                 }
                 config
             }
@@ -674,8 +674,9 @@ pub async fn handle(cmd: Commands, out: Output) {
                 .create(
                     &project,
                     MakeTaskRequest {
-                        name: name.clone().into(),
-                        display_name: input.get("Display Name").into(),
+                        name: TaskName::try_from(name.clone()).unwrap_or_else(|e| out.fail(e)),
+                        display_name: TaskDisplayName::try_from(input.get("Display Name"))
+                            .unwrap_or_else(|e| out.fail(e)),
                         description: input.get("Description"),
                         repository,
                         wildcard: input.get("Wildcard"),
@@ -769,7 +770,9 @@ pub async fn handle(cmd: Commands, out: Output) {
                     &project,
                     &task,
                     PatchTaskRequest {
-                        name: (input.get("Name") != task).then(|| input.get("Name").into()),
+                        name: (input.get("Name") != task).then(|| {
+                            TaskName::try_from(input.get("Name")).unwrap_or_else(|e| out.fail(e))
+                        }),
                         display_name: Some(input.get("Display Name")),
                         description: Some(input.get("Description")),
                         repository: Some(input.get("Repository")),
@@ -810,8 +813,9 @@ pub async fn handle(cmd: Commands, out: Output) {
                     &project,
                     &task,
                     &DuplicateTaskRequest {
-                        name: name.clone().into(),
-                        display_name: display_name.into(),
+                        name: TaskName::try_from(name.clone()).unwrap_or_else(|e| out.fail(e)),
+                        display_name: TaskDisplayName::try_from(display_name)
+                            .unwrap_or_else(|e| out.fail(e)),
                         branch,
                     },
                 )

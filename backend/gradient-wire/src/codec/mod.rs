@@ -142,3 +142,45 @@ pub fn take(input: &mut Bytes, len: u64) -> Result<Bytes, DecodeError> {
 
     Ok(input.split_to(len))
 }
+
+macro_rules! impl_proto_for_shared_struct {
+    ($ty:ty { $($field:ident: $field_ty:ty),+ $(,)? }) => {
+        impl $crate::codec::Proto for $ty {
+            const OLDEST: u16 =
+                $crate::codec::max_of(&[$(<$field_ty as $crate::codec::Proto>::OLDEST),+]);
+            const NEWEST: u16 =
+                $crate::codec::max_of(&[$(<$field_ty as $crate::codec::Proto>::NEWEST),+]);
+
+            fn encode(
+                &self,
+                version: u16,
+                out: &mut $crate::codec::bytes::BytesMut,
+            ) -> Result<(), $crate::codec::EncodeError> {
+                $($crate::codec::Proto::encode(&self.$field, version, out)?;)+
+                Ok(())
+            }
+
+            fn decode(
+                input: &mut $crate::codec::bytes::Bytes,
+                version: u16,
+            ) -> Result<Self, $crate::codec::DecodeError> {
+                Ok(Self {
+                    $($field: <$field_ty as $crate::codec::Proto>::decode(input, version)?),+
+                })
+            }
+
+            fn describe(version: u16, out: &mut String) {
+                out.push('{');
+                let mut first = true;
+                $(
+                    $crate::codec::push_separator(out, &mut first);
+                    out.push_str(concat!(stringify!($field), ":"));
+                    <$field_ty as $crate::codec::Proto>::describe(version, out);
+                )+
+                out.push('}');
+            }
+        }
+    };
+}
+
+pub(crate) use impl_proto_for_shared_struct;

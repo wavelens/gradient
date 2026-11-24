@@ -47,3 +47,27 @@ impl Related<super::task_action::Entity> for Entity {
 }
 
 impl ActiveModelBehavior for ActiveModel {}
+
+impl From<Model> for gradient_api_types::DeliveryListItem<TaskActionDeliveryId> {
+    fn from(r: Model) -> Self {
+        Self {
+            id: r.id,
+            event: r.event,
+            success: r.success,
+            response_status: r.response_status,
+            error_message: r.error_message,
+            duration_ms: r.duration_ms,
+            delivered_at: r.delivered_at,
+        }
+    }
+}
+
+impl From<Model> for gradient_api_types::DeliveryDetail<TaskActionDeliveryId> {
+    fn from(r: Model) -> Self {
+        Self {
+            request_body: r.request_body.clone(),
+            response_body: r.response_body.clone(),
+            item: r.into(),
+        }
+    }
+}

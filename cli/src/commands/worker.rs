@@ -92,11 +92,15 @@ pub async fn handle(cmd: Commands, out: Output) {
                         out.human("No workers registered.");
                     } else {
                         for w in workers {
-                            let status = if w.connected { "online" } else { "offline" };
+                            let status = if w.connection.connected {
+                                "online"
+                            } else {
+                                "offline"
+                            };
                             let url_part =
                                 w.url.map(|u| format!(" (url: {})", u)).unwrap_or_default();
                             out.human(format!(
-                                "{} \"{}\": {} [{}]{}",
+                                "{} \"{}\": {:?} [{}]{}",
                                 w.worker_id, w.display_name, w.registered_at, status, url_part
                             ));
                         }
@@ -156,11 +160,11 @@ pub async fn handle(cmd: Commands, out: Output) {
                     for connection in &metrics.connections {
                         match &connection.disconnected_at {
                             Some(disconnected_at) => out.human(format!(
-                                "Connected at {}. Disconnected at {}.",
+                                "Connected at {:?}. Disconnected at {:?}.",
                                 connection.connected_at, disconnected_at
                             )),
                             None => out.human(format!(
-                                "Connected at {}, still online",
+                                "Connected at {:?}, still online",
                                 connection.connected_at
                             )),
                         }

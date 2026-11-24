@@ -58,6 +58,10 @@ Plugins extend Gradient.
 
     Plugins written in Rust and compiled to WebAssembly. Administrators load them through the web interface. No rebuild or restart of Gradient.
 
+-   :material-rss: **Channel Support**
+
+    Gradient can publish a Nix channel from the latest successful evaluation of a task. Hosts subscribe with `nix-channel --add` and fetch binaries from the Gradient cache.
+
 </div>
 
 </div>

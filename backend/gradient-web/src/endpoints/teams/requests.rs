@@ -12,7 +12,9 @@ use crate::helpers::{OptionExt, ok_json, role_names};
 use crate::resource::Resource;
 use crate::scope::{Admin, Member, TeamScope};
 use axum::{Extension, Json};
-use chrono::NaiveDateTime;
+pub use gradient_api_types::{
+    RequestKind, TeamCacheGrant, TeamGrants, TeamProjectGrant, TeamRequestItem,
+};
 use gradient_db::WebDb;
 use gradient_db::lookup::by_ids;
 use gradient_scheduler::Scheduler;
@@ -20,112 +22,70 @@ use gradient_types::events::EventOwner;
 use gradient_types::events::audit::Action;
 use gradient_types::*;
 use sea_orm::TransactionTrait;
-use serde::Serialize;
 use std::collections::HashMap;
 use std::sync::Arc;
 use uuid::Uuid;
 
-#[derive(Serialize, utoipa::ToSchema)]
-pub struct TeamProjectGrant {
-    pub project: String,
-    pub display_name: String,
-    pub role: Option<String>,
-    pub users: bool,
-    pub workers: bool,
-}
-
-impl TeamProjectGrant {
-    fn new(grant: &MTeamProject, project: &MProject, role: Option<String>) -> Self {
-        Self {
-            project: project.name.clone(),
-            display_name: project.display_name.clone(),
-            role,
-            users: grant.includes_users,
-            workers: grant.includes_workers,
-        }
+fn build_team_project_grant_api_item_from_grant_row_project_row_and_role_name(
+    grant: &MTeamProject,
+    project: &MProject,
+    role: Option<String>,
+) -> TeamProjectGrant {
+    TeamProjectGrant {
+        project: project.name.clone(),
+        display_name: project.display_name.clone(),
+        role,
+        users: grant.includes_users,
+        workers: grant.includes_workers,
     }
 }
 
-#[derive(Serialize, utoipa::ToSchema)]
-pub struct TeamCacheGrant {
-    pub cache: String,
-    pub display_name: String,
-    pub role: Option<String>,
-}
-
-impl TeamCacheGrant {
-    fn new(cache: &MCache, role: Option<String>) -> Self {
-        Self {
-            cache: cache.name.clone(),
-            display_name: cache.display_name.clone(),
-            role,
-        }
+fn team_cache_grant_from_cache_row_and_role_name(
+    cache: &MCache,
+    role: Option<String>,
+) -> TeamCacheGrant {
+    TeamCacheGrant {
+        cache: cache.name.clone(),
+        display_name: cache.display_name.clone(),
+        role,
     }
 }
 
-#[derive(Serialize, utoipa::ToSchema)]
-pub struct TeamGrants {
-    pub projects: Vec<TeamProjectGrant>,
-    pub caches: Vec<TeamCacheGrant>,
-}
-
-#[derive(Serialize, Clone, Copy, utoipa::ToSchema)]
-#[serde(rename_all = "lowercase")]
-pub enum RequestKind {
-    Project,
-    Cache,
-}
-
-#[derive(Serialize, utoipa::ToSchema)]
-pub struct TeamRequestItem {
-    pub id: Uuid,
-    pub kind: RequestKind,
-    pub target: String,
-    pub display_name: String,
-    pub role: Option<String>,
-    pub users: bool,
-    pub workers: bool,
-    pub requested_by: Option<String>,
-    pub created_at: NaiveDateTime,
-}
-
-impl TeamRequestItem {
-    fn for_project(
-        request: &MTeamProjectRequest,
-        project: &MProject,
-        role: Option<String>,
-        requested_by: Option<String>,
-    ) -> Self {
-        Self {
-            id: request.id.into_inner(),
-            kind: RequestKind::Project,
-            target: project.name.clone(),
-            display_name: project.display_name.clone(),
-            role,
-            users: request.includes_users,
-            workers: request.includes_workers,
-            requested_by,
-            created_at: request.created_at,
-        }
+fn team_request_item_from_cache_access_request(
+    request: &MTeamCacheRequest,
+    cache: &MCache,
+    role: Option<String>,
+    requested_by: Option<String>,
+) -> TeamRequestItem {
+    TeamRequestItem {
+        id: request.id.into_inner(),
+        kind: RequestKind::Cache,
+        target: cache.name.clone(),
+        display_name: cache.display_name.clone(),
+        role,
+        users: true,
+        workers: false,
+        requested_by,
+        created_at: request.created_at,
     }
+}
 
-    fn for_cache(
-        request: &MTeamCacheRequest,
-        cache: &MCache,
-        role: Option<String>,
-        requested_by: Option<String>,
-    ) -> Self {
-        Self {
-            id: request.id.into_inner(),
-            kind: RequestKind::Cache,
-            target: cache.name.clone(),
-            display_name: cache.display_name.clone(),
-            role,
-            users: true,
-            workers: false,
-            requested_by,
-            created_at: request.created_at,
-        }
+fn team_request_item_from_project_access_request_row_project_role_and_user_name(
+    request: &MTeamProjectRequest,
+    project: &MProject,
+    role: Option<String>,
+    requested_by: Option<String>,
+) -> TeamRequestItem {
+    TeamRequestItem {
+        id: request.id.into_inner(),
+        kind: RequestKind::Project,
+        target: project.name.clone(),
+        display_name: project.display_name.clone(),
+        role,
+        users: request.includes_users,
+        workers: request.includes_workers,
+        requested_by,
+        created_at: request.created_at,
     }
 }
 
@@ -178,7 +138,11 @@ pub async fn get_team_grants(
         .filter_map(|g| {
             let project = projects.get(&g.project)?;
             let role = g.role.and_then(|role| project_roles.get(&role).cloned());
-            Some(TeamProjectGrant::new(g, project, role))
+            Some(
+                build_team_project_grant_api_item_from_grant_row_project_row_and_role_name(
+                    g, project, role,
+                ),
+            )
         })
         .collect();
     project_items.sort_by(|a, b| a.project.cmp(&b.project));
@@ -187,7 +151,7 @@ pub async fn get_team_grants(
         .iter()
         .filter_map(|g| {
             let cache = caches.get(&g.cache)?;
-            Some(TeamCacheGrant::new(
+            Some(team_cache_grant_from_cache_row_and_role_name(
                 cache,
                 cache_roles.get(&g.role).cloned(),
             ))
@@ -275,16 +239,18 @@ async fn team_request_items(db: &WebDb, team: TeamId) -> WebResult<Vec<TeamReque
         .filter_map(|r| {
             let project = projects.get(&r.project)?;
             let role = r.role.and_then(|role| project_roles.get(&role).cloned());
-            Some(TeamRequestItem::for_project(
-                r,
-                project,
-                role,
-                requester(r.requested_by),
-            ))
+            Some(
+                team_request_item_from_project_access_request_row_project_role_and_user_name(
+                    r,
+                    project,
+                    role,
+                    requester(r.requested_by),
+                ),
+            )
         })
         .chain(cache_requests.iter().filter_map(|r| {
             let cache = caches.get(&r.cache)?;
-            Some(TeamRequestItem::for_cache(
+            Some(team_request_item_from_cache_access_request(
                 r,
                 cache,
                 cache_roles.get(&r.role).cloned(),

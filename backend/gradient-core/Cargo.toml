@@ -19,6 +19,7 @@ doctest = false
 workspace = true
 
 [dependencies]
+gradient-api-types = { workspace = true }
 # Internal
 gradient-entity = { workspace = true }
 gradient-graph = { workspace = true }

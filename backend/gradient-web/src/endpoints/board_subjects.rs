@@ -5,6 +5,7 @@
  */
 
 use crate::metrics_scope::MetricsScope;
+pub use gradient_api_types::BoardProject;
 use gradient_db::exec_jobs::labels::ExecJobLabel;
 use gradient_db::lookup::{by_id, by_ids};
 use gradient_db::scheduling::assignment_record::{exec_job_of_key, shared_build_of_key};
@@ -199,13 +200,6 @@ impl WorkerNames {
     pub fn name(&self, worker: &str) -> Option<String> {
         self.0.get(worker).cloned()
     }
-}
-
-#[derive(Serialize, Clone, Default, utoipa::ToSchema)]
-pub struct BoardProject {
-    pub id: Uuid,
-    pub name: String,
-    pub display_name: String,
 }
 
 pub async fn board_projects<C: ConnectionTrait>(

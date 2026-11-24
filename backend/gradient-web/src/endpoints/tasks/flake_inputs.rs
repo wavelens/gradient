@@ -16,13 +16,15 @@ use crate::resource::Resource;
 use crate::scope::{Member, RequiresUnmanaged, TaskScope, can};
 use axum::Json;
 use chrono::Utc;
+pub use gradient_api_types::{
+    CreateFlakeInputOverrideRequest, FlakeInputOverrideOut, UpdateFlakeInputOverrideRequest,
+};
 use gradient_core::ServerState;
 use gradient_types::events::EventOwner;
 use gradient_types::events::audit::Action;
 use gradient_types::input::check_flake_input_override_reference_is_remote_flake_or_single_store_path;
 use gradient_types::*;
 use sea_orm::ActiveValue::Set;
-use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use utoipa_axum::router::OpenApiRouter;
 use utoipa_axum::routes;
@@ -31,49 +33,6 @@ pub fn router() -> OpenApiRouter<Arc<ServerState>> {
     OpenApiRouter::new()
         .routes(routes!(list, create))
         .routes(routes!(read, update, delete_one))
-}
-
-#[derive(Serialize, Debug, utoipa::ToSchema)]
-pub struct FlakeInputOverrideOut {
-    pub id: FlakeInputOverrideId,
-    pub task: TaskId,
-    pub input_name: String,
-    pub url: Option<String>,
-    pub created_at: chrono::NaiveDateTime,
-    pub updated_at: chrono::NaiveDateTime,
-}
-
-impl From<MTaskFlakeInputOverride> for FlakeInputOverrideOut {
-    fn from(m: MTaskFlakeInputOverride) -> Self {
-        Self {
-            id: m.id,
-            task: m.task,
-            input_name: m.input_name,
-            url: m.url,
-            created_at: m.created_at,
-            updated_at: m.updated_at,
-        }
-    }
-}
-
-#[derive(Deserialize, Debug, utoipa::ToSchema)]
-pub struct CreateFlakeInputOverrideRequest {
-    pub input_name: String,
-    pub url: Option<String>,
-}
-
-#[derive(Deserialize, Debug, utoipa::ToSchema)]
-pub struct UpdateFlakeInputOverrideRequest {
-    pub input_name: Option<String>,
-    #[serde(default, deserialize_with = "deserialize_optional_optional_string")]
-    pub url: Option<Option<String>>,
-}
-
-fn deserialize_optional_optional_string<'de, D>(d: D) -> Result<Option<Option<String>>, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    Ok(Some(Option::<String>::deserialize(d)?))
 }
 
 fn validate_input_name(name: &str) -> WebResult<()> {

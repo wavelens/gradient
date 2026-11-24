@@ -118,7 +118,7 @@ mod tests {
             package: pkg.into(),
             nar_size: Some(1),
             file_size: Some(1),
-            created_at: "2026-01-01T00:00:00".into(),
+            created_at: "2026-01-01T00:00:00".parse().unwrap(),
             last_fetched_at: None,
             pinned_at: None,
             pinned_by_username: None,

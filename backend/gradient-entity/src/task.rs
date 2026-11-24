@@ -5,43 +5,11 @@
  */
 
 use chrono::NaiveDateTime;
-use num_enum::{IntoPrimitive, TryFromPrimitive};
 use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
 
 use crate::ids::{EvaluationId, GitHostConnectionId, ProjectId, TaskId, UserId};
-
-#[repr(i16)]
-#[derive(
-    Debug,
-    Clone,
-    Copy,
-    Default,
-    PartialEq,
-    Eq,
-    DeriveActiveEnum,
-    EnumIter,
-    Deserialize,
-    Serialize,
-    IntoPrimitive,
-    TryFromPrimitive,
-    utoipa::ToSchema,
-)]
-#[sea_orm(rs_type = "i16", db_type = "SmallInteger")]
-#[serde(rename_all = "snake_case")]
-pub enum ConcurrencyPolicy {
-    #[sea_orm(num_value = 0)]
-    HardAbort = 0,
-    #[sea_orm(num_value = 1)]
-    SoftAbort = 1,
-    #[sea_orm(num_value = 2)]
-    All = 2,
-    #[sea_orm(num_value = 3)]
-    Skip = 3,
-    #[default]
-    #[sea_orm(num_value = 4)]
-    Auto = 4,
-}
+pub use gradient_api_types::ConcurrencyPolicy;
 
 #[derive(Clone, Debug, Default, PartialEq, DeriveEntityModel, Deserialize, Serialize)]
 #[sea_orm(table_name = "task")]
@@ -103,3 +71,13 @@ pub enum Relation {
 }
 
 impl ActiveModelBehavior for ActiveModel {}
+
+impl From<&Model> for gradient_api_types::TaskRepositoryFetchStatus {
+    fn from(task: &Model) -> Self {
+        match (task.last_fetch_at, &task.last_fetch_error) {
+            (None, _) => Self::Unchecked,
+            (Some(_), Some(_)) => Self::Failing,
+            (Some(_), None) => Self::Verified,
+        }
+    }
+}

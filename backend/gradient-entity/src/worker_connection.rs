@@ -26,3 +26,12 @@ pub struct Model {
 pub enum Relation {}
 
 impl ActiveModelBehavior for ActiveModel {}
+
+impl From<Model> for gradient_api_types::WorkerConnectionEntry {
+    fn from(connection: Model) -> Self {
+        Self {
+            connected_at: connection.connected_at,
+            disconnected_at: connection.disconnected_at,
+        }
+    }
+}

@@ -21,8 +21,8 @@ async fn listing_exec_job_outputs_sends_node_query_parameter() {
                 "path": "reports/out.txt",
                 "size": 3,
                 "content_type": "text/plain",
-                "created_at": "2026-11-09T00:00:00Z",
-                "updated_at": "2026-11-09T00:00:00Z"
+                "created_at": "2026-11-09T00:00:00",
+                "updated_at": "2026-11-09T00:00:00"
             }]))),
         )
         .mount(&server)
@@ -108,7 +108,7 @@ async fn connector_exec_job_pull_requests_decode_test() {
                 "branch": "gradient/fix",
                 "number": 5,
                 "git_host_connection": "00000000-0000-0000-0000-000000006110",
-                "created_at": "2026-11-09T00:00:00Z"
+                "created_at": "2026-11-09T00:00:00"
             }]))),
         )
         .mount(&server)

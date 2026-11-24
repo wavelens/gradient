@@ -1,4 +1,4 @@
-From 7986511548aace48bf0e45c5ed8d8b1d7c3f71a3 Mon Sep 17 00:00:00 2001
+From c48d5810e99f96623682a956b72877b10ab747f6 Mon Sep 17 00:00:00 2001
 From: Dennis Wuitz <dennish@wuitz.de>
 Date: Sun, 25 Oct 2026 00:47:29 +0200
 Subject: [PATCH] libexpr-c: expose nix_eval_state_get_stats and
@@ -9,13 +9,28 @@ attribute cost to each of them. nix_eval_state_get_stats_json() returns
 the statistics NIX_SHOW_STATS prints; nix_eval_state_get_stats() fills a
 struct with the counters only, without allocation.
 ---
- src/libexpr-c/nix_api_expr.cc     | 41 +++++++++++++++++++++
- src/libexpr-c/nix_api_expr.h      | 61 +++++++++++++++++++++++++++++++
- src/libexpr-tests/nix_api_expr.cc | 47 ++++++++++++++++++++++++
- 3 files changed, 149 insertions(+)
+ doc/manual/rl-next/c-api-eval-stats.md |  7 +++
+ src/libexpr-c/nix_api_expr.cc          | 41 +++++++++++++++++
+ src/libexpr-c/nix_api_expr.h           | 61 ++++++++++++++++++++++++++
+ src/libexpr-tests/nix_api_expr.cc      | 47 ++++++++++++++++++++
+ 4 files changed, 156 insertions(+)
+ create mode 100644 doc/manual/rl-next/c-api-eval-stats.md
 
+diff --git a/doc/manual/rl-next/c-api-eval-stats.md b/doc/manual/rl-next/c-api-eval-stats.md
+new file mode 100644
+index 000000000..ca9f21de6
+--- /dev/null
++++ b/doc/manual/rl-next/c-api-eval-stats.md
+@@ -0,0 +1,7 @@
++---
++synopsis: "C API: `nix_eval_state_get_stats` and `nix_eval_state_get_stats_json`"
++---
++
++Two new functions in `nix_api_expr.h` read the evaluation statistics of an `EvalState`.
++`nix_eval_state_get_stats_json()` returns the statistics Nix prints with `NIX_SHOW_STATS=1`, as JSON.
++`nix_eval_state_get_stats()` fills a struct with the cumulative counters only and is cheap enough to call around every evaluation.
 diff --git a/src/libexpr-c/nix_api_expr.cc b/src/libexpr-c/nix_api_expr.cc
-index 9c6bcefc3..5b5859ee7 100644
+index b23e1adcc..6b50ae18d 100644
 --- a/src/libexpr-c/nix_api_expr.cc
 +++ b/src/libexpr-c/nix_api_expr.cc
 @@ -2,6 +2,9 @@
@@ -74,7 +89,7 @@ index 9c6bcefc3..5b5859ee7 100644
  {
      if (context)
 diff --git a/src/libexpr-c/nix_api_expr.h b/src/libexpr-c/nix_api_expr.h
-index fca88e5c0..6091282fb 100644
+index 2fce9eab6..b07b045a9 100644
 --- a/src/libexpr-c/nix_api_expr.h
 +++ b/src/libexpr-c/nix_api_expr.h
 @@ -16,6 +16,7 @@
@@ -153,10 +168,10 @@ index fca88e5c0..6091282fb 100644
   * @ingroup libexpr
   * @brief Reference counting and garbage collector operations
 diff --git a/src/libexpr-tests/nix_api_expr.cc b/src/libexpr-tests/nix_api_expr.cc
-index 3ceb0a24c..8ffa8ea49 100644
+index d35688309..5125e02e1 100644
 --- a/src/libexpr-tests/nix_api_expr.cc
 +++ b/src/libexpr-tests/nix_api_expr.cc
-@@ -10,6 +10,8 @@
+@@ -12,6 +12,8 @@
  #include <gmock/gmock.h>
  #include <gtest/gtest.h>
  
@@ -165,7 +180,7 @@ index 3ceb0a24c..8ffa8ea49 100644
  #include "expr-tests-config.hh"
  
  namespace nixC {
-@@ -675,4 +677,49 @@ TEST_F(nix_api_expr_test, nix_expr_thunk_re_evaluation_after_deployment)
+@@ -771,4 +773,49 @@ TEST_F(nix_api_expr_test, nix_expr_thunk_re_evaluation_after_deployment)
      ASSERT_STREQ("vm-12345", result.c_str());
  }
  
@@ -215,3 +230,6 @@ index 3ceb0a24c..8ffa8ea49 100644
 +}
 +
  } // namespace nixC
+-- 
+2.56.0
+

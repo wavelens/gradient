@@ -11,9 +11,9 @@ use crate::output::Output;
 use clap::Subcommand;
 use clap_complete::engine::ArgValueCompleter;
 use connector::api::{
-    AddMemberRequest, ChangeMemberRoleRequest, CreateRoleRequest, GrantCacheRequest, IndexName,
-    PatchCacheGrantRequest, PatchRoleRequest, RemoveMemberRequest, RevokeInvitationRequest,
-    RoleResponseCacheRoleOwner,
+    AddMemberRequest, CacheRoleOwner, ChangeMemberRoleRequest, CreateRoleRequest,
+    GrantCacheRequest, IndexName, PatchCacheGrantRequest, PatchRoleRequest, RemoveMemberRequest,
+    RevokeInvitationRequest, RoleResponse,
 };
 
 #[derive(Subcommand, Debug)]
@@ -241,7 +241,7 @@ pub async fn handle_cache_user_commands(cmd: CacheUserCommands, out: Output) {
                     AddMemberRequest {
                         user,
                         role,
-                        add_as_member_immediately: add_as_member_immediately.then_some(true),
+                        add_as_member_immediately,
                     },
                 )
                 .await
@@ -296,7 +296,7 @@ pub async fn apply_cache_invitation_commands(cmd: CacheInvitationCommands, out: 
                     }
                     for invitation in &invitations {
                         out.human(format!(
-                            "{} ({}): {}, expires {}",
+                            "{} ({}): {}, expires {:?}",
                             invitation.name,
                             invitation.user,
                             invitation.role,
@@ -325,7 +325,7 @@ pub async fn apply_cache_invitation_commands(cmd: CacheInvitationCommands, out: 
 pub async fn apply_cache_role_command(cmd: CacheRoleCommand, out: Output) {
     let client = client_from_config(out);
     let caches = client.caches();
-    let print_role = |role: &RoleResponseCacheRoleOwner| {
+    let print_role = |role: &RoleResponse<CacheRoleOwner>| {
         out.human(format!(
             "{} {}: {}",
             role.id.0,
@@ -365,7 +365,7 @@ pub async fn apply_cache_role_command(cmd: CacheRoleCommand, out: Output) {
             role_permission_names,
         } => {
             let body = CreateRoleRequest {
-                name: IndexName(name),
+                name: IndexName::try_from(name).unwrap_or_else(|e| out.fail(e)),
                 permissions: role_permission_names,
             };
             match caches.create_custom_role(&cache, body).await {
@@ -384,7 +384,7 @@ pub async fn apply_cache_role_command(cmd: CacheRoleCommand, out: Output) {
             role_permission_names,
         } => {
             let body = PatchRoleRequest {
-                name: name.map(IndexName),
+                name: name.map(|name| IndexName::try_from(name).unwrap_or_else(|e| out.fail(e))),
                 permissions: role_permission_names,
             };
             match caches.update_custom_role(&cache, &role_id, body).await {

@@ -11,6 +11,7 @@ use axum::Json;
 use axum::extract::rejection::{JsonRejection, PathRejection, QueryRejection};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
+pub use gradient_api_types::ErrorResponseBody;
 use sea_orm::{DbErr, RuntimeErr, sqlx};
 use serde::Serialize;
 use std::fmt;
@@ -127,17 +128,6 @@ pub enum WebError {
 }
 
 pub type WebResult<T> = Result<T, WebError>;
-
-#[derive(Serialize, utoipa::ToSchema)]
-pub(crate) struct ErrorResponseBody<'a> {
-    error: bool,
-    #[schema(value_type = String)]
-    code: ErrorCode,
-    message: &'a str,
-    /// Wire names of the permissions that the signed-in caller does not have for this request (for example, `readStore`). Only 401 and 403 responses to authenticated callers include this field. The names match the values of `permissions` on the API key.
-    #[serde(skip_serializing_if = "<[_]>::is_empty")]
-    missing_permissions: &'a [&'static str],
-}
 
 impl WebError {
     pub fn status(&self) -> StatusCode {
@@ -308,9 +298,12 @@ impl IntoResponse for WebError {
         };
         let body = Json(ErrorResponseBody {
             error: true,
-            code,
-            message: &message,
-            missing_permissions,
+            code: code.to_string(),
+            message,
+            missing_permissions: missing_permissions
+                .iter()
+                .map(|name| name.to_string())
+                .collect(),
         });
 
         match self {

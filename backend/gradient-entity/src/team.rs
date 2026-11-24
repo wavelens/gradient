@@ -32,3 +32,12 @@ pub struct Model {
 pub enum Relation {}
 
 impl ActiveModelBehavior for ActiveModel {}
+
+impl From<&Model> for gradient_api_types::TeamNameAndDisplayName {
+    fn from(team: &Model) -> Self {
+        Self {
+            name: team.name.clone(),
+            display_name: team.display_name.clone(),
+        }
+    }
+}

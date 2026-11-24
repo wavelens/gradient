@@ -5,56 +5,11 @@
  */
 
 use chrono::NaiveDateTime;
-use num_enum::{IntoPrimitive, TryFromPrimitive};
 use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
 
 use crate::ids::{DerivationId, EntryPointId, EvaluationId, ExecJobId};
-
-#[repr(i16)]
-#[derive(
-    Debug,
-    Clone,
-    Copy,
-    Default,
-    PartialEq,
-    Eq,
-    Hash,
-    DeriveActiveEnum,
-    EnumIter,
-    Deserialize,
-    Serialize,
-    IntoPrimitive,
-    TryFromPrimitive,
-    utoipa::ToSchema,
-)]
-#[sea_orm(rs_type = "i16", db_type = "SmallInteger")]
-#[serde(rename_all = "snake_case")]
-pub enum ExecJobStatus {
-    #[sea_orm(num_value = 0)]
-    Queued = 0,
-    #[sea_orm(num_value = 1)]
-    Starting = 1,
-    #[sea_orm(num_value = 2)]
-    Running = 2,
-    #[sea_orm(num_value = 3)]
-    Completed = 3,
-    #[sea_orm(num_value = 4)]
-    Failed = 4,
-    #[sea_orm(num_value = 5)]
-    Aborted = 5,
-    #[default]
-    #[sea_orm(num_value = 6)]
-    Created = 6,
-}
-
-impl ExecJobStatus {
-    pub const OPEN: [Self; 4] = [Self::Created, Self::Queued, Self::Starting, Self::Running];
-
-    pub fn is_terminal(self) -> bool {
-        matches!(self, Self::Completed | Self::Failed | Self::Aborted)
-    }
-}
+pub use gradient_api_types::ExecJobStatus;
 
 #[derive(Clone, Debug, Default, PartialEq, DeriveEntityModel, Deserialize, Serialize)]
 #[sea_orm(table_name = "exec_job")]

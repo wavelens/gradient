@@ -8,10 +8,9 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicI64, Ordering};
 
-use gradient_types::ids::ProjectId;
 use gradient_wire::types::{
-    BuildMetrics, BuildStage, DeviceClass, DeviceRequest, ExecInventory, GradientCapabilities,
-    GuestSize, JobKind,
+    BuildMetrics, BuildStage, DeviceRequest, ExecInventory, GradientCapabilities, GuestSize,
+    JobKind,
 };
 use gradient_wire::worker_store_path_bloom_filter::WorkerStorePathBloomFilter;
 
@@ -19,6 +18,7 @@ use crate::job_policy::{AllowedJobs, EveryJobAllowed, WorkerJobPolicy};
 use crate::project_access::ProjectAccess;
 use crate::session_port::{SessionPort, SessionSignal};
 use crate::worker_state::{Active, AssignedJob, Draining, TypedWorker, WorkerShared};
+pub use gradient_api_types::ExecOffer;
 
 pub enum WorkerSlot {
     Active(TypedWorker<Active>),
@@ -573,7 +573,7 @@ impl WorkerPool {
     }
 }
 
-#[derive(Debug, Clone, serde::Serialize, utoipa::ToSchema)]
+#[derive(Debug, Clone)]
 pub struct WorkerInfo {
     pub id: String,
     pub capabilities: GradientCapabilities,
@@ -581,51 +581,50 @@ pub struct WorkerInfo {
     pub system_features: Vec<String>,
     pub max_concurrent_builds: u32,
     pub assigned_job_count: usize,
-    #[serde(skip)]
     pub assigned_build_count: usize,
     pub draining: bool,
-    #[serde(rename = "authorized_peers")]
-    #[schema(value_type = Option<HashSet<ProjectId>>)]
     pub project_access: ProjectAccess,
-    #[serde(skip)]
     pub cpu_usage_pct: Option<f32>,
-    #[serde(skip)]
     pub ram_free_mb: Option<u64>,
-    #[serde(skip)]
     pub ram_total_mb: u64,
-    #[serde(skip)]
     pub disk_speed_mbps: Option<f32>,
-    #[serde(skip)]
     pub upload_speed_mbps: Option<f32>,
-    #[serde(skip)]
     pub download_speed_mbps: Option<f32>,
-    #[serde(skip)]
     pub zone: Option<String>,
-    #[serde(serialize_with = "serialize_exec_offer")]
-    #[schema(value_type = Option<ExecOffer>)]
     pub exec: Option<ExecInventory>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, utoipa::ToSchema)]
-pub struct ExecOffer {
-    pub labels: Vec<String>,
-    pub devices: Vec<DeviceClass>,
-}
-
-impl From<ExecInventory> for ExecOffer {
-    fn from(inventory: ExecInventory) -> Self {
+impl From<&WorkerInfo> for gradient_api_types::WorkerInfo {
+    fn from(worker: &WorkerInfo) -> Self {
         Self {
-            labels: inventory.labels,
-            devices: inventory.devices,
+            id: worker.id.clone(),
+            capabilities: worker.capabilities.clone(),
+            architectures: worker.architectures.clone(),
+            system_features: worker.system_features.clone(),
+            max_concurrent_builds: worker.max_concurrent_builds,
+            assigned_job_count: worker.assigned_job_count,
+            draining: worker.draining,
+            authorized_peers: match &worker.project_access {
+                ProjectAccess::AllProjects => None,
+                ProjectAccess::OnlyListedProjects(projects) => Some(projects.clone()),
+            },
+            exec: worker.exec.clone().map(ExecOffer::from),
         }
     }
 }
 
-fn serialize_exec_offer<S: serde::Serializer>(
-    exec: &Option<ExecInventory>,
-    serializer: S,
-) -> Result<S::Ok, S::Error> {
-    serde::Serialize::serialize(&exec.clone().map(ExecOffer::from), serializer)
+impl From<&WorkerInfo> for gradient_api_types::WorkerLiveInfo {
+    fn from(w: &WorkerInfo) -> Self {
+        Self {
+            capabilities: w.capabilities.clone(),
+            architectures: w.architectures.clone(),
+            system_features: w.system_features.clone(),
+            max_concurrent_builds: w.max_concurrent_builds,
+            assigned_job_count: w.assigned_job_count,
+            draining: w.draining,
+            ram_total_mb: (w.ram_total_mb > 0).then_some(w.ram_total_mb),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -633,6 +632,8 @@ mod tests {
     use super::*;
     use crate::session_port::{SessionPort, SessionSignal};
     use crate::worker_state::WorkerProfile;
+    use gradient_types::ids::ProjectId;
+    use gradient_wire::types::DeviceClass;
     use std::collections::HashSet;
     use tokio::sync::mpsc;
 
@@ -1016,7 +1017,13 @@ mod tests {
                 .contains(&ProjectId::now_v7())
         );
 
-        let shown = serde_json::to_value(pool.all_workers()).unwrap();
+        let shown = serde_json::to_value(
+            pool.all_workers()
+                .iter()
+                .map(gradient_api_types::WorkerInfo::from)
+                .collect::<Vec<_>>(),
+        )
+        .unwrap();
         for worker in shown.as_array().unwrap() {
             assert_eq!(worker["authorized_peers"], serde_json::json!([]));
         }
@@ -1325,7 +1332,13 @@ mod tests {
         assert!(!workers[0].project_access.contains(&project_b));
         assert_eq!(workers[1].project_access, ProjectAccess::AllProjects);
 
-        let shown = serde_json::to_value(&workers).unwrap();
+        let shown = serde_json::to_value(
+            workers
+                .iter()
+                .map(gradient_api_types::WorkerInfo::from)
+                .collect::<Vec<_>>(),
+        )
+        .unwrap();
         assert_eq!(shown[0]["authorized_peers"], serde_json::json!([project_a]));
         assert_eq!(shown[1]["authorized_peers"], serde_json::Value::Null);
     }
@@ -1557,7 +1570,9 @@ mod tests {
             }),
         );
 
-        let listed = serde_json::to_value(&pool.all_workers()[0]).expect("serializes");
+        let listed =
+            serde_json::to_value(gradient_api_types::WorkerInfo::from(&pool.all_workers()[0]))
+                .expect("serializes");
 
         assert_eq!(
             listed["exec"],

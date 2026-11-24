@@ -19,6 +19,7 @@ use crate::scope::{Member, ProjectScope, Requires, RequiresUnmanaged, TaskScope,
 use anyhow::Context;
 use axum::{Extension, Json};
 use chrono::Utc;
+pub use gradient_api_types::{CreateTriggerRequest, TriggerOut, UpdateTriggerRequest};
 use gradient_ci::actions::{encrypt_secret_with_file, new_webhook_secret};
 use gradient_ci::trigger::InputUpdateOutcome;
 use gradient_ci::{ApplyInput, ApplyOutcome, apply_trigger};
@@ -46,24 +47,6 @@ pub fn router() -> OpenApiRouter<Arc<ServerState>> {
         .routes(routes!(fire_now))
         .routes(routes!(set_default))
         .routes(routes!(rotate_trigger_secret))
-}
-
-#[derive(Serialize, ToSchema)]
-pub struct TriggerOut {
-    pub id: TaskTriggerId,
-    pub task: TaskId,
-    #[serde(rename = "type")]
-    pub trigger_type: TriggerType,
-    pub config: serde_json::Value,
-    pub active: bool,
-    pub is_default: bool,
-    pub last_fired_at: Option<chrono::NaiveDateTime>,
-    pub created_at: chrono::NaiveDateTime,
-    pub updated_at: chrono::NaiveDateTime,
-    pub has_secret: bool,
-    pub post_request_url: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub generated_secret: Option<String>,
 }
 
 fn trigger_public_post_url(serve_url: &str, trigger: &MTaskTrigger) -> Option<String> {
@@ -127,23 +110,6 @@ fn build_trigger_audit_log_json(trigger: &MTaskTrigger) -> serde_json::Value {
         "trigger_type": trigger.trigger_type,
         "active": trigger.active,
     })
-}
-
-#[derive(Deserialize, Debug, ToSchema)]
-pub struct CreateTriggerRequest {
-    pub config: TriggerConfig,
-    #[serde(default = "default_true")]
-    pub active: bool,
-}
-
-fn default_true() -> bool {
-    true
-}
-
-#[derive(Deserialize, Debug, ToSchema)]
-pub struct UpdateTriggerRequest {
-    pub config: Option<TriggerConfig>,
-    pub active: Option<bool>,
 }
 
 fn default_push_and_pull_request_trigger_suggestions() -> Vec<TriggerConfig> {

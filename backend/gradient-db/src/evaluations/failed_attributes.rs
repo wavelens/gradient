@@ -49,6 +49,15 @@ fn dedup_by_attribute(messages: Vec<MEvaluationMessage>) -> Vec<FailedAttribute>
     failed
 }
 
+impl From<FailedAttribute> for gradient_api_types::FailedAttributeSummary {
+    fn from(failed: FailedAttribute) -> Self {
+        Self {
+            eval: failed.attr,
+            message: failed.message,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

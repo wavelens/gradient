@@ -34,6 +34,10 @@ use gradient_types::actions::ActionConfig;
 use gradient_types::events::EventOwner;
 use gradient_types::events::audit::Action;
 
+use crate::endpoints::tasks::build_task_response_from_task_row_latest_evaluation_recent_evaluation_bars_triggers_and_caller_permission_mask;
+pub use gradient_api_types::{
+    DuplicateTaskRequest, MakeTaskRequest, PatchTaskRequest, TransferOwnershipRequest,
+};
 use gradient_core::ServerState;
 use gradient_db::DbContext;
 use gradient_sources::{SourceError, resolve_remote_ref};
@@ -45,40 +49,11 @@ use gradient_types::*;
 use gradient_util::http_base_url::remove_user_name_and_password_from_urls_in_error_text;
 use sea_orm::ActiveValue::Set;
 use sea_orm::TransactionTrait;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use std::collections::HashMap;
 use std::sync::Arc;
 
 const TASK_RECENT_EVALUATION_RUN_COUNT: u64 = 5;
-
-#[derive(Serialize, Deserialize, Debug, utoipa::ToSchema)]
-pub struct MakeTaskRequest {
-    pub name: TaskName,
-    pub display_name: TaskDisplayName,
-    pub description: String,
-    pub repository: String,
-    pub wildcard: String,
-    #[serde(default)]
-    pub concurrency: Option<ConcurrencyPolicy>,
-    #[serde(default)]
-    pub wait_for_workers: Option<bool>,
-    #[serde(default)]
-    pub retry_failed_builds: Option<bool>,
-    #[serde(default)]
-    pub multi_node_evaluation: Option<bool>,
-    #[serde(default)]
-    pub exec_enabled: Option<bool>,
-    #[serde(default)]
-    pub restrict_evaluation_fetches: Option<bool>,
-    #[serde(default)]
-    pub extra_allowed_uri_prefixes: Option<Vec<String>>,
-    #[serde(default)]
-    pub triggers: Option<Vec<TriggerConfig>>,
-    #[serde(default)]
-    pub git_host_connection: Option<GitHostConnectionId>,
-    #[serde(default)]
-    pub report_status: Option<bool>,
-}
 
 #[derive(Deserialize, Debug, utoipa::ToSchema)]
 pub struct CheckRepositoryRequest {
@@ -88,13 +63,6 @@ pub struct CheckRepositoryRequest {
 #[derive(Deserialize, Debug, utoipa::ToSchema)]
 pub struct RepositoryAccessCheckRequest {
     pub repository: String,
-}
-
-#[derive(Deserialize, Debug, utoipa::ToSchema)]
-pub struct DuplicateTaskRequest {
-    pub name: TaskName,
-    pub display_name: TaskDisplayName,
-    pub branch: String,
 }
 
 async fn fetch_remote_repository_head_commit_with_project_ssh_key(
@@ -138,29 +106,6 @@ fn validate_extra_allowed_uri_prefixes(prefixes: Vec<String>) -> WebResult<Vec<S
         .iter()
         .map(|prefix| check_allowed_uri_prefix_has_remote_nix_scheme(prefix.trim()))
         .collect::<Result<Vec<_>, _>>()?)
-}
-
-#[derive(Serialize, Deserialize, Debug, utoipa::ToSchema)]
-pub struct PatchTaskRequest {
-    pub name: Option<TaskName>,
-    pub display_name: Option<String>,
-    pub description: Option<String>,
-    pub repository: Option<String>,
-    pub wildcard: Option<String>,
-    pub keep_evaluations: Option<i32>,
-    pub concurrency: Option<ConcurrencyPolicy>,
-    pub wait_for_workers: Option<bool>,
-    pub retry_failed_builds: Option<bool>,
-    pub multi_node_evaluation: Option<bool>,
-    pub exec_enabled: Option<bool>,
-    pub only_evaluate: Option<bool>,
-    pub restrict_evaluation_fetches: Option<bool>,
-    pub extra_allowed_uri_prefixes: Option<Vec<String>>,
-}
-
-#[derive(Serialize, Deserialize, Debug, utoipa::ToSchema)]
-pub struct TransferOwnershipRequest {
-    pub project: String,
 }
 
 #[utoipa::path(
@@ -241,7 +186,7 @@ pub async fn get(
         let recent_evaluations = latest_evaluation
             .and_then(|e| recent_evaluations.remove(&e.id))
             .unwrap_or_default();
-        TaskResponse::new(
+        build_task_response_from_task_row_latest_evaluation_recent_evaluation_bars_triggers_and_caller_permission_mask(
             p,
             latest_evaluation,
             recent_evaluations,
@@ -419,7 +364,7 @@ pub async fn get_task(
     };
     let triggers = gradient_db::triggers::of_task(&db.web_db, task.id).await?;
 
-    Ok(ok_json(TaskResponse::new(
+    Ok(ok_json(build_task_response_from_task_row_latest_evaluation_recent_evaluation_bars_triggers_and_caller_permission_mask(
         task,
         latest_evaluation,
         recent_evaluations,

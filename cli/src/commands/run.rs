@@ -29,11 +29,11 @@ pub struct RunArgs {
     #[arg(long)]
     no_shell: bool,
     /// Number of CPUs for the guest
-    #[arg(long, value_parser = clap::value_parser!(i32).range(1..))]
-    cpus: Option<i32>,
+    #[arg(long, value_parser = clap::value_parser!(u32).range(1..))]
+    cpus: Option<u32>,
     /// Memory for the guest (MB)
-    #[arg(long, value_name = "MB", value_parser = clap::value_parser!(i64).range(1..))]
-    memory: Option<i64>,
+    #[arg(long, value_name = "MB", value_parser = clap::value_parser!(u64).range(1..))]
+    memory: Option<u64>,
     /// Give the guest internet access
     #[arg(long)]
     network: bool,
@@ -121,19 +121,13 @@ fn has_terminal() -> bool {
 
 fn run_options(args: &RunArgs, interactive: bool) -> RunOptions {
     RunOptions {
-        interactive: Some(interactive),
+        interactive,
         cpus: args.cpus,
         memory_mb: args.memory,
         network: args.network.then_some(true),
         labels: (!args.labels.is_empty()).then(|| args.labels.clone()),
-        timeout_secs: args
-            .timeout
-            .map(|secs| i64::try_from(secs).unwrap_or(i64::MAX)),
-        ports: args
-            .forwards
-            .iter()
-            .map(|forward| i32::from(forward.guest))
-            .collect(),
+        timeout_secs: args.timeout,
+        ports: args.forwards.iter().map(|forward| forward.guest).collect(),
     }
 }
 

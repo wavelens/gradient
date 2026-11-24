@@ -4,9 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use super::dispatch::{
-    BuildRequestOptions, DispatchResponse, InputOverrideBody, finalize_build_request, parent_job,
-};
+use super::dispatch::{BuildRequestOptions, DispatchResponse, finalize_build_request, parent_job};
 use super::refusal::BuildRequestRefusal;
 use crate::access::{Caller, ProjectAccess, load_project};
 use crate::api_spec::Binary;
@@ -21,6 +19,7 @@ use axum::Extension;
 use axum::Json;
 use axum::body::Bytes;
 use axum::extract::{Multipart, State};
+pub use gradient_api_types::SourceFinalize;
 use gradient_core::ServerState;
 use gradient_storage::PartialStore;
 use gradient_storage::source_nar::source_nar_from_bytes;
@@ -132,18 +131,6 @@ pub async fn post_source(
 pub struct SourceChunkQuery {
     offset: u64,
     project: String,
-}
-
-#[derive(Deserialize, utoipa::ToSchema)]
-pub struct SourceFinalize {
-    #[serde(default)]
-    pub target: Option<String>,
-    #[serde(default)]
-    pub system: Option<String>,
-    #[serde(default)]
-    pub input_overrides: Vec<InputOverrideBody>,
-    #[serde(default)]
-    pub run: Option<gradient_entity::evaluation::RunOptions>,
 }
 
 fn source_partial_store(config: &RuntimeConfig) -> WebResult<PartialStore> {

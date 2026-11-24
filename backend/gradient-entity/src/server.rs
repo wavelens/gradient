@@ -4,4 +4,4 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-pub type Architecture = String;
+pub use gradient_api_types::Architecture;

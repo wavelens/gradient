@@ -66,3 +66,21 @@ impl RelationTrait for Relation {
 }
 
 impl ActiveModelBehavior for ActiveModel {}
+
+impl From<Model> for gradient_api_types::ClosureEdge {
+    fn from(edge: Model) -> Self {
+        Self {
+            source: edge.dependency.to_string(),
+            target: edge.derivation.to_string(),
+        }
+    }
+}
+
+impl From<Model> for gradient_api_types::DependencyEdge {
+    fn from(edge: Model) -> Self {
+        Self {
+            source: edge.dependency,
+            target: edge.derivation,
+        }
+    }
+}

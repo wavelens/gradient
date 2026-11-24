@@ -18,6 +18,7 @@ doctest = false
 workspace = true
 
 [dependencies]
+gradient-api-types = { workspace = true }
 gradient-wildcard = { workspace = true }
 gradient-derive = { workspace = true }
 gradient-entity = { workspace = true }

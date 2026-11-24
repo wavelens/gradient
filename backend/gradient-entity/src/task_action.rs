@@ -5,70 +5,11 @@
  */
 
 use chrono::NaiveDateTime;
-use num_enum::{IntoPrimitive, TryFromPrimitive};
-use sea_orm::Iterable;
 use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
 
 use crate::ids::{TaskActionId, TaskId, UserId};
-
-#[repr(i16)]
-#[derive(
-    Debug,
-    Clone,
-    Copy,
-    Default,
-    PartialEq,
-    Eq,
-    DeriveActiveEnum,
-    EnumIter,
-    Deserialize,
-    Serialize,
-    IntoPrimitive,
-    TryFromPrimitive,
-)]
-#[sea_orm(rs_type = "i16", db_type = "SmallInteger")]
-pub enum ActionType {
-    #[default]
-    #[sea_orm(num_value = 0)]
-    SendMail = 0,
-    #[sea_orm(num_value = 1)]
-    SendWebRequest = 1,
-    #[sea_orm(num_value = 3)]
-    OpenPr = 3,
-    #[sea_orm(num_value = 4)]
-    SendMatrixMessage = 4,
-    #[sea_orm(num_value = 5)]
-    SendSlackMessage = 5,
-    #[sea_orm(num_value = 6)]
-    StartEvaluation = 6,
-}
-
-impl ActionType {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            ActionType::SendMail => "send_mail",
-            ActionType::SendWebRequest => "send_web_request",
-            ActionType::OpenPr => "open_pr",
-            ActionType::SendMatrixMessage => "send_matrix_message",
-            ActionType::SendSlackMessage => "send_slack_message",
-            ActionType::StartEvaluation => "start_evaluation",
-        }
-    }
-
-    pub fn from_name(name: &str) -> Option<Self> {
-        Self::iter().find(|t| t.as_str() == name)
-    }
-
-    pub fn secret_field(self) -> Option<&'static str> {
-        match self {
-            ActionType::SendWebRequest => Some("token"),
-            ActionType::SendMatrixMessage => Some("access_token"),
-            ActionType::SendSlackMessage => Some("webhook_url"),
-            _ => None,
-        }
-    }
-}
+pub use gradient_api_types::ActionType;
 
 #[derive(Clone, Debug, Default, PartialEq, DeriveEntityModel, Deserialize, Serialize)]
 #[sea_orm(table_name = "task_action")]
@@ -114,9 +55,44 @@ impl Related<super::task_action_delivery::Entity> for Entity {
 
 impl ActiveModelBehavior for ActiveModel {}
 
+impl From<Model> for gradient_api_types::ActionResponse {
+    fn from(m: Model) -> Self {
+        let at = m.action_type;
+        let mut config = m.config;
+        if let Some(field) = at.secret_field()
+            && let Some(obj) = config.as_object_mut()
+        {
+            obj.remove(field);
+        }
+        let events = m
+            .events
+            .as_array()
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|v| v.as_str().map(str::to_owned))
+                    .collect()
+            })
+            .unwrap_or_default();
+        Self {
+            id: m.id,
+            name: m.name,
+            action_type: at.as_str().into(),
+            config,
+            events,
+            active: m.active,
+            last_fired_at: m.last_fired_at,
+            last_delivery: None,
+            created_by: m.created_by,
+            created_at: m.created_at,
+            updated_at: m.updated_at,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use sea_orm::Iterable;
 
     #[test]
     fn type_names_round_trip() {

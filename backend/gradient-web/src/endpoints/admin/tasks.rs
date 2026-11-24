@@ -10,43 +10,12 @@ use crate::helpers::ok_json;
 use crate::resource::Resource;
 use anyhow::Context;
 use axum::{Json, extract::State};
+pub use gradient_api_types::AdminTaskDto;
 use gradient_core::ServerState;
 use gradient_db::maintenance::admin_tasks;
-use gradient_entity::ids::{AdminTaskId, UserId};
-use gradient_types::{BaseResponse, MAdminTask};
-use serde::Serialize;
+use gradient_entity::ids::AdminTaskId;
+use gradient_types::BaseResponse;
 use std::sync::Arc;
-
-#[derive(Serialize, Debug, utoipa::ToSchema)]
-pub struct AdminTaskDto {
-    pub id: AdminTaskId,
-    pub kind: &'static str,
-    pub status: &'static str,
-    pub created_at: chrono::NaiveDateTime,
-    pub started_at: Option<chrono::NaiveDateTime>,
-    pub finished_at: Option<chrono::NaiveDateTime>,
-    pub progress: Option<serde_json::Value>,
-    pub checkpoint: Option<String>,
-    pub error: Option<String>,
-    pub created_by: Option<UserId>,
-}
-
-impl From<MAdminTask> for AdminTaskDto {
-    fn from(m: MAdminTask) -> Self {
-        Self {
-            id: m.id,
-            kind: m.kind.as_str(),
-            status: m.status.as_str(),
-            created_at: m.created_at,
-            started_at: m.started_at,
-            finished_at: m.finished_at,
-            progress: m.progress,
-            checkpoint: m.checkpoint,
-            error: m.error,
-            created_by: m.created_by,
-        }
-    }
-}
 
 #[utoipa::path(
     get,

@@ -15,8 +15,8 @@ use crate::output::{ExitKind, Output};
 use clap::{Args, Subcommand};
 use connector::api::{
     AddTeamMemberRequest, MakeTeamRequest, PatchTeamRequest, PatchWorkerRequest,
-    RegisterWorkerRequest, RemoveTeamMemberRequest, RevokeInvitationRequest, TeamMemberRequest,
-    TeamRole,
+    RegisterWorkerRequest, RemoveTeamMemberRequest, RevokeInvitationRequest, TeamDisplayName,
+    TeamMemberRequest, TeamName, TeamRole,
 };
 use connector::webhooks::WebhookResource;
 
@@ -225,11 +225,11 @@ impl WorkerCapabilityToggles {
         RegisterWorkerRequest {
             display_name,
             url,
-            enable_network: self.enable_network,
-            enable_secrets: self.enable_secrets,
-            enable_exec: self.enable_exec,
-            enable_eval: self.enable_eval,
-            enable_build: self.enable_build,
+            enable_network: self.enable_network.unwrap_or(true),
+            enable_secrets: self.enable_secrets.unwrap_or(true),
+            enable_exec: self.enable_exec.unwrap_or_default(),
+            enable_eval: self.enable_eval.unwrap_or(true),
+            enable_build: self.enable_build.unwrap_or(true),
         }
     }
 }
@@ -358,8 +358,9 @@ pub async fn handle(cmd: Commands, out: Output) {
             let name = input.get("Name");
             match teams
                 .create(MakeTeamRequest {
-                    name: name.clone().into(),
-                    display_name: input.get("Display Name").into(),
+                    name: TeamName::try_from(name.clone()).unwrap_or_else(|e| out.fail(e)),
+                    display_name: TeamDisplayName::try_from(input.get("Display Name"))
+                        .unwrap_or_else(|e| out.fail(e)),
                 })
                 .await
             {
@@ -382,7 +383,9 @@ pub async fn handle(cmd: Commands, out: Output) {
             scim_group,
         } => {
             let body = PatchTeamRequest {
-                display_name: display_name.map(Into::into),
+                display_name: display_name.map(|display_name| {
+                    TeamDisplayName::try_from(display_name).unwrap_or_else(|e| out.fail(e))
+                }),
                 new_project_users,
                 new_project_workers,
                 new_project_role,
@@ -481,7 +484,7 @@ async fn handle_members(cmd: TeamMembersCommands, client: &connector::Client, ou
                 AddTeamMemberRequest {
                     user,
                     role,
-                    add_as_member_immediately: None,
+                    add_as_member_immediately: false,
                 },
             )
             .await
@@ -519,7 +522,7 @@ async fn handle_invitations(
                     }
                     for invitation in invitations {
                         out.human(format!(
-                            "{} ({}): {}, expires {}",
+                            "{} ({}): {}, expires {:?}",
                             invitation.user,
                             invitation.name,
                             invitation.role,
@@ -613,7 +616,7 @@ async fn handle_workers(cmd: TeamWorkerSubcommand, client: &connector::Client, o
                     out.human("No workers registered.");
                 }
                 for worker in workers {
-                    let status = match (worker.active, worker.connected) {
+                    let status = match (worker.active, worker.connection.connected) {
                         (false, _) => "inactive",
                         (true, true) => "online",
                         (true, false) => "offline",
@@ -623,7 +626,7 @@ async fn handle_workers(cmd: TeamWorkerSubcommand, client: &connector::Client, o
                         .map(|url| format!(" (url: {url})"))
                         .unwrap_or_default();
                     out.human(format!(
-                        "{} \"{}\": {} [{status}]{url}",
+                        "{} \"{}\": {:?} [{status}]{url}",
                         worker.worker_id, worker.display_name, worker.registered_at
                     ));
                 }

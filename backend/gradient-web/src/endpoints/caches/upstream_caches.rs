@@ -19,8 +19,12 @@ use crate::scope::{CacheScope, Readable, Requires, RequiresUnmanaged, can};
 use anyhow::Context;
 use axum::Json;
 use axum::extract::State;
+pub use gradient_api_types::{
+    AddUpstreamRequest, HttpUpstreamCredentialRequest, PatchHttpUpstreamCredentialRequest,
+    PatchUpstreamRequest, UpstreamCacheItem, UpstreamTestResponse,
+};
 use gradient_core::ServerState;
-use gradient_core::upstream_source::{ProtocolProbe, credential_of_upstream_row, probe_protocol};
+use gradient_core::upstream_source::{credential_of_upstream_row, probe_protocol};
 use gradient_db::WebDb;
 use gradient_entity::cache_upstream::{
     CacheUpstreamKind, CacheUpstreamSource, UpstreamCredentialScheme,
@@ -40,158 +44,48 @@ use gradient_util::upstream_cache_credential::{
 };
 use sea_orm::ActiveValue::Set;
 use sea_orm::{IntoActiveModel, TransactionTrait};
-use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
-#[derive(Deserialize, utoipa::ToSchema)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum AddUpstreamRequest {
-    Internal {
-        cache_name: String,
-        display_name: Option<String>,
-        mode: Option<CacheSubscriptionMode>,
-    },
-    Http {
-        display_name: String,
-        url: String,
-        public_key: String,
-        #[serde(default)]
-        http1_only: bool,
-        credential: Option<HttpUpstreamCredentialRequest>,
-    },
-    GradientProto {
-        url: String,
-        remote_cache: String,
-        display_name: String,
-        mode: Option<CacheSubscriptionMode>,
-        api_key: Option<String>,
-    },
+fn validate_upstream_credential_request_and_return_scheme_and_plain_text_to_encrypt(
+    request: &HttpUpstreamCredentialRequest,
+) -> Result<(UpstreamCredentialScheme, String), CacheRefusal> {
+    Ok(match request {
+        HttpUpstreamCredentialRequest::Basic { user, password } => (
+            UpstreamCredentialScheme::Basic,
+            validate_basic_auth_and_make_upstream_cache_credential(user, password)?,
+        ),
+        HttpUpstreamCredentialRequest::Bearer { token } => (
+            UpstreamCredentialScheme::Bearer,
+            upstream_cache_credential_plaintext_from_bearer_token(token)?,
+        ),
+    })
 }
 
-#[derive(Deserialize, utoipa::ToSchema)]
-#[serde(tag = "scheme", rename_all = "snake_case")]
-pub enum HttpUpstreamCredentialRequest {
-    Basic { user: String, password: String },
-    Bearer { token: String },
-}
-
-impl HttpUpstreamCredentialRequest {
-    fn validate_and_return_credential_scheme_and_plain_text_for_encryption(
-        &self,
-    ) -> Result<(UpstreamCredentialScheme, String), CacheRefusal> {
-        Ok(match self {
-            Self::Basic { user, password } => (
-                UpstreamCredentialScheme::Basic,
-                validate_basic_auth_and_make_upstream_cache_credential(user, password)?,
-            ),
-            Self::Bearer { token } => (
-                UpstreamCredentialScheme::Bearer,
-                upstream_cache_credential_plaintext_from_bearer_token(token)?,
-            ),
-        })
+fn upstream_cache_item_from_upstream_cache_row_and_optional_upstream_gradient_cache_name(
+    upstream: MCacheUpstream,
+    upstream_cache_name: Option<String>,
+) -> UpstreamCacheItem {
+    let shown_url = upstream
+        .url
+        .as_deref()
+        .and_then(upstream_cache_url_for_display_without_username_password_query_and_fragment);
+    UpstreamCacheItem {
+        stored_url_has_user_password_or_query: shown_url
+            .as_ref()
+            .is_some_and(|shown| shown.had_removed_url_parts),
+        url: shown_url.map(|UpstreamCacheUrlForDisplay { url, .. }| url),
+        id: upstream.id,
+        display_name: upstream.display_name,
+        mode: upstream.mode,
+        upstream_cache_id: upstream.upstream_cache,
+        upstream_cache_name,
+        public_key: upstream.public_key,
+        kind: format!("{:?}", upstream.kind).to_lowercase(),
+        remote_cache: upstream.remote_cache_name,
+        http1_only: upstream.http1_only,
+        active: upstream.active,
+        credential_scheme: upstream.credential_scheme.map(Into::into),
     }
-}
-
-#[derive(Deserialize, utoipa::ToSchema)]
-#[serde(tag = "scheme", rename_all = "snake_case")]
-pub enum PatchHttpUpstreamCredentialRequest {
-    Basic { user: String, password: String },
-    Bearer { token: String },
-    None,
-}
-
-impl PatchHttpUpstreamCredentialRequest {
-    fn into_credential_request_to_store(self) -> Option<HttpUpstreamCredentialRequest> {
-        match self {
-            Self::Basic { user, password } => {
-                Some(HttpUpstreamCredentialRequest::Basic { user, password })
-            }
-            Self::Bearer { token } => Some(HttpUpstreamCredentialRequest::Bearer { token }),
-            Self::None => None,
-        }
-    }
-}
-
-impl std::fmt::Debug for PatchHttpUpstreamCredentialRequest {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(match self {
-            Self::Basic { .. } => "Basic",
-            Self::Bearer { .. } => "Bearer",
-            Self::None => "None",
-        })
-    }
-}
-
-#[derive(Serialize, utoipa::ToSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum CredentialSchemeItem {
-    Basic,
-    Bearer,
-}
-
-impl From<UpstreamCredentialScheme> for CredentialSchemeItem {
-    fn from(scheme: UpstreamCredentialScheme) -> Self {
-        match scheme {
-            UpstreamCredentialScheme::Basic => Self::Basic,
-            UpstreamCredentialScheme::Bearer => Self::Bearer,
-        }
-    }
-}
-
-#[derive(Serialize, utoipa::ToSchema)]
-pub struct UpstreamCacheItem {
-    pub id: CacheUpstreamId,
-    pub display_name: String,
-    pub mode: CacheSubscriptionMode,
-    pub upstream_cache_id: Option<CacheId>,
-    /// The name of the internal upstream cache (for a link to that cache). The API can return this name when the cache is public or the caller has `manageUpstreamCaches` here.
-    pub upstream_cache_name: Option<String>,
-    pub url: Option<String>,
-    pub public_key: Option<String>,
-    pub kind: String,
-    pub remote_cache: Option<String>,
-    pub http1_only: bool,
-    pub active: bool,
-    /// True when the stored URL holds a user, password or query, which `url` leaves out. Such an upstream cache can't be set active until its URL is fixed: with PATCH for an HTTP upstream cache, by creating it again for a Gradient Proto one.
-    pub stored_url_has_user_password_or_query: bool,
-    pub credential_scheme: Option<CredentialSchemeItem>,
-}
-
-impl UpstreamCacheItem {
-    fn new(upstream: MCacheUpstream, upstream_cache_name: Option<String>) -> Self {
-        let shown_url = upstream
-            .url
-            .as_deref()
-            .and_then(upstream_cache_url_for_display_without_username_password_query_and_fragment);
-        Self {
-            stored_url_has_user_password_or_query: shown_url
-                .as_ref()
-                .is_some_and(|shown| shown.had_removed_url_parts),
-            url: shown_url.map(|UpstreamCacheUrlForDisplay { url, .. }| url),
-            id: upstream.id,
-            display_name: upstream.display_name,
-            mode: upstream.mode,
-            upstream_cache_id: upstream.upstream_cache,
-            upstream_cache_name,
-            public_key: upstream.public_key,
-            kind: format!("{:?}", upstream.kind).to_lowercase(),
-            remote_cache: upstream.remote_cache_name,
-            http1_only: upstream.http1_only,
-            active: upstream.active,
-            credential_scheme: upstream.credential_scheme.map(Into::into),
-        }
-    }
-}
-
-#[derive(Debug, Deserialize, utoipa::ToSchema)]
-pub struct PatchUpstreamRequest {
-    pub display_name: Option<String>,
-    pub mode: Option<CacheSubscriptionMode>,
-    pub url: Option<String>,
-    pub public_key: Option<String>,
-    pub http1_only: Option<bool>,
-    pub active: Option<bool>,
-    pub credential: Option<PatchHttpUpstreamCredentialRequest>,
 }
 
 /// State is re-applying a managed cache's upstream caches on startup. Toggling `active` is the only
@@ -246,7 +140,7 @@ fn validate_http(
         return Err(CacheRefusal::HttpPublicKeyRequired.into());
     }
     let payload = credential
-        .map(HttpUpstreamCredentialRequest::validate_and_return_credential_scheme_and_plain_text_for_encryption)
+        .map(validate_upstream_credential_request_and_return_scheme_and_plain_text_to_encrypt)
         .transpose()?;
     if payload.is_some() && !url.as_str().starts_with("https://") {
         return Err(CacheRefusal::UpstreamCacheCredentialSentOverPlainHttp.into());
@@ -377,7 +271,9 @@ pub async fn get_upstream_caches(
                 .and_then(|id| linked.get(&id))
                 .filter(|target| manages || target.public)
                 .map(|target| target.name.clone());
-            UpstreamCacheItem::new(upstream, name)
+            upstream_cache_item_from_upstream_cache_row_and_optional_upstream_gradient_cache_name(
+                upstream, name,
+            )
         })
         .collect();
 
@@ -599,7 +495,7 @@ pub async fn patch_cache_upstream(
         let payload = credential_change
             .as_ref()
             .and_then(Option::as_ref)
-            .map(HttpUpstreamCredentialRequest::validate_and_return_credential_scheme_and_plain_text_for_encryption)
+            .map(validate_upstream_credential_request_and_return_scheme_and_plain_text_to_encrypt)
             .transpose()?;
         let keeps_stored_credential = has_stored_credential && credential_change.is_none();
         let target_url = new_url
@@ -656,31 +552,6 @@ pub async fn patch_cache_upstream(
     tx.commit().await?;
 
     Ok(ok_json("Upstream updated".to_string()))
-}
-
-#[derive(Debug, Serialize, utoipa::ToSchema)]
-pub struct UpstreamTestResponse {
-    pub ok: bool,
-    pub http1: ProtocolProbe,
-    pub http2: ProtocolProbe,
-    pub message: String,
-}
-
-impl UpstreamTestResponse {
-    fn new(http1: ProtocolProbe, http2: ProtocolProbe) -> Self {
-        let message = match (http1.ok, http2.ok) {
-            (true, true) => "Reachable over HTTP/1.1 and HTTP/2.",
-            (true, false) => "Reachable over HTTP/1.1 only.",
-            (false, true) => "Reachable over HTTP/2 only.",
-            (false, false) => "Unreachable over HTTP/1.1 and HTTP/2.",
-        };
-        Self {
-            ok: http1.ok || http2.ok,
-            http1,
-            http2,
-            message: message.to_string(),
-        }
-    }
 }
 
 #[utoipa::path(

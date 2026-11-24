@@ -12,6 +12,7 @@ use crate::audit::Audit;
 use crate::error::{WebError, WebResult};
 use crate::helpers::OptionExt;
 use crate::resource::Resource;
+pub use gradient_api_types::{CreateRepositoryGrantRequest, RepositoryGrantResponse};
 use gradient_db::git_host_connection_repository_grants::{
     self as grants, NewGitHostConnectionRepositoryGrant,
 };
@@ -19,41 +20,21 @@ use gradient_db::git_host_connections::GitHostConnectionOwnerByDatabaseId;
 use gradient_types::events::audit::Action;
 use gradient_types::*;
 use sea_orm::{TransactionSession, TransactionTrait};
-use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-#[derive(Deserialize, Debug, utoipa::ToSchema)]
-pub struct CreateRepositoryGrantRequest {
-    pub project: String,
-    pub repository_owner: String,
-    pub repository_name: Option<String>,
-}
-
-#[derive(Serialize, Debug, utoipa::ToSchema)]
-pub struct RepositoryGrantResponse {
-    pub id: GitHostConnectionRepositoryGrantId,
-    pub project: ProjectId,
-    pub project_name: Option<String>,
-    pub repository_owner: String,
-    pub repository_name: Option<String>,
-    #[schema(value_type = String)]
-    pub source: RepositoryGrantSource,
-    pub created_by: Option<UserId>,
-    pub created_at: chrono::NaiveDateTime,
-}
-
-impl RepositoryGrantResponse {
-    fn new(grant: MGitHostConnectionRepositoryGrant, project_name: Option<String>) -> Self {
-        Self {
-            id: grant.id,
-            project: grant.project,
-            project_name,
-            repository_owner: grant.repository_owner,
-            repository_name: grant.repository_name,
-            source: grant.source,
-            created_by: grant.created_by,
-            created_at: grant.created_at,
-        }
+fn repository_grant_response_from_row_and_project_name(
+    grant: MGitHostConnectionRepositoryGrant,
+    project_name: Option<String>,
+) -> RepositoryGrantResponse {
+    RepositoryGrantResponse {
+        id: grant.id,
+        project: grant.project,
+        project_name,
+        repository_owner: grant.repository_owner,
+        repository_name: grant.repository_name,
+        source: grant.source,
+        created_by: grant.created_by,
+        created_at: grant.created_at,
     }
 }
 
@@ -162,7 +143,7 @@ pub(crate) async fn list(
         .into_iter()
         .map(|grant| {
             let project_name = visible_project_names.get(&grant.project).cloned();
-            RepositoryGrantResponse::new(grant, project_name)
+            repository_grant_response_from_row_and_project_name(grant, project_name)
         })
         .collect())
 }
@@ -257,7 +238,10 @@ pub(crate) async fn create(
         Some(&linked_ids),
     )
     .await;
-    Ok(RepositoryGrantResponse::new(grant, Some(project.name)))
+    Ok(repository_grant_response_from_row_and_project_name(
+        grant,
+        Some(project.name),
+    ))
 }
 
 pub(crate) async fn delete(

@@ -13,23 +13,11 @@ use anyhow::Context;
 use axum::extract::State;
 use axum::response::Redirect;
 use axum::{Extension, Json};
+pub use gradient_api_types::{GithubAppManifestRequest, GithubAppManifestResponse};
 use gradient_core::ServerState;
 use gradient_types::{BaseResponse, MUser};
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use std::sync::Arc;
-
-#[derive(Deserialize, Default, Debug, utoipa::ToSchema)]
-pub struct GithubAppManifestRequest {
-    pub host: Option<String>,
-    pub organization: Option<String>,
-}
-
-#[derive(Serialize, Debug, utoipa::ToSchema)]
-pub struct GithubAppManifestResponse {
-    pub manifest: serde_json::Value,
-    pub post_url: String,
-    pub state: String,
-}
 
 #[derive(Deserialize, Debug, utoipa::IntoParams)]
 #[into_params(parameter_in = Query)]

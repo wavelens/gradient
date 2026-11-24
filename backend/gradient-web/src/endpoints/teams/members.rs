@@ -17,6 +17,9 @@ use crate::resource::Resource;
 use crate::scope::{Admin, Member, TeamScope};
 use axum::Json;
 use axum::extract::State;
+pub use gradient_api_types::{
+    AddTeamMemberRequest, RemoveTeamMemberRequest, TeamMemberItem, TeamMemberRequest,
+};
 use gradient_core::ServerState;
 use gradient_notify::{InvitationMail, InviteScope, generate_token};
 use gradient_types::events::EventOwner;
@@ -24,45 +27,18 @@ use gradient_types::events::audit::Action;
 use gradient_types::*;
 use sea_orm::ActiveValue::Set;
 use sea_orm::{ConnectionTrait, TransactionTrait};
-use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
-#[derive(Serialize, utoipa::ToSchema)]
-pub struct TeamMemberItem {
-    pub user: String,
-    pub name: String,
-    pub role: TeamRole,
-    pub source: TeamMemberSource,
-}
-
-impl TeamMemberItem {
-    fn new(member: MUser, membership: MTeamUser) -> Self {
-        Self {
-            user: member.username,
-            name: member.name,
-            role: membership.role,
-            source: membership.source,
-        }
+fn team_member_item_from_user_and_membership(
+    member: MUser,
+    membership: MTeamUser,
+) -> TeamMemberItem {
+    TeamMemberItem {
+        user: member.username,
+        name: member.name,
+        role: membership.role,
+        source: membership.source,
     }
-}
-
-#[derive(Deserialize, utoipa::ToSchema)]
-pub struct AddTeamMemberRequest {
-    pub user: String,
-    pub role: TeamRole,
-    #[serde(default)]
-    pub add_as_member_immediately: bool,
-}
-
-#[derive(Deserialize, utoipa::ToSchema)]
-pub struct TeamMemberRequest {
-    pub user: String,
-    pub role: TeamRole,
-}
-
-#[derive(Deserialize, utoipa::ToSchema)]
-pub struct RemoveTeamMemberRequest {
-    pub user: String,
 }
 
 pub(crate) fn role_label(role: TeamRole) -> &'static str {
@@ -112,7 +88,7 @@ pub async fn get_team_members(
     Ok(ok_json(
         rows.into_iter()
             .filter_map(|(membership, member)| {
-                member.map(|member| TeamMemberItem::new(member, membership))
+                member.map(|member| team_member_item_from_user_and_membership(member, membership))
             })
             .collect(),
     ))

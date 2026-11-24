@@ -4,25 +4,13 @@
 use crate::api::{
     ArtefactTree, ClosureGraph, EvaluationAction, EvaluationFailureSummary,
     EvaluationMessageResponse, EvaluationResponse, FlakeGraphNode, MakeEvaluationRequest,
-    OutputArtefacts, PaginatedBuilds,
+    PaginatedBuilds,
 };
 use crate::http::encode_url_component;
 use crate::{Client, ConnectorError, DownloadedBinaryFile, LiveUpdateEvent, http};
 use futures::stream::Stream;
 use reqwest::Method;
 use serde::Serialize;
-
-impl OutputArtefacts {
-    /// The API is returning the prefix-free base form. An already-prefixed value is tolerated
-    /// during the transition.
-    pub fn full_store_path(&self) -> String {
-        if self.store_path.starts_with("/nix/store/") {
-            self.store_path.clone()
-        } else {
-            format!("/nix/store/{}", self.store_path)
-        }
-    }
-}
 
 pub struct EvalsApi<'a>(pub(crate) &'a Client);
 

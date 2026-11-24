@@ -84,7 +84,7 @@ fn connection(id: &str, generated_secret: Option<&str>) -> Value {
         "git_host_type": "forgejo", "base_url": "https://git.example.com", "has_secret": true,
         "has_access_token": true, "access_token_refreshes_automatically": false,
         "allowed_ips": [], "receives_events": true,
-        "reports_status": true, "created_by": USER, "created_at": "2026-11-11T00:00:00Z",
+        "reports_status": true, "created_by": USER, "created_at": "2026-11-11T00:00:00",
         "managed": false, "webhook_url": "https://gradient.example/api/v1/hooks/forgejo",
         "generated_secret": generated_secret
     })
@@ -356,7 +356,7 @@ async fn test_git_host_connection_delete_and_deliveries_by_uuid_skip_the_name_lo
         .respond_with(ok(json!([{
             "id": DELIVERY, "event": "push", "status_code": 202, "result": "queued",
             "repository": "org/repo", "tasks_scanned": 1, "queued": 1,
-            "created_at": "2026-11-11T00:00:00Z"
+            "created_at": "2026-11-11T00:00:00"
         }])))
         .expect(1)
         .mount(&server)
@@ -414,8 +414,8 @@ async fn test_git_host_connection_rejects_invalid_owner_and_unknown_name() {
 fn one_repository_grant_response_json() -> Value {
     json!({
         "id": REPOSITORY_GRANT_UUID, "project": USER, "project_name": "web",
-        "repository_owner": "org", "repository_name": "repo", "source": "api",
-        "created_by": USER, "created_at": "2026-11-11T00:00:00Z"
+        "repository_owner": "org", "repository_name": "repo", "source": "admin",
+        "created_by": USER, "created_at": "2026-11-11T00:00:00"
     })
 }
 
@@ -481,14 +481,14 @@ async fn test_repository_grant_create_list_and_delete_by_uuid_for_a_team_connect
         ]
         .concat(),
     ));
-    assert!(created.contains("org/repo web api"), "{created}");
+    assert!(created.contains("org/repo web admin"), "{created}");
     let listed = stdout_of(gradient(
         &home,
         false,
         &[&forgejo_repository_grant_arguments_prefix[..], &["list"]].concat(),
     ));
     assert!(
-        listed.contains(&format!("org/repo web api: {REPOSITORY_GRANT_UUID}")),
+        listed.contains(&format!("org/repo web admin: {REPOSITORY_GRANT_UUID}")),
         "{listed}"
     );
     gradient(
@@ -659,12 +659,12 @@ fn task_repository(report_status: bool, current: Option<Value>) -> Value {
         },
         "recent_deliveries": [{
             "id": DELIVERY, "event": "push", "status_code": 202, "result": "queued",
-            "tasks_scanned": 1, "queued": 1, "created_at": "2026-11-11T00:00:00Z"
+            "tasks_scanned": 1, "queued": 1, "created_at": "2026-11-11T00:00:00"
         }],
         "status_posts": [{
             "id": ATTEMPT, "event": "evaluation.completed", "success": false,
             "response_status": 401, "error_message": "bad token",
-            "delivered_at": "2026-11-11T00:00:00Z"
+            "delivered_at": "2026-11-11T00:00:00"
         }],
         "available_connections": [
             summary(PROJECT_CONNECTION, "forgejo", project_owner(), true),
@@ -887,7 +887,7 @@ async fn test_task_repository_check_commit_status_posts_the_status_test() {
         .and(path(format!("{REPOSITORY}/status-test")))
         .respond_with(ok(json!({
             "id": ATTEMPT, "event": "test", "success": true, "response_status": 201,
-            "delivered_at": "2026-11-11T00:00:00Z"
+            "delivered_at": "2026-11-11T00:00:00"
         })))
         .expect(1)
         .mount(&server)
@@ -933,7 +933,8 @@ async fn test_git_host_connection_create_for_github_sends_the_installation_id() 
     Mock::given(method("PUT"))
         .and(path("/api/v1/admin/git-host-connections"))
         .and(body_json(json!({
-            "name": "github-acme", "git_host_type": "github", "installation_id": 42
+            "name": "github-acme", "git_host_type": "github", "installation_id": 42,
+            "receives_events": true, "reports_status": false
         })))
         .respond_with(ok(connection(OTHER_CONNECTION, None)))
         .expect(1)
@@ -999,7 +1000,7 @@ async fn test_git_host_connection_list_shows_health_tasks_and_declarative_state(
     declared["task_count"] = json!(2);
     declared["last_delivery"] = json!({
         "id": DELIVERY, "event": "push", "status_code": 202, "result": "queued",
-        "tasks_scanned": 1, "queued": 1, "created_at": "2026-11-11T00:00:00Z"
+        "tasks_scanned": 1, "queued": 1, "created_at": "2026-11-11T00:00:00"
     });
     Mock::given(method("GET"))
         .and(path(CONNECTIONS))

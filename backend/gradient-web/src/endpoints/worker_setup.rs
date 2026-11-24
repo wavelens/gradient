@@ -5,39 +5,23 @@
  */
 
 use crate::endpoints::projects::workers::RegisterWorkerRequest;
-use serde::Serialize;
+pub use gradient_api_types::WorkerRegistrationResponse;
 
-#[derive(Serialize, utoipa::ToSchema)]
-pub struct WorkerRegistrationResponse {
-    pub id: String,
-    pub name: String,
-    pub url: String,
-    /// Project ID or team ID that the worker names in its peers file. The peers line is `<peer_id>:<token>`.
-    pub peer_id: String,
-    /// One-time token for the worker. The server can save only the hash and can't show the token again.
-    pub token: String,
-    pub nixos_configuration: String,
-}
-
-impl WorkerRegistrationResponse {
-    pub fn new(
-        serve_url: &str,
-        body: &RegisterWorkerRequest,
-        url: String,
-        peer_id: impl ToString,
-        token: String,
-    ) -> Self {
-        let id = uuid::Uuid::now_v7().to_string();
-        Self {
-            nixos_configuration: render_new_worker_nixos_configuration_snippet(
-                serve_url, &id, body,
-            ),
-            id,
-            name: body.display_name.trim().to_string(),
-            url,
-            peer_id: peer_id.to_string(),
-            token,
-        }
+pub fn make_new_worker_registration_response_with_nixos_config(
+    serve_url: &str,
+    body: &RegisterWorkerRequest,
+    url: String,
+    peer_id: impl ToString,
+    token: String,
+) -> WorkerRegistrationResponse {
+    let id = uuid::Uuid::now_v7().to_string();
+    WorkerRegistrationResponse {
+        nixos_configuration: render_new_worker_nixos_configuration_snippet(serve_url, &id, body),
+        id,
+        name: body.display_name.trim().to_string(),
+        url,
+        peer_id: peer_id.to_string(),
+        token,
     }
 }
 

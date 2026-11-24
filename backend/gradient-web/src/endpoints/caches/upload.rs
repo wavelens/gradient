@@ -19,6 +19,7 @@ use axum::body::Bytes;
 use axum::extract::{Multipart, State};
 use axum::http::{HeaderMap, StatusCode, header};
 use axum::response::IntoResponse;
+pub use gradient_api_types::NarinfoPart;
 use gradient_core::ServerState;
 use gradient_db::DbContext;
 use gradient_entity::store_path_content_producer::CacheUploadChannel;
@@ -46,19 +47,6 @@ pub struct NarUploadForm {
     pub narinfo: NarinfoPart,
     #[schema(value_type = String, format = Binary)]
     pub nar: Vec<u8>,
-}
-
-#[derive(Deserialize, utoipa::ToSchema)]
-pub struct NarinfoPart {
-    store_path: String,
-    file_hash: String,
-    file_size: i64,
-    nar_size: i64,
-    nar_hash: String,
-    #[serde(default)]
-    references: Vec<String>,
-    #[serde(default)]
-    deriver: Option<String>,
 }
 
 #[utoipa::path(
