@@ -7,6 +7,7 @@
 from datetime import timedelta
 
 EVALUATED = {"Building", "Waiting", "Completed"}
+EVALUATION_STATUS_NAME_TO_DATABASE_VALUE = {"Building": 3, "Waiting": 4, "Completed": 5}
 EVAL_TIMEOUT = 900
 POSTGRES_LOG = "/var/lib/postgresql/18/log/postgresql.log"
 server_trace_directory = "/var/lib/gradient/trace"
@@ -169,6 +170,19 @@ def eval_phases(eval_id):
         " WHERE dj.evaluation_id = '{eval_id}' AND dj.kind = 0",
         eval_id,
     )
+
+
+def evaluation_request_to_first_non_evaluating_status_ms(eval_id):
+    left_evaluating = sorted(EVALUATION_STATUS_NAME_TO_DATABASE_VALUE[name] for name in EVALUATED)
+    milliseconds = psql(
+        "SELECT round(extract(epoch FROM coalesce("
+        " (SELECT min(pe.at) FROM phase_event pe WHERE pe.subject_kind = 1 AND pe.subject_id = e.id"
+        f" AND pe.phase IN ({', '.join(map(str, left_evaluating))})),"
+        " least(e.building_started_at, e.finished_at)) - e.created_at) * 1000)::bigint"
+        f" FROM evaluation e WHERE e.id = '{eval_id}'"
+    )
+    assert milliseconds, f"evaluation {eval_id} has no recorded end of its evaluating statuses"
+    return int(milliseconds)
 
 
 def shard_timings(eval_id):
@@ -403,7 +417,8 @@ def measure(token, task):
     phases = eval_phases(eval_id)
     result = {
         "eval_id": eval_id,
-        "wall_ms": report.wall_ms(phases),
+        report.EVALUATION_REQUEST_TO_BUILDING_STARTED_MS_KEY: evaluation_request_to_first_non_evaluating_status_ms(eval_id),
+        report.WORKERS_EVALUATION_PHASE_SPAN_MS_KEY: report.evaluation_phase_span_milliseconds(phases),
         "statements": statements,
         "shards": shards,
         "jobs": jobs,

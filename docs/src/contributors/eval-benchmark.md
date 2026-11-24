@@ -64,13 +64,14 @@ cat result/summary.txt
 - Server spans for each measured evaluation go into `spans-<task>-<N>.jsonl`. Worker spans go into `spans-<task>-<N>-<worker>.jsonl` for each active worker, including the eval subprocess. The log can print a table of span totals per process, ordered by total time.
 - Names for all job phases appear in the log, for example `eval_flake` and `nar_push`.
 - Measured rounds commit a changed comment, wipe the worker eval caches, collect garbage, then stop the surplus workers.
-- Wall clock measures the first start to the last end of the `eval_flake` and `eval_derivations` phases across all jobs.
+- End to end is the span from evaluation creation to the first post-evaluation status (`Building`, `Waiting` or `Completed`). Both timestamps come from the server in `evaluation.created_at` and the matching `phase_event` row, at microsecond precision.
+- The worker phase is the span from the first start to the last end of the `eval_flake` and `eval_derivations` phases across all jobs. `summary.txt`, `summary.json` and the HTML page show this second number next to end-to-end time, but the verdict does not use it.
 - Statements come from `pg_stat_statements` calls of the `gradient` role, reset before each evaluation.
 
 | Target | Check |
 |---|---|
-| Speedup | Wall clock on 1 worker divided by the wall clock on N workers, at least 1 + 0.15 x (N - 1), on more than one job |
-| Small flake | One job with 4 workers up, at most 10% slower than standalone |
+| Speedup | End-to-end time on 1 worker divided by the end-to-end time on N workers, at least 1 + 0.15 x (N - 1), on more than one job |
+| Small flake | One job with 4 workers up, end-to-end time at most 10% slower than standalone |
 
 - A missed target can fail the test. The failure can only occur after `summary.txt` and `evalbench-multinode.tar.gz` exist.
 - Set at least 20 CPUs on the builder. QEMU threads of each VM pin to separate cores. Fewer CPUs trigger an immediate test failure.
