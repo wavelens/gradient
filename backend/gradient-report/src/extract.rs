@@ -11,13 +11,27 @@ use sea_orm::{ConnectionTrait, Statement};
 
 use crate::redact::Redactor;
 use crate::schema::ManifestRow;
-use crate::tables::{Row, TableSpec, redact_value};
+use crate::tables::{Row, TableSpec, map_stored_value_to_original_form, redact_value};
+use gradient_types::StorePathMapper;
 
-pub fn redact_row(spec: &TableSpec, redactor: &Redactor, row: &Row) -> Row {
+pub fn redact_row(
+    spec: &TableSpec,
+    redactor: &Redactor,
+    mapper: &StorePathMapper,
+    row: &Row,
+) -> Row {
     spec.columns
         .iter()
         .enumerate()
-        .map(|(i, column)| redact_value(redactor, spec.name, column, row.get(i).cloned().flatten()))
+        .map(|(i, column)| {
+            let original = map_stored_value_to_original_form(
+                mapper,
+                spec.name,
+                column,
+                row.get(i).cloned().flatten(),
+            );
+            redact_value(redactor, spec.name, column, original)
+        })
         .collect()
 }
 
@@ -96,26 +110,6 @@ pub async fn fetch_rows<C: ConnectionTrait>(
     }
 
     Ok(rows)
-}
-
-pub async fn export_tables<C: ConnectionTrait>(
-    db: &C,
-    conn: &Connection,
-    specs: &[TableSpec],
-    scope: Uuid,
-    redactor: &Redactor,
-) -> Result<Vec<ManifestRow>> {
-    let mut manifest = Vec::with_capacity(specs.len());
-    for spec in specs {
-        create_table(conn, spec)?;
-        let rows = fetch_rows(db, spec, scope).await?;
-        let redacted: Vec<Row> = rows.iter().map(|r| redact_row(spec, redactor, r)).collect();
-        write_rows(conn, spec, &redacted)?;
-
-        manifest.push(manifest_row(spec, redactor, redacted.len() as i64));
-    }
-
-    Ok(manifest)
 }
 
 pub fn manifest_row(spec: &TableSpec, redactor: &Redactor, rows: i64) -> ManifestRow {
@@ -243,7 +237,12 @@ mod tests {
     fn redact_row_rewrites_only_the_columns_with_a_policy() {
         let spec = spec("evaluation");
         let row = evaluation_row("git@git.supersandro.de:sandro/nixos-config.git");
-        let out = redact_row(spec, &redactor(true, false), &row);
+        let out = redact_row(
+            spec,
+            &redactor(true, false),
+            &crate::tables::identity_store_path_mapper(),
+            &row,
+        );
 
         assert_eq!(out[0], row[0], "the id is not identifying");
         assert_eq!(out[5], row[5], "the status is not identifying");

@@ -9,6 +9,7 @@
 //! column affinity is converting each value back on insert.
 
 use crate::redact::Redactor;
+use gradient_types::StorePathMapper;
 use gradient_util::http_base_url::{
     remove_user_name_and_password_from_urls_in_error_text,
     upstream_cache_url_for_display_without_username_password_query_and_fragment,
@@ -79,6 +80,72 @@ pub fn redact_value(
     };
 
     Some(out)
+}
+
+pub fn map_stored_value_to_original_form(
+    mapper: &StorePathMapper,
+    table: &str,
+    column: &str,
+    value: Option<String>,
+) -> Option<String> {
+    let v = value?;
+    let out = match (table, column) {
+        ("derivation", "hash")
+        | ("derivation_output", "hash")
+        | ("derivation_output", "deriver")
+        | ("cached_path", "hash")
+        | ("cached_path", "deriver") => mapper.outbound_text(&v).unwrap_or(v),
+        ("derivation_output", "references_list") | ("cached_path", "references") => {
+            convert_stored_store_path_list_to_original_form(mapper, &v)
+        }
+        ("evaluation", "repository") | ("evaluation", "flake_source") => {
+            mapper.outbound_if_store_path(&v)
+        }
+        ("exec_job", "spec") => convert_exec_job_spec_paths_to_original_form(mapper, v),
+        ("dispatched_job", "job_context") | ("dispatched_job", "candidates") => {
+            match serde_json::from_str::<serde_json::Value>(&v) {
+                Ok(mut json) => {
+                    mapper.rewrite_stored_drv_paths_in_json_to_outbound(&mut json);
+                    json.to_string()
+                }
+                Err(_) => v,
+            }
+        }
+        _ => v,
+    };
+
+    Some(out)
+}
+
+fn convert_stored_store_path_list_to_original_form(mapper: &StorePathMapper, list: &str) -> String {
+    list.split_whitespace()
+        .map(|path| {
+            mapper
+                .outbound_text(path)
+                .unwrap_or_else(|_| path.to_owned())
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn convert_exec_job_spec_paths_to_original_form(mapper: &StorePathMapper, spec: String) -> String {
+    let Ok(mut json) = serde_json::from_str::<serde_json::Value>(&spec) else {
+        return spec;
+    };
+    for field in ["program", "image"] {
+        if let Some(serde_json::Value::String(path)) = json.get_mut(field) {
+            *path = mapper.outbound_if_store_path(path);
+        }
+    }
+    json.to_string()
+}
+
+#[cfg(test)]
+pub(crate) fn identity_store_path_mapper() -> StorePathMapper {
+    StorePathMapper::for_cache(
+        std::sync::Arc::new(gradient_entity::IdentityMapping),
+        gradient_entity::ids::CacheId::nil(),
+    )
 }
 
 macro_rules! spec {
@@ -1006,6 +1073,59 @@ mod tests {
                 Some(stored.into())
             ),
             Some("https://cache.example/path".into())
+        );
+    }
+
+    #[test]
+    fn evaluation_report_export_writes_original_hashes_under_rotated_store_path_mapping() {
+        use gradient_entity::ids::CacheId;
+        use gradient_entity::{
+            EXAMPLE_ORIGINAL_HASH as O, EXAMPLE_STORED_HASH as S, RotatedHashMapping,
+            StorePathMapper,
+        };
+        use std::sync::Arc;
+
+        let mapper = StorePathMapper::for_cache(Arc::new(RotatedHashMapping), CacheId::nil());
+        let map = |table: &str, column: &str, value: String| {
+            map_stored_value_to_original_form(&mapper, table, column, Some(value))
+        };
+
+        assert_eq!(map("derivation_output", "hash", S.into()), Some(O.into()));
+        assert_eq!(
+            map("cached_path", "deriver", format!("/nix/store/{S}-a.drv")),
+            Some(format!("/nix/store/{O}-a.drv"))
+        );
+        assert_eq!(
+            map(
+                "derivation_output",
+                "references_list",
+                format!("/nix/store/{S}-a /nix/store/{S}-b")
+            ),
+            Some(format!("/nix/store/{O}-a /nix/store/{O}-b"))
+        );
+        let spec = map(
+            "exec_job",
+            "spec",
+            format!(r#"{{"program":"/nix/store/{S}-app/bin/app","image":null}}"#),
+        )
+        .expect("spec");
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&spec).expect("json"),
+            serde_json::json!({ "program": format!("/nix/store/{O}-app/bin/app"), "image": null })
+        );
+        let job_context = map(
+            "dispatched_job",
+            "job_context",
+            format!(r#"{{"derivations":[{{"drv_path":"{S}-a.drv","pname":"a"}}]}}"#),
+        )
+        .expect("job context");
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&job_context).expect("json"),
+            serde_json::json!({ "derivations": [{ "drv_path": format!("{O}-a.drv"), "pname": "a" }] })
+        );
+        assert_eq!(
+            map("derivation", "name", format!("{S}-name")),
+            Some(format!("{S}-name"))
         );
     }
 
