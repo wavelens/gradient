@@ -214,7 +214,7 @@
     "flag": "capabilities-eval",
     "env": "GRADIENT_WORKER_CAPABILITIES_EVAL",
     "type": "bool",
-    "description": "Whether to run Nix flake evaluations.",
+    "description": "Whether to run Nix flake evaluation. The NixOS module can then set Gradient's Nix fork as the default for `nix.package`.",
     "default": "true",
     "values": [
       "true",

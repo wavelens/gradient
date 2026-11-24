@@ -179,7 +179,7 @@ pub struct CapabilitiesArgs {
     #[arg(default_value = "false")]
     pub federate: bool,
 
-    /// Whether to run Nix flake evaluations.
+    /// Whether to run Nix flake evaluation. The NixOS module can then set Gradient's Nix fork as the default for `nix.package`.
     #[arg(default_value = "true")]
     pub eval: bool,
 

@@ -550,8 +550,9 @@ in {
           values in each build result. Peak memory, disk I/O and OOM kills need Gradient's
           Nix fork on the daemon. Set this option or enable
           {option}`services.gradient.worker.capabilities.eval` to make the fork the default for
-          {option}`nix.package`. Concurrent evaluations on this fork register derivations without
-          SQLite busy retries. The metrics always include wall time.
+          {option}`nix.package`. Write operations to the store on this fork begin with the Nix
+          daemon acquiring the write lock of the Nix database. Concurrent evaluations wait on
+          that lock. They don't sleep and retry. The metrics always include wall time.
         '';
       };
 
