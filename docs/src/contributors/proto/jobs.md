@@ -157,7 +157,7 @@ Each build job contains a single `BuildSpec` and maps to one shared build (a `de
     - Out-of-memory failures only return to `FailedTransient` without consuming `build.maxAttempts` if the attempt has a known project and `BuildMetrics.build_cores` is above 1 and below every earlier kill of that derivation in the same project. Other kills consume one attempt. The next attempt can reduce the core count by one third.
     - A kill at 1 core can end the build as `FailedPermanent` with the message `ran out of memory with 1 core`.
     - Out-of-memory builds from workers without a core count use up attempts like other `Transient` failures.
-- **Builds Larger Than Every Worker:** Predicted RAM values exceed every worker's capacity, even with 1 core and RAM proportional to core count. Builds with these values wait for the largest connected worker the project can use and run there. Small workers don't accept those builds. Such builds can fail only through an out-of-memory kill. Only attempts from releases before 2.1 have reason `NotEnoughResources`.
+- **Builds Larger Than Every Worker:** Builds wait for a larger connected worker available to the project when they exceed the total RAM of the worker at the largest core step. They run there at that step. Builds wait for that largest worker when predicted RAM is above the capacity of all workers. They wait for that worker even with 1 core and RAM proportional to the core count. Smaller workers accept neither kind. Such builds can fail only through an out-of-memory kill. Only attempts from releases before 2.1 have reason `NotEnoughResources`.
 - Evaluations end `Completed`, or `Failed` with a build in `Failed`, `Aborted` or `DependencyFailed`, or with an error message present.
 
 ## Cluster Members

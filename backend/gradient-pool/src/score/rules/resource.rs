@@ -92,7 +92,7 @@ impl ScoreRule for ResourceSaturationRule {
     }
 
     fn description(&self) -> &'static str {
-        "Strongly penalizes sending a real build to a worker whose CPU or RAM is already saturated. Holds a build while the worker's free RAM, less the RAM reserved for the jobs already assigned to it and for a held build waiting for it, cannot take the build's predicted peak RAM at any of its core counts, each a third fewer than the last down to one. The largest core count that fits now wins; a build that fits only after a wait keeps its full core count and waits. A prioritized build, or a build held for 60 seconds, keeps its RAM free on a single worker and starts there first. A build no instance has measured yet counts as the mean peak RAM of the instance's builds. Substitute-only builtin fetches get a more lenient CPU threshold. Builds too large for any worker that the project can use have an upper bound equal to the total RAM of the largest such worker. They wait for that worker and run there. Smaller workers play no part."
+        "Strong penalties apply to an actual build on a worker with saturated CPU or RAM. Each build can keep the maximum core count where predicted peak RAM can fit in total RAM of workers available to the project. Each step down can cut core count by a third, down to 1. Available RAM on a worker is free RAM minus RAM reserved for assigned jobs and pending builds that wait for that worker. A build can wait while that available RAM can't fit the predicted peak. Only workers with no reservations they can release start a build with fewer cores. A priority build or a build held for 60 seconds can set aside its RAM share on a single worker and start there first. A build that no instance measured yet can count as the average peak RAM of builds for that instance. Substitute-only builtin fetches get a more lenient CPU threshold. Each build too large for any worker available to the project can get a cap equal to total RAM of the largest such worker. Such a build can wait for that worker and run there. Smaller workers don't take part."
     }
 }
 
@@ -445,7 +445,7 @@ mod tests {
     }
 
     #[test]
-    fn a_build_that_fits_with_fewer_cores_is_not_held() {
+    fn build_that_fits_with_fewer_cores_is_held_for_ram_at_full_core_count() {
         let rule = ResourceSaturationRule::default();
         let mut estimate = BuildEstimate::fixed(Some(8_000), Some(60_000), 5);
         if let Some(ram) = estimate.ram.as_mut() {
@@ -460,13 +460,15 @@ mod tests {
             ..Default::default()
         });
 
-        assert!(
-            !held(&rule, &ctx(&job), &worker),
-            "29 cores fit now, 64 only after a wait"
-        );
+        assert!(held(&rule, &ctx(&job), &worker));
         assert_eq!(
-            rule.score(&ctx(&job), &worker, &InstanceContext::default()),
-            0.0
+            ctx(&job)
+                .core_choice(
+                    &worker.metrics.expect("worker has metrics"),
+                    InstanceContext::default().unmeasured_build_ram_mb()
+                )
+                .cores,
+            64
         );
     }
 }
