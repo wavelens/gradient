@@ -120,6 +120,7 @@ pub mod dispatched_job_phase;
 pub mod exec_job;
 pub mod exec_job_attempt;
 pub mod exec_job_continuation;
+pub mod exec_job_metric;
 pub mod exec_job_output;
 pub mod exec_job_phase;
 pub mod exec_job_pull_request;
