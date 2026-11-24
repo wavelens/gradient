@@ -9,9 +9,11 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use anyhow::{Context, Result};
+use futures::future::OptionFuture;
 use gradient_util::shutdown::Shutdown;
 use gradient_wire::guest::{
-    AGENT_VSOCK_PORT, AgentToWorker, GUEST_JOB_SECRETS_SINCE, GuestConnection, GuestSender, RunJob,
+    AGENT_VSOCK_PORT, AgentToWorker, GUEST_JOB_SECRETS_SINCE,
+    GUEST_USAGE_WINDOW_MESSAGE_AGENT_TO_WORKER_SINCE, GuestConnection, GuestSender, RunJob,
     WorkerToAgent,
 };
 use tokio::sync::{mpsc, oneshot, watch};
@@ -27,19 +29,20 @@ use crate::redaction::JobSecrets;
 use crate::run::run;
 use crate::setup::{PreparedJob, prepare};
 use crate::shell::ShellContext;
+use crate::system_usage_sampler::sample_and_send_exec_metrics_windows_until_shutdown;
 use crate::terminal::{ProgramTerminal, SERIAL_CONSOLE, resize_console};
 
 const ACCEPT_RETRY: Duration = Duration::from_millis(100);
 const SETUP_TIMEOUT: Duration = Duration::from_secs(300);
 
 #[derive(Clone, Debug, Default)]
-struct Progress {
+pub(crate) struct Progress {
     started: bool,
-    outcome: Option<Outcome>,
+    pub(crate) outcome: Option<Outcome>,
 }
 
 #[derive(Clone, Debug)]
-enum Outcome {
+pub(crate) enum Outcome {
     Exited(i32),
     SetupFailed(String),
     Lost,
@@ -173,7 +176,7 @@ async fn serve_connection(agent: Arc<Agent>, stream: VsockStream) -> Result<()> 
         http: Arc::clone(&agent.http),
     };
     let mut channels = AgentChannels::new(outgoing.clone(), agent.tasks.clone());
-    let mut _streamer = spawn_streamer(&agent, None, outgoing.clone());
+    let mut _streamer = spawn_streamer(&agent, None, outgoing.clone(), version);
     while let Some(message) = receiver.recv::<WorkerToAgent>().await? {
         match message {
             WorkerToAgent::Attach { output_offset } => {
@@ -181,7 +184,7 @@ async fn serve_connection(agent: Arc<Agent>, stream: VsockStream) -> Result<()> 
                     outgoing.send(secrets).await?;
                 }
                 let reader = agent.readers.reader_from(output_offset);
-                _streamer = spawn_streamer(&agent, Some(reader), outgoing.clone());
+                _streamer = spawn_streamer(&agent, Some(reader), outgoing.clone(), version);
             }
             WorkerToAgent::RunJob(job) => {
                 if let Some(refused) = start_job(&agent, job) {
@@ -299,22 +302,28 @@ fn spawn_streamer(
     agent: &Agent,
     reader: Option<OutputReader>,
     outgoing: mpsc::Sender<AgentToWorker>,
+    version: u16,
 ) -> AbortOnDropHandle<()> {
     let progress = agent.progress.subscribe();
-    AbortOnDropHandle::new(
-        agent
-            .tasks
-            .spawn(stream_to_worker(progress, reader, outgoing)),
-    )
+    AbortOnDropHandle::new(agent.tasks.spawn(stream_to_worker(
+        progress,
+        reader,
+        outgoing,
+        agent.tasks.clone(),
+        version >= GUEST_USAGE_WINDOW_MESSAGE_AGENT_TO_WORKER_SINCE,
+    )))
 }
 
 async fn stream_to_worker(
     mut progress: watch::Receiver<Progress>,
     mut reader: Option<OutputReader>,
     outgoing: mpsc::Sender<AgentToWorker>,
+    tasks: Shutdown,
+    sends_usage_windows: bool,
 ) {
     let mut sent_started = false;
     let mut output_done = reader.is_none();
+    let mut resource_usage_sampler_task_handle = None;
     loop {
         let now = progress.borrow_and_update().clone();
         match now.outcome.clone() {
@@ -333,8 +342,17 @@ async fn stream_to_worker(
             if outgoing.send(AgentToWorker::ProgramStarted).await.is_err() {
                 return;
             }
+            if sends_usage_windows {
+                resource_usage_sampler_task_handle = Some(AbortOnDropHandle::new(tasks.spawn(
+                    sample_and_send_exec_metrics_windows_until_shutdown(
+                        progress.clone(),
+                        outgoing.clone(),
+                    ),
+                )));
+            }
         }
         if let (Some(_), true, Some(Outcome::Exited(code))) = (&reader, output_done, &now.outcome) {
+            OptionFuture::from(resource_usage_sampler_task_handle.take()).await;
             let _ = outgoing.send(AgentToWorker::Exited { code: *code }).await;
             return;
         }
@@ -373,19 +391,87 @@ async fn next_chunk(reader: Option<&mut OutputReader>) -> Option<OutputChunk> {
 
 #[cfg(test)]
 mod tests {
+    use std::time::Duration;
+
+    use gradient_util::shutdown::Shutdown;
     use gradient_wire::guest::AgentToWorker;
     use tokio::sync::{mpsc, watch};
 
-    use super::{initial_progress, stream_to_worker};
+    use super::{Outcome, Progress, initial_progress, stream_to_worker};
+    use crate::output::OutputLog;
+
+    async fn collect_worker_messages_until_program_exits(
+        sends_usage_windows: bool,
+    ) -> Vec<AgentToWorker> {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let log = OutputLog::create(&dir.path().join("output.log"), 1024)
+            .await
+            .expect("create");
+        tokio::time::pause();
+        let (progress, receiver) = watch::channel(Progress {
+            started: true,
+            outcome: None,
+        });
+        let (outgoing, mut sent) = mpsc::channel(16);
+
+        let tasks = Shutdown::new();
+        let streamer = tasks.spawn(stream_to_worker(
+            receiver,
+            Some(log.readers().reader_from(0)),
+            outgoing,
+            tasks.clone(),
+            sends_usage_windows,
+        ));
+        tokio::time::sleep(Duration::from_millis(1500)).await;
+        progress.send_modify(|p| p.outcome = Some(Outcome::Exited(0)));
+        log.close();
+        streamer.await.expect("streamer");
+
+        let mut messages = Vec::new();
+        while let Some(message) = sent.recv().await {
+            messages.push(message);
+        }
+        messages
+    }
 
     #[tokio::test]
     async fn a_restarted_agent_reports_the_job_as_lost() {
         let (_progress, receiver) = watch::channel(initial_progress(true));
         let (outgoing, mut sent) = mpsc::channel(4);
 
-        stream_to_worker(receiver, None, outgoing).await;
+        stream_to_worker(receiver, None, outgoing, Shutdown::new(), true).await;
 
         assert_eq!(sent.recv().await, Some(AgentToWorker::JobLost));
         assert_eq!(sent.recv().await, None);
+    }
+
+    #[tokio::test]
+    async fn a_short_program_still_sends_its_partial_window() {
+        let messages = collect_worker_messages_until_program_exits(true).await;
+
+        assert!(
+            matches!(
+                messages.as_slice(),
+                [
+                    AgentToWorker::ProgramStarted,
+                    AgentToWorker::ResourceUsageWindow(_),
+                    AgentToWorker::Exited { code: 0 },
+                ]
+            ),
+            "{messages:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn an_old_worker_gets_no_usage_windows() {
+        let messages = collect_worker_messages_until_program_exits(false).await;
+
+        assert_eq!(
+            messages,
+            [
+                AgentToWorker::ProgramStarted,
+                AgentToWorker::Exited { code: 0 },
+            ]
+        );
     }
 }
