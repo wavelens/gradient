@@ -6,6 +6,7 @@
 
 pub mod actions;
 pub mod log;
+pub mod metrics;
 pub mod outputs;
 pub mod pull_requests;
 pub mod query;
