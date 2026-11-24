@@ -90,6 +90,19 @@ pub struct DownsampledResourceUseBucket {
     pub disk_max_bytes: u64,
 }
 
+impl From<DownsampledResourceUseBucket> for gradient_api_types::ExecUsageChartPoint {
+    fn from(bucket: DownsampledResourceUseBucket) -> Self {
+        Self {
+            elapsed_ms: bucket.elapsed_ms,
+            cpu_avg: bucket.cpu_avg,
+            cpu_max: bucket.cpu_max,
+            ram_avg_bytes: bucket.ram_avg_bytes,
+            ram_max_bytes: bucket.ram_max_bytes,
+            disk_max_bytes: bucket.disk_max_bytes,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct ExecAttemptResourceUsageResult {
     pub peaks: WholeAttemptPeakResourceUsage,

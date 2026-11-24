@@ -7119,6 +7119,49 @@ paths:
       security:
       - {}
       - bearerAuth: []
+  /api/v1/exec/{job}/metrics:
+    get:
+      tags:
+      - exec-jobs
+      summary: Get metrics of exec job
+      description: |-
+        Return CPU, RAM and disk usage of one attempt. The target is the latest attempt. ``attempt`` can select a different attempt by number. Multi-node jobs respond on node 0. ``attempt_open`` is true until the attempt is complete. The requested size is the guest size of the job. The available size is the memory and disk that the guest last reported. The available size is empty before the first report. ``cpu_avg``, ``cpu_max``, ``ram_max_bytes`` and ``disk_max_bytes`` cover the whole attempt. CPU values give the count of CPUs in use, not a percentage. ``points`` can hold at most 300 points. Each point can include ``elapsed_ms`` since program start and the average and maximum of reports in that time range. Empty before program start. Return 404 for an attempt number not in the job.
+
+        **Access:** Public projects, or members of the project.
+      operationId: getExecJobMetrics
+      parameters:
+      - name: job
+        in: path
+        required: true
+        schema:
+          $ref: '#/components/schemas/ExecJobId'
+      - name: attempt
+        in: query
+        required: false
+        schema:
+          type: integer
+          format: int32
+          minimum: 0
+      responses:
+        '200':
+          description: Exec job metrics
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - error
+                - message
+                properties:
+                  error:
+                    type: boolean
+                  message:
+                    $ref: '#/components/schemas/ExecJobMetricsResponse'
+        default:
+          $ref: '#/components/responses/Error'
+      security:
+      - {}
+      - bearerAuth: []
   /api/v1/exec/{job}/outputs:
     get:
       tags:
@@ -19977,6 +20020,68 @@ components:
         total_bytes:
           type: integer
           minimum: 0
+    ExecJobMetricsResponse:
+      type: object
+      required:
+      - attempt
+      - attempt_open
+      - requested_cpus
+      - requested_memory_bytes
+      - requested_disk_bytes
+      - cpu_avg
+      - cpu_max
+      - ram_max_bytes
+      - disk_max_bytes
+      - points
+      properties:
+        attempt:
+          type: integer
+          format: int32
+          minimum: 0
+        attempt_open:
+          type: boolean
+        requested_cpus:
+          type: integer
+          format: int32
+          minimum: 0
+        requested_memory_bytes:
+          type: integer
+          format: int64
+          minimum: 0
+        requested_disk_bytes:
+          type: integer
+          format: int64
+          minimum: 0
+        usable_memory_bytes:
+          type:
+          - integer
+          - 'null'
+          format: int64
+          minimum: 0
+        usable_disk_bytes:
+          type:
+          - integer
+          - 'null'
+          format: int64
+          minimum: 0
+        cpu_avg:
+          type: number
+          format: float
+        cpu_max:
+          type: number
+          format: float
+        ram_max_bytes:
+          type: integer
+          format: int64
+          minimum: 0
+        disk_max_bytes:
+          type: integer
+          format: int64
+          minimum: 0
+        points:
+          type: array
+          items:
+            $ref: '#/components/schemas/ExecUsageChartPoint'
     ExecJobNode:
       type: object
       required:
@@ -20414,6 +20519,38 @@ components:
             type: integer
             format: int32
             minimum: 0
+    ExecUsageChartPoint:
+      type: object
+      required:
+      - elapsed_ms
+      - cpu_avg
+      - cpu_max
+      - ram_avg_bytes
+      - ram_max_bytes
+      - disk_max_bytes
+      properties:
+        elapsed_ms:
+          type: integer
+          format: int64
+          minimum: 0
+        cpu_avg:
+          type: number
+          format: float
+        cpu_max:
+          type: number
+          format: float
+        ram_avg_bytes:
+          type: integer
+          format: int64
+          minimum: 0
+        ram_max_bytes:
+          type: integer
+          format: int64
+          minimum: 0
+        disk_max_bytes:
+          type: integer
+          format: int64
+          minimum: 0
     ExpensiveBuild:
       type: object
       required:

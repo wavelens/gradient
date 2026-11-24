@@ -25,7 +25,7 @@ use gradient_test_support::state::TestState;
 use gradient_test_support::web::{
     make_test_server, mock_db_and_auth_header_for_api_key_owned_by_user, signed_in_as,
 };
-use gradient_types::exec::{DeviceRequest, ExecSpec};
+use gradient_types::exec::{DeviceRequest, ExecSpec, GuestSize};
 use gradient_types::permissions::{Permission, mask_from};
 use gradient_types::waiting_reason::{ExecUnmet, WaitingReason};
 use sea_orm::MockDatabase;
@@ -54,6 +54,7 @@ fn job(status: ExecJobStatus) -> exec_job::Model {
             name: "gpu:h100".into(),
             count: 8,
         }],
+        guest: GuestSize::default_request(),
         ..ExecSpec::default()
     };
     let waiting = WaitingReason::ExecWorkers {
@@ -89,14 +90,32 @@ fn lost_attempt() -> exec_job_attempt::Model {
     }
 }
 
+fn finished_attempt_with_metrics() -> exec_job_attempt::Model {
+    exec_job_attempt::Model {
+        program_started_at: Some(test_date()),
+        ended_at: Some(test_date() + chrono::Duration::seconds(30)),
+        end_reason: Some(AttemptEndReason::Completed),
+        ..lost_attempt()
+    }
+}
+
 fn with_job(db: MockDatabase, status: ExecJobStatus) -> MockDatabase {
-    append_exec_job_of_task_with_status_to_mock_database(db, status, task())
+    with_job_and_attempt(db, status, lost_attempt())
+}
+
+fn with_job_and_attempt(
+    db: MockDatabase,
+    status: ExecJobStatus,
+    attempt: exec_job_attempt::Model,
+) -> MockDatabase {
+    append_exec_job_of_task_with_status_to_mock_database(db, status, task(), attempt)
 }
 
 fn append_exec_job_of_task_with_status_to_mock_database(
     db: MockDatabase,
     status: ExecJobStatus,
     task: gradient_entity::task::Model,
+    attempt: exec_job_attempt::Model,
 ) -> MockDatabase {
     db.append_query_results([vec![job(status)]])
         .append_query_results([vec![entry_point::Model {
@@ -108,7 +127,7 @@ fn append_exec_job_of_task_with_status_to_mock_database(
             ..eval_at(evaluation_id(), 0)
         }]])
         .append_query_results([vec![task.clone()]])
-        .append_query_results([vec![lost_attempt()]])
+        .append_query_results([vec![attempt]])
         .append_query_results([vec![exec_job_phase::Model {
             attempt: attempt_id(),
             name: "epoch-3".into(),
@@ -401,6 +420,7 @@ async fn job_token_reading_exec_job_of_another_task_in_public_project_gets_404()
         db,
         ExecJobStatus::Running,
         other_task,
+        lost_attempt(),
     )
     .append_query_results([vec![public_project()]])
     .append_query_results([Vec::<exec_job_output::Model>::new()])
@@ -729,4 +749,143 @@ async fn a_log_storage_failure_is_a_server_error_not_an_empty_log() {
         .await;
 
     assert_eq!(res.status_code(), StatusCode::INTERNAL_SERVER_ERROR);
+}
+
+const BYTES_PER_MEBIBYTE: i64 = 1024 * 1024;
+
+fn build_exec_attempt_usage_bucket_row(
+    elapsed_ms: i64,
+    cpu_avg: f32,
+    cpu_max: f32,
+) -> BTreeMap<String, sea_orm::Value> {
+    BTreeMap::from(
+        [
+            ("elapsed_ms", sea_orm::Value::from(elapsed_ms)),
+            ("cpu_avg", sea_orm::Value::from(cpu_avg)),
+            ("cpu_max", sea_orm::Value::from(cpu_max)),
+            (
+                "ram_avg_bytes",
+                sea_orm::Value::from(300 * BYTES_PER_MEBIBYTE),
+            ),
+            (
+                "ram_max_bytes",
+                sea_orm::Value::from(400 * BYTES_PER_MEBIBYTE),
+            ),
+            (
+                "disk_max_bytes",
+                sea_orm::Value::from(1024 * BYTES_PER_MEBIBYTE),
+            ),
+            ("whole_attempt_cpu_avg", sea_orm::Value::from(1.25_f32)),
+            ("whole_attempt_cpu_max", sea_orm::Value::from(1.75_f32)),
+            (
+                "whole_attempt_ram_max_bytes",
+                sea_orm::Value::from(412 * BYTES_PER_MEBIBYTE),
+            ),
+            (
+                "whole_attempt_disk_max_bytes",
+                sea_orm::Value::from(1100 * BYTES_PER_MEBIBYTE),
+            ),
+            (
+                "ram_total_bytes",
+                sea_orm::Value::from(480 * BYTES_PER_MEBIBYTE),
+            ),
+            (
+                "disk_total_bytes",
+                sea_orm::Value::from(1900 * BYTES_PER_MEBIBYTE),
+            ),
+        ]
+        .map(|(key, value)| (key.to_owned(), value)),
+    )
+}
+
+#[tokio::test]
+async fn metrics_show_the_requested_guest_size_and_points() {
+    let db = with_job_and_attempt(
+        mock_db(),
+        ExecJobStatus::Completed,
+        finished_attempt_with_metrics(),
+    )
+    .append_query_results([vec![public_project()]])
+    .append_query_results([vec![
+        build_exec_attempt_usage_bucket_row(0, 0.5, 1.0),
+        build_exec_attempt_usage_bucket_row(10_000, 1.5, 1.75),
+    ]]);
+
+    let res = make_test_server(db.into_connection())
+        .get(&format!("/api/v1/exec/{}/metrics", job_id()))
+        .await;
+
+    res.assert_status_ok();
+    let body: Value = res.json();
+    let metrics = &body["message"];
+    assert_eq!(metrics["attempt"], 1);
+    assert_eq!(metrics["attempt_open"], false);
+    assert_eq!(metrics["requested_cpus"], 2);
+    assert_eq!(metrics["requested_memory_bytes"], 500 * BYTES_PER_MEBIBYTE);
+    assert_eq!(metrics["requested_disk_bytes"], 2048 * BYTES_PER_MEBIBYTE);
+    assert_eq!(metrics["usable_memory_bytes"], 480 * BYTES_PER_MEBIBYTE);
+    assert_eq!(metrics["usable_disk_bytes"], 1900 * BYTES_PER_MEBIBYTE);
+    assert_eq!(metrics["cpu_avg"], 1.25);
+    assert_eq!(metrics["cpu_max"], 1.75);
+    assert_eq!(metrics["ram_max_bytes"], 412 * BYTES_PER_MEBIBYTE);
+    assert_eq!(metrics["disk_max_bytes"], 1100 * BYTES_PER_MEBIBYTE);
+    let points = metrics["points"].as_array().expect("points");
+    assert_eq!(points.len(), 2);
+    assert_eq!(points[1]["elapsed_ms"], 10_000);
+    assert_eq!(points[1]["cpu_avg"], 1.5);
+    assert_eq!(points[1]["cpu_max"], 1.75);
+    assert_eq!(points[1]["ram_avg_bytes"], 300 * BYTES_PER_MEBIBYTE);
+    assert_eq!(points[1]["ram_max_bytes"], 400 * BYTES_PER_MEBIBYTE);
+    assert_eq!(points[1]["disk_max_bytes"], 1024 * BYTES_PER_MEBIBYTE);
+}
+
+#[tokio::test]
+async fn metrics_of_an_unknown_attempt_are_not_found() {
+    let db =
+        with_job(mock_db(), ExecJobStatus::Failed).append_query_results([vec![public_project()]]);
+
+    let res = make_test_server(db.into_connection())
+        .get(&format!("/api/v1/exec/{}/metrics?attempt=7", job_id()))
+        .await;
+
+    assert_eq!(res.status_code(), StatusCode::NOT_FOUND);
+    let body: Value = res.json();
+    assert_eq!(body["message"], "Exec job attempt not found");
+}
+
+#[tokio::test]
+async fn metrics_of_a_private_project_need_view_access() {
+    let (db, auth) = signed_in_as(user());
+    let db = with_job(db, ExecJobStatus::Failed)
+        .append_query_results([vec![project()]])
+        .append_query_results([Vec::<project_access::Model>::new()]);
+
+    let res = make_test_server(db.into_connection())
+        .get(&format!("/api/v1/exec/{}/metrics", job_id()))
+        .add_header("authorization", auth)
+        .await;
+
+    assert_eq!(res.status_code(), StatusCode::NOT_FOUND);
+
+    let (db, auth) = signed_in_as(user());
+    let db = with_job(db, ExecJobStatus::Failed)
+        .append_query_results([vec![project()]])
+        .append_query_results([vec![project_access::Model {
+            team: None,
+            project: project().id,
+            user: user().id,
+            role: view_role().id,
+        }]])
+        .append_query_results([vec![view_role()]]);
+
+    let res = make_test_server(db.into_connection())
+        .get(&format!("/api/v1/exec/{}/metrics?attempt=1", job_id()))
+        .add_header("authorization", auth)
+        .await;
+
+    res.assert_status_ok();
+    let body: Value = res.json();
+    assert_eq!(body["message"]["points"], Value::Array(Vec::new()));
+    assert_eq!(body["message"]["cpu_max"], 0.0);
+    assert_eq!(body["message"]["usable_memory_bytes"], Value::Null);
 }

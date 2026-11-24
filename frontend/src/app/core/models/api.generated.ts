@@ -1237,6 +1237,21 @@ export interface ExecJobLog {
   total_bytes: number;
 }
 
+export interface ExecJobMetricsResponse {
+  attempt: number;
+  attempt_open: boolean;
+  requested_cpus: number;
+  requested_memory_bytes: number;
+  requested_disk_bytes: number;
+  usable_memory_bytes?: number | null;
+  usable_disk_bytes?: number | null;
+  cpu_avg: number;
+  cpu_max: number;
+  ram_max_bytes: number;
+  disk_max_bytes: number;
+  points: ExecUsageChartPoint[];
+}
+
 export interface ExecJobNode {
   node: number;
   id: ExecJobId;
@@ -1360,6 +1375,15 @@ export interface ExecUnmet {
   network?: boolean;
   ssh?: boolean;
   ports?: number[];
+}
+
+export interface ExecUsageChartPoint {
+  elapsed_ms: number;
+  cpu_avg: number;
+  cpu_max: number;
+  ram_avg_bytes: number;
+  ram_max_bytes: number;
+  disk_max_bytes: number;
 }
 
 export interface ExpensiveBuild {

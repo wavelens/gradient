@@ -227,6 +227,32 @@ pub struct ExecJobLog {
 }
 
 #[derive(Deserialize, Serialize, Debug, utoipa::ToSchema)]
+pub struct ExecUsageChartPoint {
+    pub elapsed_ms: u64,
+    pub cpu_avg: f32,
+    pub cpu_max: f32,
+    pub ram_avg_bytes: u64,
+    pub ram_max_bytes: u64,
+    pub disk_max_bytes: u64,
+}
+
+#[derive(Deserialize, Serialize, Debug, utoipa::ToSchema)]
+pub struct ExecJobMetricsResponse {
+    pub attempt: u32,
+    pub attempt_open: bool,
+    pub requested_cpus: u32,
+    pub requested_memory_bytes: u64,
+    pub requested_disk_bytes: u64,
+    pub usable_memory_bytes: Option<u64>,
+    pub usable_disk_bytes: Option<u64>,
+    pub cpu_avg: f32,
+    pub cpu_max: f32,
+    pub ram_max_bytes: u64,
+    pub disk_max_bytes: u64,
+    pub points: Vec<ExecUsageChartPoint>,
+}
+
+#[derive(Deserialize, Serialize, Debug, utoipa::ToSchema)]
 pub struct ExecJobOutputView {
     pub path: String,
     pub size: i64,

@@ -487,6 +487,7 @@ pub(crate) fn optional_api() -> OpenApiRouter<Arc<ServerState>> {
                 .routes(routes!(builds::downloads::get_build_download))
                 .routes(routes!(exec_jobs::query::get_exec_job))
                 .routes(routes!(exec_jobs::log::get_exec_job_log))
+                .routes(routes!(exec_jobs::metrics::get_exec_job_metrics))
                 .routes(routes!(exec_jobs::outputs::list_exec_job_outputs))
                 .routes(routes!(
                     exec_jobs::pull_requests::list_exec_job_pull_requests

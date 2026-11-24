@@ -36,7 +36,7 @@ pub use gradient_api_types::{
     ExecJobTokenView, StartedEvaluationView,
 };
 
-fn spec_of(job: &MExecJob) -> ExecSpec {
+pub(super) fn spec_of(job: &MExecJob) -> ExecSpec {
     serde_json::from_value(job.spec.clone()).unwrap_or_default()
 }
 
