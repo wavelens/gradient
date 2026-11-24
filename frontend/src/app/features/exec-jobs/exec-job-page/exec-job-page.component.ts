@@ -47,11 +47,12 @@ import { getFailureBannerForDisplayedAttempt } from '../exec-job-failed-attempt-
 import { phaseMarker } from '../phase-markers';
 import { ExecJobOutputsComponent } from '../exec-job-outputs/exec-job-outputs.component';
 import { ExecJobInfoComponent } from '../exec-job-info/exec-job-info.component';
+import { ExecJobResourceUsageComponent } from '../exec-job-resource-usage/exec-job-resource-usage.component';
 
 const POLL_MS = 2000;
 const execJobPollingStopOnServerRefusal = Symbol('refused');
 
-type JobView = 'log' | 'info' | 'timeline' | 'terminal';
+type JobView = 'log' | 'info' | 'timeline' | 'metrics' | 'terminal';
 type TerminalMode = 'console' | 'attach' | 'shell';
 
 const TERMINAL_PATHS: Record<TerminalMode, (node: number) => string> = {
@@ -77,6 +78,7 @@ function parsePositiveIntegerQueryParam(value: string | null | undefined): numbe
 const LOG_VIEW = { label: 'Log', value: 'log', icon: 'article' } as const;
 const INFO_VIEW = { label: 'Info', value: 'info', icon: 'info' } as const;
 const TIMELINE_VIEW = { label: 'Timeline', value: 'timeline', icon: 'schedule' } as const;
+const METRICS_VIEW = { label: 'Metrics', value: 'metrics', icon: 'show_chart' } as const;
 const TERMINAL_VIEW = { label: 'Terminal', value: 'terminal', icon: 'terminal' } as const;
 
 @Component({
@@ -86,7 +88,7 @@ const TERMINAL_VIEW = { label: 'Terminal', value: 'terminal', icon: 'terminal' }
     RouterModule, FormsModule, ButtonComponent, CopyFieldComponent,
     EmptyStateComponent, FormFieldComponent, IconComponent, LoadingSpinnerComponent, MessageBannerComponent,
     SelectButtonComponent, TabSwitchComponent, StatusBadgeComponent, StatusIconComponent, TerminalComponent, WritableDirective, ExecJobOutputsComponent,
-    LogAttemptListComponent, LogViewerComponent, JobTimelineComponent, LabelHelpComponent, ExecJobInfoComponent, WaitingNoticeComponent, DrawerDirective, RelativeTimePipe,
+    LogAttemptListComponent, LogViewerComponent, JobTimelineComponent, LabelHelpComponent, ExecJobInfoComponent, ExecJobResourceUsageComponent, WaitingNoticeComponent, DrawerDirective, RelativeTimePipe,
     ServerTimestampToLocalDateTimePipe,
   ],
   templateUrl: './exec-job-page.component.html',
@@ -143,7 +145,7 @@ export class ExecJobPageComponent implements OnInit {
     const job = this.job();
     return !!job && this.triggerAccess().canEdit && hasExecTerminal(job.status);
   });
-  views = computed(() => [LOG_VIEW, INFO_VIEW, TIMELINE_VIEW, ...(this.terminalReachable() ? [TERMINAL_VIEW] : [])]);
+  views = computed(() => [LOG_VIEW, INFO_VIEW, TIMELINE_VIEW, METRICS_VIEW, ...(this.terminalReachable() ? [TERMINAL_VIEW] : [])]);
   terminalModes = computed(() => {
     const job = this.job();
     const modes: { label: string; value: TerminalMode }[] = [{ label: 'Console', value: 'console' }];
@@ -263,7 +265,7 @@ export class ExecJobPageComponent implements OnInit {
     this.jobId = params.get('job') ?? '';
     const view = this.route.snapshot.queryParamMap?.get('view');
     this.wantsTerminal = view === 'terminal';
-    if (view === INFO_VIEW.value || view === TIMELINE_VIEW.value) this.view.set(view);
+    if (view === INFO_VIEW.value || view === TIMELINE_VIEW.value || view === METRICS_VIEW.value) this.view.set(view);
     this.node.set(parsePositiveIntegerQueryParam(this.route.snapshot.queryParamMap?.get('node')) ?? 0);
     this.selectedAttemptNumber.set(parsePositiveIntegerQueryParam(this.route.snapshot.queryParamMap?.get('attempt')));
     this.watch();

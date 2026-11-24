@@ -8,7 +8,7 @@ import { Injectable, inject } from '@angular/core';
 import { Observable } from 'rxjs';
 import { environment } from '@environments/environment';
 import { ApiService } from './api.service';
-import { ExecJobLog, ExecJobOutputView, ExecJobPullRequestView, ExecJobResponse, ExecJobSummary } from '@core/models';
+import { ExecJobLog, ExecJobMetricsResponse, ExecJobOutputView, ExecJobPullRequestView, ExecJobResponse, ExecJobSummary } from '@core/models';
 
 function query(params: Record<string, number | undefined>): string {
   const defined = Object.entries(params).filter((entry): entry is [string, number] => entry[1] !== undefined);
@@ -29,6 +29,10 @@ export class ExecJobsService {
 
   logAfter(job: string, offset?: number, attempt?: number, node?: number): Observable<ExecJobLog> {
     return this.api.get<ExecJobLog>(`exec/${job}/log${query({ attempt, node, offset })}`);
+  }
+
+  getJobAttemptMetrics(job: string, attempt: number | null, node: number | null): Observable<ExecJobMetricsResponse> {
+    return this.api.get<ExecJobMetricsResponse>(`exec/${job}/metrics${query({ attempt: attempt ?? undefined, node: node ?? undefined })}`);
   }
 
   outputs(job: string, node?: number): Observable<ExecJobOutputView[]> {

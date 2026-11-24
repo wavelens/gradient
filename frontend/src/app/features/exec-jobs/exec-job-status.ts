@@ -79,7 +79,7 @@ export function deviceLabel(device: DeviceRequest): string {
   return device.count === 1 ? device.name : `${device.name}:${device.count}`;
 }
 
-function cpusLabel(cpus: number): string {
+export function cpusLabel(cpus: number): string {
   return cpus === 1 ? '1 CPU' : `${cpus} CPUs`;
 }
 
