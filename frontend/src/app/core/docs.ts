@@ -19,6 +19,7 @@ export type DocLink =
   | 'concepts/triggers/'
   | 'concepts/triggers/#path-filters'
   | 'concepts/workers/#capabilities'
+  | 'exec/phases-and-outputs/#metrics'
   | 'exec/secrets/'
   | 'exec/secrets/#3-encrypt-repository-sops-files'
   | 'guides/actions/'

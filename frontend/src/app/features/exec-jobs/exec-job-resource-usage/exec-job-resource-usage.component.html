@@ -30,7 +30,7 @@
   </div>
 
   <gr-metric-chart
-    title="CPUs in use"
+    title="CPU in use"
     type="line"
     [height]="200"
     [series]="cpuInUseChartSeries()"
@@ -41,7 +41,7 @@
   />
 
   <gr-metric-chart
-    title="RAM Usage"
+    title="RAM in use"
     explanationText="Memory that the guest uses (page cache excluded). The kernel can free that cache at any time."
     type="line"
     [height]="200"
@@ -53,7 +53,7 @@
   />
 
   <gr-metric-chart
-    title="Disk in Use at /work"
+    title="Disk usage for /work"
     type="line"
     [height]="200"
     [series]="workDiskUsedBytesChartSeries()"

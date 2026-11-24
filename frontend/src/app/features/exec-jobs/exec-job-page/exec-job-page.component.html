@@ -238,7 +238,8 @@
           </div>
         } @else if (view() === 'metrics') {
           <div class="log-header">
-            <span class="log-header-title">Resource Usage</span>
+            <span class="log-header-title">Metrics</span>
+            <gr-label-help doc="exec/phases-and-outputs/#metrics" title="About the metrics" />
           </div>
           <gr-exec-job-resource-usage [job]="job.id" [node]="node()"
                                       [attempt]="pickedOrHighestNumberedAttemptForSelectedNode()?.number ?? null" />
