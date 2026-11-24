@@ -163,9 +163,10 @@ def span_section(spans, span_section_heading_text):
 
 
 def runs_table(runs):
-    head = ["Workers", "Wall clock", "Speedup", "Target", "Statements", "Shards", "Jobs"]
+    head = ["Workers", "End to end", "Worker phases", "Speedup", "Target", "Statements", "Shards", "Jobs"]
     rows = "".join(
-        f"<tr><td>N={n}</td><td>{seconds(r['wall_ms'])}</td><td>{report.speedup(runs, n):.2f}x</td>"
+        f"<tr><td>N={n}</td><td>{seconds(report.get_evaluation_duration_milliseconds(r))}</td>"
+        f"<td>{seconds(r[report.WORKERS_EVALUATION_PHASE_SPAN_MS_KEY])}</td><td>{report.speedup(runs, n):.2f}x</td>"
         f"<td>{report.target(n):.2f}x</td><td>{r['statements']}</td><td>{r['shards']}</td><td>{r['jobs']}</td></tr>"
         for n, r in sorted(runs.items())
     )
@@ -182,7 +183,8 @@ def run_section(title, run, out_dir):
     shards = run.get("shard_timings", [])
     aborted = run.get("status", "Completed") != "Completed"
     parts = [
-        f"<h2 id=\"{anchor(title)}\">{escape(title)}</h2><p class=\"muted\">{seconds(run['wall_ms'])} on {report.jobs_text(run['jobs'])},"
+        f"<h2 id=\"{anchor(title)}\">{escape(title)}</h2><p class=\"muted\">{seconds(report.get_evaluation_duration_milliseconds(run))} end to end,"
+        f" {seconds(run[report.WORKERS_EVALUATION_PHASE_SPAN_MS_KEY])} worker phases on {report.jobs_text(run['jobs'])},"
         f" shards: {shard_states(shards) or 'none'}" + (f", <b>ended {escape(run['status'])} and was aborted</b>" if aborted else "") + "</p>",
         f"<h3>Shards per Member</h3><div class=\"card\">{shard_chart(shards)}</div>",
         f"<h3>Predicted and Actual Shard Time</h3><div class=\"card\">{prediction_chart(shards)}"
@@ -208,7 +210,9 @@ def run_section(title, run, out_dir):
 def small_section(small):
     if not report.small_complete(small):
         return ""
-    rows = [(label, small[label]["wall_ms"] * 1000, f"{label}: {seconds(small[label]['wall_ms'])}"
+    rows = [(label, report.get_evaluation_duration_milliseconds(small[label]) * 1000,
+             f"{label}: {seconds(report.get_evaluation_duration_milliseconds(small[label]))} end to end,"
+             f" {seconds(small[label][report.WORKERS_EVALUATION_PHASE_SPAN_MS_KEY])} worker phases"
              f" on {report.jobs_text(small[label]['jobs'])}") for label in ("standalone", "multinode")]
     return f"<h2>Small Flake</h2><div class=\"card\">{svg.bars(rows)}</div>"
 
