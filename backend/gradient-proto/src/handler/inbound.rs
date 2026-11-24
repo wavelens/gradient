@@ -15,10 +15,10 @@ use gradient_types::{
     BuildProgress, BuildProgressPhase, EvaluationProgress, StorePath, StorePathMapper,
 };
 use tokio::sync::Semaphore;
+use tokio::task::JoinHandle;
 use tracing::{Instrument as _, debug, debug_span, info, trace, warn};
 
 use gradient_scheduler::actor::{WorkerCapabilities, WorkerMetrics};
-use gradient_scheduler::eval_split::reply::ShardRequest;
 use gradient_scheduler::jobs::{Assignment, PendingJob, Reattached};
 use gradient_scheduler::{ReportedTimeline, Scheduler};
 use gradient_wire::messages::{
@@ -27,7 +27,7 @@ use gradient_wire::messages::{
 };
 use gradient_wire::types::{
     BuildProgressPhase as WireBuildProgressPhase, EvalProgress as WireEvalProgress,
-    EvalShardOutcome, ExecMetrics, MAX_PHASE_PAYLOAD,
+    EvalShardOutcome, ExecMetrics, FinishedShard, MAX_PHASE_PAYLOAD,
 };
 use gradient_wire::worker_store_path_bloom_filter::{
     BloomFilterBitArrayChunk, WorkerStorePathBloomFilterChunkCollector,
@@ -37,7 +37,10 @@ use super::SessionHandles;
 use super::cache::{CacheQueryJob, handle_cache_query};
 use super::dialed::DialedSession;
 use super::eval_cache::handle_eval_cache_pull;
-use super::eval_split::{handle_eval_shards_planned, handle_eval_source_ready, send_reply};
+use super::eval_split::{
+    answer_split_member_eval_shard_request, handle_eval_shards_planned, handle_eval_source_ready,
+    send_reply,
+};
 use super::job_events::{JobEvent, JobEvents};
 use super::log_lane::{LogLane, LogTarget};
 use super::nar_serve::{NarStreamResume, ServeSlot, serve_nar_request};
@@ -531,14 +534,10 @@ impl<'a> InboundContext<'a> {
                 held,
             } => {
                 if self.owns_split_member(&job_id).await {
-                    let request = ShardRequest {
-                        have_source,
-                        finished,
-                        held,
-                    };
-                    self.job_events
-                        .push(JobEvent::ShardRequest { job_id, request })
-                        .await;
+                    self.queue_owned_split_member_finished_shard_hold_unapplied_finished_shards_and_spawn_answer_task(
+                        job_id, have_source, finished, held,
+                    )
+                    .await;
                 } else {
                     send_reply(self.writer, job_id, EvalShardOutcome::Finished).await;
                 }
@@ -909,6 +908,28 @@ impl<'a> InboundContext<'a> {
         }
 
         owned
+    }
+
+    async fn queue_owned_split_member_finished_shard_hold_unapplied_finished_shards_and_spawn_answer_task(
+        &self,
+        job_id: String,
+        have_source: bool,
+        finished: Option<FinishedShard>,
+        held: Vec<String>,
+    ) -> JoinHandle<()> {
+        if let Some(finished) = finished {
+            self.job_events
+                .queue_finished_shard_report_as_unapplied(job_id.clone(), finished)
+                .await;
+        }
+        let held = self
+            .job_events
+            .held_shard_ids_including_queued_job_finishes(&job_id, held);
+        let (scheduler, writer) = (Arc::clone(self.scheduler), self.writer.clone());
+        self.handles.db.shutdown.spawn(async move {
+            answer_split_member_eval_shard_request(&scheduler, &writer, job_id, have_source, held)
+                .await;
+        })
     }
 
     fn rpc(&self) -> RpcContext {
@@ -1935,7 +1956,6 @@ pub(in crate::handler) mod fixture {
                 "w1",
                 SchedulerJobEvents {
                     scheduler: Arc::clone(&scheduler),
-                    writer: writer.clone(),
                     peer_id: "w1".into(),
                 },
             );
@@ -2026,7 +2046,6 @@ mod assignment_response_tests {
             "w1",
             SchedulerJobEvents {
                 scheduler: Arc::clone(&scheduler),
-                writer: writer.clone(),
                 peer_id: "w1".into(),
             },
         );
@@ -2096,7 +2115,6 @@ mod assignment_response_tests {
             "w1",
             SchedulerJobEvents {
                 scheduler: Arc::clone(&scheduler),
-                writer: writer.clone(),
                 peer_id: "w1".into(),
             },
         );
@@ -2144,7 +2162,6 @@ mod assignment_response_tests {
             "w1",
             SchedulerJobEvents {
                 scheduler: Arc::clone(&scheduler),
-                writer: writer.clone(),
                 peer_id: "w1".into(),
             },
         );
@@ -2197,7 +2214,6 @@ mod assignment_response_tests {
             "w1",
             SchedulerJobEvents {
                 scheduler: Arc::clone(&scheduler),
-                writer: writer.clone(),
                 peer_id: "w1".into(),
             },
         );
@@ -2267,7 +2283,6 @@ mod assignment_response_tests {
             "w1",
             SchedulerJobEvents {
                 scheduler: Arc::clone(&scheduler),
-                writer: writer.clone(),
                 peer_id: "w1".into(),
             },
         );
@@ -2333,7 +2348,6 @@ mod assignment_response_tests {
             "w1",
             SchedulerJobEvents {
                 scheduler: Arc::clone(&scheduler),
-                writer: writer.clone(),
                 peer_id: "w1".into(),
             },
         );
@@ -2400,7 +2414,6 @@ mod assignment_response_tests {
             "w1",
             SchedulerJobEvents {
                 scheduler: Arc::clone(&scheduler),
-                writer: writer.clone(),
                 peer_id: "w1".into(),
             },
         );
@@ -2910,6 +2923,121 @@ mod exec_report_tests {
         session.job_events.finish().await;
 
         assert_eq!(*recorded.lock(), vec![("epoch-3".to_owned(), 2)]);
+    }
+}
+
+#[cfg(test)]
+mod eval_shard_request_tests {
+    use super::fixture::{TestSession, decode, pending_eval};
+    use super::*;
+    use crate::handler::job_events::{ApplyJobEvent, JobEvent};
+    use gradient_entity::eval_split::Model as MEvalSplit;
+    use gradient_fixtures::mock::mock_db;
+    use gradient_pool::ProjectAccess;
+    use gradient_scheduler::eval_split::reply::RETRY_AFTER_MS;
+    use gradient_test_support::prelude::*;
+    use gradient_types::ids::ClusterJobId;
+    use std::collections::HashSet;
+    use std::time::Duration;
+
+    struct NeverFinishingApplyJobEvent;
+
+    impl ApplyJobEvent for NeverFinishingApplyJobEvent {
+        async fn apply(&self, _event: JobEvent) {
+            std::future::pending::<()>().await;
+        }
+    }
+
+    fn split(source: bool, planned: bool) -> MEvalSplit {
+        MEvalSplit {
+            evaluation: EvaluationId::now_v7(),
+            cluster_job: ClusterJobId::now_v7(),
+            source_store_path: source.then(|| "/nix/store/[hash1]-source".into()),
+            fingerprint: source.then(|| "fp".into()),
+            planned_at: planned.then(gradient_types::now),
+        }
+    }
+
+    async fn reply_while_job_event_lane_is_blocked(
+        split: MEvalSplit,
+        member: u16,
+        have_source: bool,
+    ) -> EvalShardOutcome {
+        let job_id = format!("eval:{}:{member}", split.evaluation);
+        let db = mock_db()
+            .append_query_results([vec![split]])
+            .into_connection();
+        let state = TestState::new().worker_db(db).build();
+        let (mut session, mut sent, _admitted) = TestSession::new(&state).await;
+        let pending = pending_eval();
+        let (port, _signals) = tokio::sync::mpsc::unbounded_channel();
+        session
+            .scheduler
+            .reattach_worker(
+                "w1",
+                gradient_wire::types::GradientCapabilities {
+                    eval: true,
+                    ..Default::default()
+                },
+                ProjectAccess::OnlyListedProjects(HashSet::from([pending.project_id()])),
+                Arc::new(port),
+                vec![Reattached::single(
+                    job_id.clone(),
+                    DispatchedJobId::now_v7(),
+                    pending,
+                )],
+                true,
+            )
+            .await
+            .expect("the worker registers");
+        session.job_events = JobEvents::spawn(&state.shutdown, "w1", NeverFinishingApplyJobEvent);
+        session
+            .job_events
+            .push(JobEvent::Update {
+                job_id: job_id.clone(),
+                update: JobUpdateKind::Compressing,
+            })
+            .await;
+
+        let (ctx, _uploads) = session.split();
+        ctx.queue_owned_split_member_finished_shard_hold_unapplied_finished_shards_and_spawn_answer_task(
+            job_id, have_source, None, Vec::new(),
+        )
+        .await;
+        let reply = tokio::time::timeout(Duration::from_secs(5), sent.recv())
+            .await
+            .expect("answered while the job event lane is blocked")
+            .expect("reply sent");
+        let ServerMessage::EvalShardReply { outcome, .. } = decode(reply) else {
+            panic!("expected an eval shard reply");
+        };
+        outcome
+    }
+
+    #[tokio::test]
+    async fn split_member_without_evaluation_source_gets_source_reply_or_wait_while_job_event_lane_blocked()
+     {
+        assert_eq!(
+            reply_while_job_event_lane_is_blocked(split(false, false), 1, false).await,
+            EvalShardOutcome::Wait {
+                retry_after_ms: RETRY_AFTER_MS
+            }
+        );
+        assert_eq!(
+            reply_while_job_event_lane_is_blocked(split(true, false), 1, false).await,
+            EvalShardOutcome::Source {
+                store_path: "/nix/store/[hash1]-source".into(),
+                fingerprint: "fp".into(),
+            }
+        );
+    }
+
+    #[tokio::test]
+    async fn plan_reply_arrives_before_plan_is_stored_while_job_event_lane_is_blocked() {
+        assert_eq!(
+            reply_while_job_event_lane_is_blocked(split(true, false), 0, true).await,
+            EvalShardOutcome::Plan
+        );
     }
 }
 

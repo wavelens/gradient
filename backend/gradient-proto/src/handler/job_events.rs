@@ -12,19 +12,18 @@ use std::time::{Duration, Instant};
 
 use gradient_entity::dispatched_job::DispatchedJobOutcome;
 use gradient_graph::writer::RECORD_ROW_BUDGET;
-use gradient_scheduler::eval_split::reply::ShardRequest;
 use gradient_scheduler::{ReportedTimeline, Scheduler};
 use gradient_types::ids::{DispatchedJobId, EvaluationId};
 use gradient_util::shutdown::Shutdown;
-use gradient_wire::types::{BuildFailureKind, BuildMetrics, ExecMetrics, InputOutcome};
+use gradient_util::sync::Mutex;
+use gradient_wire::types::{
+    BuildFailureKind, BuildMetrics, ExecMetrics, FinishedShard, InputOutcome,
+};
 use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
 use tracing::{Instrument as _, debug, debug_span, error, info, warn};
 
 use gradient_wire::messages::JobUpdateKind;
-
-use super::eval_split::handle_eval_shard_request;
-use super::socket::ProtoWriter;
 
 const JOB_EVENT_QUEUE: usize = 64;
 const SLOW_JOB_EVENT: Duration = Duration::from_secs(5);
@@ -63,9 +62,10 @@ pub(super) enum JobEvent {
         fetch_id: String,
         outcome: InputOutcome,
     },
-    ShardRequest {
+    FinishedShardReport {
         job_id: String,
-        request: ShardRequest,
+        finished: FinishedShard,
+        registration: PendingShardFinishRegistration,
     },
     Phase {
         job_id: String,
@@ -86,7 +86,7 @@ impl JobEvent {
             | JobEvent::Failed { job_id, .. }
             | JobEvent::ImportRequest { job_id, .. }
             | JobEvent::InputRequest { job_id, .. }
-            | JobEvent::ShardRequest { job_id, .. }
+            | JobEvent::FinishedShardReport { job_id, .. }
             | JobEvent::Phase { job_id, .. }
             | JobEvent::ExecUsageWindow { job_id, .. }
             | JobEvent::InputFetched {
@@ -107,7 +107,7 @@ impl JobEvent {
             JobEvent::ImportRequest { .. } => "import_request",
             JobEvent::InputRequest { .. } => "input_request",
             JobEvent::InputFetched { .. } => "input_fetched",
-            JobEvent::ShardRequest { .. } => "shard_request",
+            JobEvent::FinishedShardReport { .. } => "finished_shard_report",
             JobEvent::Phase { .. } => "phase",
             JobEvent::ExecUsageWindow { .. } => "exec_usage_window",
         }
@@ -154,9 +154,32 @@ pub(super) trait ApplyJobEvent: Send + Sync + 'static {
 
 type QueuedEvent = (Instant, JobEvent, Option<oneshot::Sender<()>>);
 
+/// Finish messages wait in the lane behind the eval results that the worker sent before them. Shards become Done only at the commit of that eval result. Takes of that job count the shard as held until then.
+#[derive(Clone, Default)]
+struct QueuedFinishedShardReportRegistry(Arc<Mutex<Vec<(String, String)>>>);
+
+pub(super) struct PendingShardFinishRegistration {
+    registry: QueuedFinishedShardReportRegistry,
+    job_id: String,
+    shard_id: String,
+}
+
+impl Drop for PendingShardFinishRegistration {
+    fn drop(&mut self) {
+        let mut queued = self.registry.0.lock();
+        if let Some(at) = queued
+            .iter()
+            .position(|(job_id, shard_id)| *job_id == self.job_id && *shard_id == self.shard_id)
+        {
+            queued.swap_remove(at);
+        }
+    }
+}
+
 pub(super) struct JobEvents {
     tx: Option<mpsc::Sender<QueuedEvent>>,
     drained: Option<JoinHandle<()>>,
+    queued_finishes: QueuedFinishedShardReportRegistry,
 }
 
 impl JobEvents {
@@ -166,11 +189,50 @@ impl JobEvents {
         Self {
             tx: Some(tx),
             drained: Some(drained),
+            queued_finishes: QueuedFinishedShardReportRegistry::default(),
         }
     }
 
     pub(super) async fn push(&self, event: JobEvent) {
         self.send(event, None).await;
+    }
+
+    pub(super) async fn queue_finished_shard_report_as_unapplied(
+        &self,
+        job_id: String,
+        finished: FinishedShard,
+    ) {
+        self.queued_finishes
+            .0
+            .lock()
+            .push((job_id.clone(), finished.id.clone()));
+        let registration = PendingShardFinishRegistration {
+            registry: self.queued_finishes.clone(),
+            job_id: job_id.clone(),
+            shard_id: finished.id.clone(),
+        };
+        self.push(JobEvent::FinishedShardReport {
+            job_id,
+            finished,
+            registration,
+        })
+        .await;
+    }
+
+    pub(super) fn held_shard_ids_including_queued_job_finishes(
+        &self,
+        job_id: &str,
+        mut held: Vec<String>,
+    ) -> Vec<String> {
+        held.extend(
+            self.queued_finishes
+                .0
+                .lock()
+                .iter()
+                .filter(|(queued_job_id, _)| queued_job_id == job_id)
+                .map(|(_, shard_id)| shard_id.clone()),
+        );
+        held
     }
 
     pub(super) async fn push_awaited(&self, event: JobEvent) -> oneshot::Receiver<()> {
@@ -241,7 +303,6 @@ async fn drain(mut rx: mpsc::Receiver<QueuedEvent>, peer_id: String, handler: im
 
 pub(super) struct SchedulerJobEvents {
     pub scheduler: Arc<Scheduler>,
-    pub writer: ProtoWriter,
     pub peer_id: String,
 }
 
@@ -298,8 +359,19 @@ impl ApplyJobEvent for SchedulerJobEvents {
                     .handle_input_fetched(&self.peer_id, &fetch_id, outcome)
                     .await;
             }
-            JobEvent::ShardRequest { job_id, request } => {
-                handle_eval_shard_request(&self.scheduler, &self.writer, job_id, request).await;
+            JobEvent::FinishedShardReport {
+                job_id,
+                finished,
+                registration,
+            } => {
+                if let Err(e) = self
+                    .scheduler
+                    .mark_shard_done_and_insert_deferred_shards(&job_id, finished)
+                    .await
+                {
+                    error!(peer_id = %self.peer_id, %job_id, error = %e, "failed to mark reported shard complete -> requeue on job's next shard take");
+                }
+                drop(registration);
             }
             JobEvent::Phase {
                 job_id,
@@ -638,6 +710,121 @@ mod tests {
             .await
             .expect("signalled after the apply")
             .expect("the apply sends the signal");
+    }
+
+    struct GatedRecordingApplyJobEvent {
+        applied: UnboundedSender<&'static str>,
+        gate: Arc<Notify>,
+    }
+
+    impl ApplyJobEvent for GatedRecordingApplyJobEvent {
+        async fn apply(&self, event: JobEvent) {
+            if event.kind() == "eval_result" {
+                self.gate.notified().await;
+            }
+            let _ = self.applied.send(event.kind());
+        }
+    }
+
+    fn finished(id: &str) -> FinishedShard {
+        FinishedShard {
+            id: id.to_owned(),
+            deferred: Vec::new(),
+        }
+    }
+
+    #[tokio::test]
+    async fn finished_shard_report_waits_for_earlier_eval_result_and_shard_is_held_for_that_job_until_applied()
+     {
+        let (applied, mut kinds) = mpsc::unbounded_channel();
+        let gate = Arc::new(Notify::new());
+        let mut events = JobEvents::spawn(
+            &Shutdown::new(),
+            "w1",
+            GatedRecordingApplyJobEvent {
+                applied,
+                gate: Arc::clone(&gate),
+            },
+        );
+        events.push(eval_result("j", 1)).await;
+        events
+            .queue_finished_shard_report_as_unapplied("j".into(), finished("x"))
+            .await;
+
+        assert_eq!(
+            events.held_shard_ids_including_queued_job_finishes("j", vec!["y".into()]),
+            ["y", "x"]
+        );
+        assert_eq!(
+            events.held_shard_ids_including_queued_job_finishes("other", Vec::new()),
+            Vec::<String>::new()
+        );
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        assert!(kinds.try_recv().is_err(), "applied before the eval result");
+
+        gate.notify_one();
+        events.finish().await;
+
+        assert_eq!(kinds.try_recv().unwrap(), "eval_result");
+        assert_eq!(kinds.try_recv().unwrap(), "finished_shard_report");
+        assert!(
+            events
+                .held_shard_ids_including_queued_job_finishes("j", Vec::new())
+                .is_empty()
+        );
+    }
+
+    #[tokio::test]
+    async fn finished_shard_report_to_closed_lane_is_dropped_and_shard_no_longer_counts_as_held() {
+        let (mut events, _applied, _gate) = lane();
+        events.finish().await;
+
+        events
+            .queue_finished_shard_report_as_unapplied("j".into(), finished("x"))
+            .await;
+
+        assert!(
+            events
+                .held_shard_ids_including_queued_job_finishes("j", Vec::new())
+                .is_empty()
+        );
+    }
+
+    #[tokio::test]
+    async fn mark_reported_shard_done_database_error_releases_shard_to_next_take() {
+        let db = gradient_fixtures::mock::empty_db();
+        let log_db = db.clone();
+        let state = gradient_test_support::state::test_state(db);
+        let scheduler = Arc::new(Scheduler::new(Arc::clone(&state)));
+        let mut events = JobEvents::spawn(
+            &state.shutdown,
+            "w1",
+            SchedulerJobEvents {
+                scheduler,
+                peer_id: "w1".into(),
+            },
+        );
+
+        events
+            .queue_finished_shard_report_as_unapplied(
+                format!("eval:{}:1", EvaluationId::now_v7()),
+                finished(&gradient_types::ids::EvalShardId::now_v7().to_string()),
+            )
+            .await;
+        events.finish().await;
+
+        assert!(
+            log_db
+                .into_transaction_log()
+                .iter()
+                .flat_map(|t| t.statements())
+                .any(|s| s.sql.starts_with("UPDATE \"eval_shard\"")),
+            "The database marked the shard done."
+        );
+        assert!(
+            events.queued_finishes.0.lock().is_empty(),
+            "A failed finish must not leave the shard held by the job."
+        );
     }
 
     #[tokio::test]

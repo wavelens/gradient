@@ -188,6 +188,11 @@ flowchart LR
 - The server can only answer `Finished`, when no shard is `Queued` or `Running`.
 - A member can have at most two running shards. A worker can request a second shard with the first shard still on the list. The second shard can keep other evaluation subprocesses busy while the slow attribute can finish the first. Servers older than protocol 55 receive one shard at a time.
 
+- All shard requests get an immediate response at any stage (no source yet, no plan yet, or shards to fetch). Previous evaluation results from the same worker never delay that response. Source reports and plan reports go into storage before the server can read the next message on that connection.
+- The `Done` marks for reported `finished` shards wait in the job event lane behind those evaluation results. `Done` shards always have a committed result.
+- The job take step can treat the shard as held before arrival of the `Done` mark. The server response is then `Wait`, not `Finished`, because the shard is still `Running`.
+- Failed `Done` marks leave the shard as `Running`. Later job takes return the shard to the queue.
+
 ### Recovery
 
 | Event | Result |

@@ -83,18 +83,12 @@ pub fn next_step(split: &SplitView, member: &MemberView) -> NextStep {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Default)]
-pub struct ShardRequest {
-    pub have_source: bool,
-    pub finished: Option<FinishedShard>,
-    pub held: Vec<String>,
-}
-
 impl Scheduler {
     pub async fn eval_shard_request(
         &self,
         job_id: &str,
-        request: ShardRequest,
+        have_source: bool,
+        held: &[String],
     ) -> Result<EvalShardOutcome> {
         let Some((split, index)) = self.split_of(job_id).await? else {
             info!(%job_id, "shard request from a job that is not a split evaluation member");
@@ -102,7 +96,7 @@ impl Scheduler {
         };
 
         let member = MemberView {
-            have_source: request.have_source,
+            have_source,
             is_primary: index == 0,
         };
         let outcome = match next_step(&SplitView::from(&split), &member) {
@@ -112,8 +106,58 @@ impl Scheduler {
                 fingerprint,
             },
             NextStep::Plan => EvalShardOutcome::Plan,
-            NextStep::Take => self.take(&split, job_id, request).await?,
+            NextStep::Take => {
+                self.requeue_lost_shards_and_take_next_shard(job_id, held)
+                    .await?
+            }
         };
+
+        Ok(outcome)
+    }
+
+    pub async fn mark_shard_done_and_insert_deferred_shards(
+        &self,
+        job_id: &str,
+        finished: FinishedShard,
+    ) -> Result<()> {
+        let deferred = if finished.deferred.is_empty() {
+            Vec::new()
+        } else {
+            let Some((split, _)) = self.split_of(job_id).await? else {
+                return Ok(());
+            };
+            self.planned_shards(&split, finished.deferred).await?
+        };
+        let txn = self.db.worker_db.begin().await?;
+        finish(&txn, job_id, &finished.id, deferred).await?;
+        txn.commit().await?;
+
+        Ok(())
+    }
+
+    async fn requeue_lost_shards_and_take_next_shard(
+        &self,
+        job_id: &str,
+        held: &[String],
+    ) -> Result<EvalShardOutcome> {
+        let Some((evaluation, _)) = parse_eval_job_key(job_id) else {
+            return Ok(EvalShardOutcome::Finished);
+        };
+        let held: Vec<EvalShardId> = held.iter().filter_map(|id| id.parse().ok()).collect();
+        let txn = self.db.worker_db.begin().await?;
+        let mut stale = eval_shards::requeue_shards_of(&txn, job_id, &held).await?;
+        stale.extend(
+            eval_shards::requeue_running_shards_whose_job_has_no_open_assignment(&txn, evaluation)
+                .await?,
+        );
+
+        let outcome = match eval_shards::take_shard(&txn, evaluation, job_id).await? {
+            Some(shard) => EvalShardOutcome::Shard(given_shard(&txn, shard).await?),
+            None if eval_shards::has_open_shards(&txn, evaluation).await? => wait(),
+            None => EvalShardOutcome::Finished,
+        };
+        txn.commit().await?;
+        self.record_failed_shards(&stale).await;
 
         Ok(outcome)
     }
@@ -225,46 +269,6 @@ impl Scheduler {
             .await?;
 
         Ok(split.map(|split| (split, index)))
-    }
-
-    async fn take(
-        &self,
-        split: &MEvalSplit,
-        job_id: &str,
-        request: ShardRequest,
-    ) -> Result<EvalShardOutcome> {
-        let evaluation = split.evaluation;
-        let deferred = match &request.finished {
-            Some(finished) if !finished.deferred.is_empty() => {
-                self.planned_shards(split, finished.deferred.clone())
-                    .await?
-            }
-            _ => Vec::new(),
-        };
-        let held: Vec<EvalShardId> = request
-            .held
-            .iter()
-            .filter_map(|id| id.parse().ok())
-            .collect();
-        let txn = self.db.worker_db.begin().await?;
-        if let Some(finished) = request.finished {
-            finish(&txn, job_id, &finished.id, deferred).await?;
-        }
-        let mut stale = eval_shards::requeue_shards_of(&txn, job_id, &held).await?;
-        stale.extend(
-            eval_shards::requeue_running_shards_whose_job_has_no_open_assignment(&txn, evaluation)
-                .await?,
-        );
-
-        let outcome = match eval_shards::take_shard(&txn, evaluation, job_id).await? {
-            Some(shard) => EvalShardOutcome::Shard(given_shard(&txn, shard).await?),
-            None if eval_shards::has_open_shards(&txn, evaluation).await? => wait(),
-            None => EvalShardOutcome::Finished,
-        };
-        txn.commit().await?;
-        self.record_failed_shards(&stale).await;
-
-        Ok(outcome)
     }
 }
 
@@ -503,13 +507,7 @@ mod tests {
         let scheduler = scheduler(db);
 
         let outcome = scheduler
-            .eval_shard_request(
-                &format!("eval:{evaluation}:1"),
-                ShardRequest {
-                    have_source: true,
-                    ..Default::default()
-                },
-            )
+            .eval_shard_request(&format!("eval:{evaluation}:1"), true, &[])
             .await
             .expect("reply");
 
@@ -519,6 +517,82 @@ mod tests {
                 retry_after_ms: RETRY_AFTER_MS
             }
         );
+    }
+
+    #[tokio::test]
+    async fn a_queued_finish_keeps_the_unlisted_shard_running_until_applied() {
+        use gradient_entity::cluster_job::ClusterJobStatus;
+        use gradient_fixtures::shape::shape;
+
+        let (evaluation, cluster) = (EvaluationId::now_v7(), ClusterJobId::now_v7());
+        let job = crate::jobs::eval_job_key(evaluation, 1);
+        let db = shape()
+            .evaluation(evaluation)
+            .eval_assignment()
+            .assignment_option(|a| a.job_id = Some(job.clone()))
+            .cluster(
+                cluster,
+                false,
+                2,
+                ClusterJobStatus::Running,
+                1,
+                gradient_types::now(),
+            )
+            .eval_split_of(cluster)
+            .into_database()
+            .await;
+        let shard = NewShard {
+            pattern: "packages.*".into(),
+            ..Default::default()
+        };
+        eval_shards::insert_shards(&db.connection(), evaluation, &[shard], None)
+            .await
+            .expect("planned shard");
+        let scheduler = scheduler(db.connection());
+
+        let EvalShardOutcome::Shard(taken) = scheduler
+            .requeue_lost_shards_and_take_next_shard(&job, &[])
+            .await
+            .expect("take")
+        else {
+            panic!("Scheduled shards receive assignments.");
+        };
+        let queued_finish = [taken.id.clone()];
+        assert_eq!(
+            scheduler
+                .requeue_lost_shards_and_take_next_shard(&job, &queued_finish)
+                .await
+                .expect("take"),
+            wait(),
+            "The job replies Wait until the reported finish is applied."
+        );
+        let rows = db.rows::<gradient_entity::eval_shard::Entity>().await;
+        assert_eq!(
+            rows.iter()
+                .map(|row| (row.state, row.attempts))
+                .collect::<Vec<_>>(),
+            [(EvalShardState::Running, 0)],
+            "Shards with a completion report in the queue never return to the queue."
+        );
+
+        scheduler
+            .mark_shard_done_and_insert_deferred_shards(
+                &job,
+                FinishedShard {
+                    id: taken.id,
+                    deferred: Vec::new(),
+                },
+            )
+            .await
+            .expect("finish");
+        assert_eq!(
+            scheduler
+                .requeue_lost_shards_and_take_next_shard(&job, &[])
+                .await
+                .expect("take"),
+            EvalShardOutcome::Finished
+        );
+        db.finish().await;
     }
 
     #[test]
@@ -593,22 +667,11 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn the_last_finished_shard_answers_finished() {
+    async fn member_with_all_shards_done_gets_finished_reply() {
         let evaluation = EvaluationId::now_v7();
         let job = format!("eval:{evaluation}:1");
-        let done = MEvalShard {
-            id: EvalShardId::now_v7(),
-            evaluation,
-            seq: 1,
-            pattern: "packages.*".into(),
-            state: EvalShardState::Done,
-            taken_job: Some(job.clone()),
-            created_at: gradient_types::now(),
-            ..Default::default()
-        };
         let db = mock_db()
             .append_query_results([vec![split(evaluation, true, true)]])
-            .append_query_results([vec![done.clone()]])
             .append_query_results([Vec::<MEvalShard>::new()])
             .append_query_results([Vec::<MEvalShard>::new()])
             .append_query_results([Vec::<MEvalShard>::new()])
@@ -616,16 +679,8 @@ mod tests {
             .into_connection();
         let scheduler = scheduler(db);
 
-        let request = ShardRequest {
-            have_source: true,
-            finished: Some(FinishedShard {
-                id: done.id.to_string(),
-                deferred: Vec::new(),
-            }),
-            held: Vec::new(),
-        };
         let outcome = scheduler
-            .eval_shard_request(&job, request)
+            .eval_shard_request(&job, true, &[])
             .await
             .expect("reply");
 
