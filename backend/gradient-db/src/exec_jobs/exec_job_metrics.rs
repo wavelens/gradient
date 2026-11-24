@@ -34,7 +34,8 @@ crate::sql! {
              SELECT ram_total_bytes, disk_total_bytes FROM windows ORDER BY sequence DESC LIMIT 1 \
          ), buckets AS ( \
              SELECT date_bin($2::bigint * interval '1 millisecond', \
-                             GREATEST(received_at, $3::timestamp), $3::timestamp) AS bucket_start, \
+                             LEAST(GREATEST(received_at, $3::timestamp), $4::timestamp), \
+                             $3::timestamp) AS bucket_start, \
                     COALESCE(sum(cpu_avg::float8 * window_ms) / NULLIF(sum(window_ms), 0), 0)::real \
                       AS cpu_avg, \
                     max(cpu_max) AS cpu_max, \
@@ -51,7 +52,7 @@ crate::sql! {
                 l.ram_total_bytes, l.disk_total_bytes \
          FROM buckets b CROSS JOIN whole_attempt w CROSS JOIN latest l \
          ORDER BY b.bucket_start",
-        params = [NewUuid, Int(10_000), Now],
+        params = [NewUuid, Int(10_000), Now, Now],
         tier = Bulk;
 }
 
@@ -149,6 +150,7 @@ pub async fn get_downsampled_usage_points_and_peaks_for_exec_attempt<C: Connecti
                 Value::Uuid(Some(attempt.into_inner())),
                 Value::BigInt(Some(bucket_width_ms)),
                 Value::ChronoDateTime(Some(program_started_at)),
+                Value::ChronoDateTime(Some(until)),
             ]),
     )
     .all(db)
@@ -313,6 +315,65 @@ mod tests {
 
         assert!(!stored);
         assert!(db.rows::<EExecJobMetric>().await.is_empty());
+        db.finish().await;
+    }
+
+    #[tokio::test]
+    async fn recording_a_window_for_a_missing_attempt_returns_false_and_stores_nothing() {
+        let (db, _, _) = create_postgres_database_with_started_open_exec_job_attempt().await;
+
+        let stored = record(
+            &db.connection(),
+            ExecJobAttemptId::now_v7(),
+            &exec_metrics_window_with_sequence_and_cpu_max(0, 1.0),
+            gradient_types::now(),
+        )
+        .await
+        .expect("the lookup runs");
+
+        assert!(!stored);
+        assert!(db.rows::<EExecJobMetric>().await.is_empty());
+        db.finish().await;
+    }
+
+    #[tokio::test]
+    async fn usage_window_after_chart_end_downsample_to_at_most_300_points_and_keep_the_peak_in_last_point()
+     {
+        let (db, _, attempt) = create_postgres_database_with_started_open_exec_job_attempt().await;
+        let conn = db.connection();
+        let program_started_at = attempt.program_started_at.expect("the program started");
+        for sequence in 0..1_200_u32 {
+            let received_at = program_started_at + Duration::seconds(10 * i64::from(sequence + 1));
+            record(
+                &conn,
+                attempt.id,
+                &exec_metrics_window_with_sequence_and_cpu_max(sequence, 1.0),
+                received_at,
+            )
+            .await
+            .expect("the window is recorded");
+        }
+        record(
+            &conn,
+            attempt.id,
+            &exec_metrics_window_with_sequence_and_cpu_max(1_200, 4.0),
+            program_started_at + Duration::seconds(12_500),
+        )
+        .await
+        .expect("the late window is recorded");
+
+        let usage = get_downsampled_usage_points_and_peaks_for_exec_attempt(
+            &conn,
+            attempt.id,
+            program_started_at,
+            program_started_at + Duration::seconds(12_000),
+        )
+        .await
+        .expect("the usage is read");
+
+        assert!(usage.points.len() <= 300, "{} points", usage.points.len());
+        assert_eq!(usage.peaks.cpu_max, 4.0);
+        assert_eq!(usage.points.last().map(|point| point.cpu_max), Some(4.0));
         db.finish().await;
     }
 

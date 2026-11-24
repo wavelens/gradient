@@ -21,7 +21,8 @@ const UP: &str = "CREATE TABLE public.exec_job_metric ( \
     disk_max_bytes bigint NOT NULL, \
     disk_total_bytes bigint NOT NULL, \
     PRIMARY KEY (attempt, sequence) \
-);";
+); \
+CREATE INDEX \"idx-exec_job_metric-exec_job\" ON public.exec_job_metric USING btree (exec_job);";
 
 const DOWN: &str = "DROP TABLE public.exec_job_metric;";
 
