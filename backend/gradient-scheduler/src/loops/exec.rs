@@ -71,7 +71,7 @@ pub(crate) async fn assign_exec_jobs(scheduler: &Scheduler) -> anyhow::Result<()
     let new_rows: Vec<&ExecDispatchRow> = rows
         .iter()
         .filter(|row| untracked.contains(&exec_job_key(row.job.id)))
-        .filter(|row| program_outputs.refusal(row).is_none())
+        .filter(|row| program_outputs.refusal(row, None).is_none())
         .collect();
     let closures = ProgramClosures::load(&scheduler.db.worker_db, new_rows.iter().copied()).await?;
     let new_ids: Vec<ExecJobId> = new_rows.iter().map(|row| row.job.id).collect();
@@ -83,9 +83,14 @@ pub(crate) async fn assign_exec_jobs(scheduler: &Scheduler) -> anyhow::Result<()
     for row in rows {
         let key = exec_job_key(row.job.id);
         let tracked = !untracked.contains(&key);
-        if !tracked && let Some(refusal) = program_outputs.refusal(&row) {
-            fail_queued_job(scheduler, &row, &key, false, refusal).await?;
-            continue;
+        if !tracked && program_outputs.refusal(&row, None).is_some() {
+            let mapper = scheduler
+                .resolve_project_store_path_mapping(row.project)
+                .await;
+            if let Some(refusal) = program_outputs.refusal(&row, mapper.as_ref()) {
+                fail_queued_job(scheduler, &row, &key, false, refusal).await?;
+                continue;
+            }
         }
         let Some(pending) = queued_job(scheduler, &row, &key, tracked, &api_url, &closures).await?
         else {
@@ -197,7 +202,7 @@ impl DerivationPathAndOutputPathsByDerivationId {
         Ok(Self(by_derivation))
     }
 
-    fn refusal(&self, row: &ExecDispatchRow) -> Option<String> {
+    fn refusal(&self, row: &ExecDispatchRow, mapper: Option<&StorePathMapper>) -> Option<String> {
         let program = serde_json::from_value::<ExecSpec>(row.job.spec.clone())
             .ok()?
             .program;
@@ -206,8 +211,15 @@ impl DerivationPathAndOutputPathsByDerivationId {
         let bound = outputs
             .iter()
             .any(|output| root.as_deref() == Some(output.as_str()));
-        (!bound).then(|| {
-            format!("program {program} is not inside an output of derivation {derivation}")
+        (!bound).then(|| match mapper {
+            Some(mapper) => format!(
+                "program {} is not inside an output of derivation {}",
+                mapper.outbound_if_store_path(&program),
+                mapper.outbound_if_store_path(derivation),
+            ),
+            None => {
+                "the program for this exec job is not inside an output of its derivation".into()
+            }
         })
     }
 }
@@ -405,5 +417,71 @@ mod tests {
             Some("/nix/store/aaaa-train")
         );
         assert_eq!(store_root("/bin/sh"), None);
+    }
+
+    #[test]
+    fn test_exec_job_program_outside_derivation_outputs_failure_names_original_paths_with_rotated_mapping()
+     {
+        use gradient_entity::RotatedHashMapping;
+        use gradient_entity::exec_job::{self, ExecJobStatus};
+        use gradient_entity::{EXAMPLE_ORIGINAL_HASH as O, EXAMPLE_STORED_HASH as S};
+        use gradient_types::ids::{CacheId, EntryPointId, EvaluationId, TaskId};
+
+        let derivation = DerivationId::now_v7();
+        let outputs = DerivationPathAndOutputPathsByDerivationId(HashMap::from([(
+            derivation,
+            (
+                format!("/nix/store/{S}-app.drv"),
+                vec![format!("/nix/store/{S}-app")],
+            ),
+        )]));
+        let spec = ExecSpec {
+            program: format!("/nix/store/{S}-other/bin/app"),
+            ..Default::default()
+        };
+        let row = ExecDispatchRow {
+            job: exec_job::Model {
+                id: ExecJobId::now_v7(),
+                evaluation: EvaluationId::now_v7(),
+                entry_point: EntryPointId::now_v7(),
+                program_derivation: derivation,
+                image_derivation: None,
+                requirement: serde_json::Value::Null,
+                spec: serde_json::to_value(spec).unwrap(),
+                retries_left: 0,
+                status: ExecJobStatus::Queued,
+                waiting_reason: None,
+                message: None,
+                created_at: gradient_types::now(),
+                started_at: None,
+                finished_at: None,
+                node_index: 0,
+                keep_vm_running: false,
+                program_exit_code: None,
+                waits_for_manual_start: false,
+            },
+            node_index: 0,
+            entry_point: "app".into(),
+            task: TaskId::now_v7(),
+            wait_for_workers: false,
+            project: ProjectId::now_v7(),
+            project_name: "p".into(),
+            task_name: "t".into(),
+            parent_job: None,
+            repository: String::new(),
+            commit: String::new(),
+            architecture: "x86_64-linux".into(),
+            image_path: None,
+            attempts_done: 0,
+            last_phase: None,
+            open_attempt: None,
+            allows_project_credentials_and_privileged_actions: false,
+        };
+        let mapper = StorePathMapper::for_cache(Arc::new(RotatedHashMapping), CacheId::nil());
+
+        let refusal = outputs.refusal(&row, Some(&mapper)).unwrap();
+
+        assert_eq!(refusal.matches(O).count(), 2, "{refusal}");
+        assert!(!refusal.contains(S), "{refusal}");
     }
 }

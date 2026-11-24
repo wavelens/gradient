@@ -127,6 +127,7 @@ fn response(
     outputs_size: i64,
     names: &WorkerNames,
     config: &RuntimeConfig,
+    mapper: &StorePathMapper,
 ) -> ExecJobResponse {
     let ExecJobDetail {
         job,
@@ -175,7 +176,9 @@ fn response(
         network: requirement.network,
         ssh: requirement.ssh,
         ports: spec.ports,
-        image: spec.image,
+        image: spec
+            .image
+            .map(|image| mapper.outbound_if_store_path(&image)),
         timeout_secs: spec.timeout_secs,
         max_silent_secs: spec.max_silent_secs,
         retries: spec.retries,
@@ -263,6 +266,7 @@ pub async fn get_exec_job(
         .sum();
     let scope = MetricsScope::resolve(&state.web_db, &maybe_user).await?;
     let names = WorkerNames::load(&state.web_db, &scope, attempt_workers(&ctx.detail)).await?;
+    let mapper = state.project_mapper(ctx.project.id).await?;
     let latest = ctx.detail.attempts.last();
     let timeline = match latest {
         Some(attempt) => worker_timeline(&state.web_db, attempt, &ctx.detail.phases).await?,
@@ -282,6 +286,7 @@ pub async fn get_exec_job(
         outputs_size,
         &names,
         &state.config,
+        &mapper,
     )))
 }
 
@@ -349,5 +354,50 @@ mod tests {
         ] {
             assert_eq!(login_of(status, None), None, "{status:?}");
         }
+    }
+
+    #[test]
+    fn the_exec_job_response_shows_the_image_store_path_in_its_original_form() {
+        use gradient_entity::{
+            EXAMPLE_ORIGINAL_HASH as O, EXAMPLE_STORED_HASH as S, RotatedHashMapping,
+        };
+
+        let state = TestState::new().build();
+        let spec = ExecSpec {
+            image: Some(format!("/nix/store/{S}-img")),
+            ..Default::default()
+        };
+        let ctx = ExecJobAccessContext {
+            detail: ExecJobDetail {
+                job: MExecJob {
+                    spec: serde_json::to_value(spec).expect("spec"),
+                    ..Default::default()
+                },
+                status: ExecJobStatus::Created,
+                entry_point: String::new(),
+                task: None,
+                project: None,
+                attempts: vec![],
+                phases: vec![],
+                tokens: vec![],
+                started_evaluations: vec![],
+                nodes: vec![],
+            },
+            task: MTask::default(),
+            project: MProject::default(),
+        };
+        let mapper = StorePathMapper::for_cache(Arc::new(RotatedHashMapping), CacheId::nil());
+
+        let response = response(
+            ctx,
+            vec![],
+            None,
+            0,
+            &WorkerNames::default(),
+            &state.config,
+            &mapper,
+        );
+
+        assert_eq!(response.image, Some(format!("/nix/store/{O}-img")));
     }
 }
