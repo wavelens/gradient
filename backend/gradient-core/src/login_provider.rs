@@ -32,6 +32,8 @@ pub enum LoginRefusal {
     NoVerifiedEmail,
     #[error("The username of the account cannot be used as a Gradient username.")]
     UnusableUsername,
+    #[error("The sign-in provider account is too new for sign-in here. Try again later.")]
+    ExternalAccountTooRecent,
 }
 
 impl LoginRefusal {
@@ -42,6 +44,7 @@ impl LoginRefusal {
             Self::UsernameTaken => "username_taken",
             Self::NoVerifiedEmail => "no_verified_email",
             Self::UnusableUsername => "unusable_username",
+            Self::ExternalAccountTooRecent => "external_account_too_recent",
         }
     }
 }
