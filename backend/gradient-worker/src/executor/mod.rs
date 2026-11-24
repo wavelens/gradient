@@ -15,6 +15,7 @@ mod download;
 pub mod eval;
 mod eval_cache_sharing;
 pub mod eval_cache_sync;
+mod eval_derivation_report_batches;
 pub mod eval_split;
 pub(crate) mod failure;
 pub mod fetch;
