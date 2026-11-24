@@ -36,9 +36,9 @@ use crate::proto::progress::{
 };
 use gradient_wire::traits::{EvalProgressSink, InputProgressSink, JobReporter};
 use gradient_wire::types::{
-    BuildProgressPhase, BuildStage, EvalShardOutcome, EvalShardSpec, ExecMetrics, FinishedShard,
-    GrantTarget, ImportOutcome, InputOutcome, Realisation, SegmentFetch, SegmentSource,
-    UploadMetadata, UploadObject, UrlWithSecretQuery,
+    BuildProgressPhase, BuildStage, EXEC_METRICS_SINCE, EvalShardOutcome, EvalShardSpec,
+    ExecMetrics, FinishedShard, GrantTarget, ImportOutcome, InputOutcome, Realisation,
+    SegmentFetch, SegmentSource, UploadMetadata, UploadObject, UrlWithSecretQuery,
 };
 use gradient_worker_client::connection::reconnecting::ReconnectingWriter;
 use gradient_worker_client::nar_recv::{NarPayload, NarReceiver, NarUnavailable};
@@ -706,8 +706,15 @@ impl JobUpdater {
     }
 
     pub async fn send_exec_metrics(&self, metrics: ExecMetrics) -> Result<()> {
+        if self
+            .writer
+            .current_protocol_version()
+            .is_none_or(|version| version < EXEC_METRICS_SINCE)
+        {
+            return Ok(());
+        }
         self.writer
-            .send(ClientMessage::ExecMetrics {
+            .send_now(ClientMessage::ExecMetrics {
                 job_id: self.job_id.clone(),
                 metrics,
             })
@@ -1389,5 +1396,84 @@ mod tests {
         );
         server_task.await.unwrap();
         pump.abort();
+    }
+
+    fn build_sample_exec_metrics() -> ExecMetrics {
+        ExecMetrics {
+            sequence: 1,
+            window_ms: 10_000,
+            cpu_avg: 0.5,
+            cpu_max: 1.0,
+            ram_avg_bytes: 1,
+            ram_max_bytes: 2,
+            ram_total_bytes: 4,
+            disk_max_bytes: 1,
+            disk_total_bytes: 8,
+        }
+    }
+
+    fn is_program_started_job_update(msg: &ClientMessage) -> bool {
+        matches!(
+            msg,
+            ClientMessage::JobUpdate {
+                update: JobUpdateKind::ProgramStarted,
+                ..
+            }
+        )
+    }
+
+    #[tokio::test]
+    async fn sending_usage_window_is_skipped_for_protocol_version_67_and_later_job_update_still_reaches_server()
+     {
+        let server = MockProtoServer::bind().await;
+        let (mut sc, conn) = tokio::join!(
+            server.accept_worker_websocket_with_max_protocol_version(EXEC_METRICS_SINCE - 1),
+            gradient_worker_client::connection::ProtoConnection::open(server.url()),
+        );
+        let (updater, _reader) = make_updater("job-a".to_owned(), conn.unwrap());
+        assert_eq!(
+            updater.writer.current_protocol_version(),
+            Some(EXEC_METRICS_SINCE - 1)
+        );
+        let session = updater.writer.current_session().unwrap();
+
+        updater
+            .send_exec_metrics(build_sample_exec_metrics())
+            .await
+            .unwrap();
+        updater.report_program_started().await.unwrap();
+
+        assert!(updater.writer.is_current(session));
+        let received = tokio::time::timeout(std::time::Duration::from_secs(5), sc.recv())
+            .await
+            .expect("the job update reaches the server")
+            .unwrap();
+        assert!(is_program_started_job_update(&received), "got {received:?}");
+    }
+
+    #[tokio::test]
+    async fn a_usage_window_sent_while_disconnected_is_dropped_and_does_not_arrive_after_reconnect()
+    {
+        let server = MockProtoServer::bind().await;
+        let (_sc, conn) = tokio::join!(
+            server.accept(),
+            gradient_worker_client::connection::ProtoConnection::open(server.url()),
+        );
+        let (updater, _reader) = make_updater("job-a".to_owned(), conn.unwrap());
+        updater.writer.detach();
+
+        updater
+            .send_exec_metrics(build_sample_exec_metrics())
+            .await
+            .unwrap();
+
+        let mut next = gradient_worker_client::testing::mock_session().await;
+        updater.writer.attach(next.writer.clone()).await.unwrap();
+        updater.report_program_started().await.unwrap();
+        let received = tokio::time::timeout(std::time::Duration::from_secs(5), next.server.recv())
+            .await
+            .expect("the job update reaches the next session")
+            .unwrap();
+        assert!(is_program_started_job_update(&received), "got {received:?}");
     }
 }

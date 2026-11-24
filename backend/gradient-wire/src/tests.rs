@@ -800,10 +800,11 @@ fn a_resource_usage_window_needs_the_twelfth_guest_version() {
 #[test]
 fn exec_metrics_cross_the_wire_since_version_68() {
     use crate::codec::{from_bytes, to_bytes};
-    use crate::exec::ExecMetrics;
+    use crate::exec::{EXEC_METRICS_SINCE, ExecMetrics};
     use crate::messages::ClientMessage;
 
-    let since = 68;
+    let since = EXEC_METRICS_SINCE;
+    assert_eq!(since, 68);
     let message = ClientMessage::ExecMetrics {
         job_id: "job".into(),
         metrics: ExecMetrics {
