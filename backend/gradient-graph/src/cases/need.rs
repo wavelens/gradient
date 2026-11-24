@@ -1266,3 +1266,66 @@ fn collect_explain_plan_nodes(node: &serde_json::Value) -> Vec<&serde_json::Valu
 
     flattened_plan_tree_nodes
 }
+
+#[tokio::test]
+async fn d18_two_probe_answers_written_together_leave_same_need_state_as_two_answers_written_one_after_another()
+ {
+    let two_unprobed_roots = |evaluation| {
+        shape()
+            .evaluation(evaluation)
+            .derivation(A)
+            .walked()
+            .entry_point("pkg.a")
+            .job()
+            .output(A_OUT)
+            .depends_on(BD)
+            .derivation(BD)
+            .walked()
+            .job()
+            .output(BD_OUT)
+            .build_status(BuildStatus::Skipped)
+            .derivation(X)
+            .walked()
+            .entry_point("pkg.x")
+            .job()
+            .output(X_OUT)
+            .depends_on(O)
+            .derivation(O)
+            .walked()
+            .job()
+            .output(O_OUT)
+            .build_status(BuildStatus::Skipped)
+    };
+    let separate = Case::start(two_unprobed_roots(EvaluationId::now_v7())).await;
+    let together = Case::start(two_unprobed_roots(EvaluationId::now_v7())).await;
+
+    separate.upstream_probed(&[A]).await;
+    separate.upstream_probed(&[X]).await;
+    let (a, x) = (
+        together.ids(&[A]).await.into_iter().collect(),
+        together.ids(&[X]).await.into_iter().collect(),
+    );
+    let (a_answer, x_answer) = tokio::join!(
+        together.graph.upstream_probed(a),
+        together.graph.upstream_probed(x)
+    );
+    a_answer.expect("the answer for A is written");
+    x_answer.expect("the answer for X is written");
+
+    for path in [A, BD, X, O] {
+        let (s, t) = (separate.sb(path).await, together.sb(path).await);
+        assert_eq!(
+            (t.status, t.wanted, t.probed, t.attempt, t.blocking_deps),
+            (s.status, s.wanted, s.probed, s.attempt, s.blocking_deps),
+            "need state of {path}"
+        );
+    }
+    assert!(
+        together.sb(O).await.wanted,
+        "the answer for X made O needed"
+    );
+    separate.zero_drift("separate").await;
+    together.zero_drift("together").await;
+    separate.finish().await;
+    together.finish().await;
+}

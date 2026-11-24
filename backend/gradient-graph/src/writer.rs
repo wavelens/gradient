@@ -134,6 +134,7 @@ pub struct GraphState {
     health: Option<Arc<SupervisorHealth>>,
     queued: Vec<(RecordBatch, Reply<RecordReport>)>,
     queued_rows: usize,
+    queued_upstream_probe_answers: Vec<(Vec<DerivationId>, Reply<()>)>,
     nars: Vec<(NarCommit, Reply<NarCommitted>)>,
     flush_pending: bool,
 }
@@ -170,6 +171,7 @@ impl Actor for GraphWriter {
             health: args.health,
             queued: Vec::new(),
             queued_rows: 0,
+            queued_upstream_probe_answers: Vec::new(),
             nars: Vec::new(),
             flush_pending: false,
         })
@@ -203,15 +205,9 @@ impl Actor for GraphWriter {
                 let _ = reply.send(ask_probe(st, result));
             }
             GraphMsg::UpstreamProbed(shared_builds, reply) => {
-                flush(&myself, st).await;
-                let shared_builds = &shared_builds;
-                let limits = GraphWriterTransactionLimits::for_message_kind("upstream_probed");
-                let result = transact(&st.ctx, limits, move |scoped| async move {
-                    record::mark_probed(&scoped, shared_builds).await
-                })
-                .await;
-                st.record(&result.as_ref().map(|_| ()).map_err(|e| anyhow!("{e}")));
-                let _ = reply.send(ask_probe(st, result));
+                st.queued_upstream_probe_answers
+                    .push((shared_builds, reply));
+                queue_flush(&myself, st).await;
             }
             GraphMsg::CommitNar(commit, reply) => {
                 st.nars.push((commit, reply));
@@ -315,15 +311,19 @@ async fn queue_flush(myself: &ActorRef<GraphMsg>, st: &mut GraphState) {
 
 #[tracing::instrument(level = "debug", skip_all, fields(batches = st.queued.len(), rows = st.queued_rows, nars = st.nars.len()))]
 async fn flush(myself: &ActorRef<GraphMsg>, st: &mut GraphState) {
-    if st.queued.is_empty() && st.nars.is_empty() {
+    if st.queued.is_empty() && st.queued_upstream_probe_answers.is_empty() && st.nars.is_empty() {
         return;
     }
 
     let groups = merge_queued(std::mem::take(&mut st.queued));
+    let probe_answers = std::mem::take(&mut st.queued_upstream_probe_answers);
     let commits = std::mem::take(&mut st.nars);
     st.queued_rows = 0;
     for (group, replies) in groups {
         write_record_batch_group_in_own_transaction(myself, st, group, replies).await;
+    }
+    if !probe_answers.is_empty() {
+        write_queued_probe_answers_in_one_transaction_and_reply(st, probe_answers).await;
     }
     if !commits.is_empty() {
         commit_queued_nar_uploads(myself, st, commits).await;
@@ -366,6 +366,35 @@ async fn write_record_batch_group_in_own_transaction(
             }
             if let Some(reply) = first {
                 let _ = reply.send(Err(e));
+            }
+        }
+    }
+}
+
+async fn write_queued_probe_answers_in_one_transaction_and_reply(
+    st: &GraphState,
+    queued: Vec<(Vec<DerivationId>, Reply<()>)>,
+) {
+    let (answers, replies): (Vec<_>, Vec<_>) = queued.into_iter().unzip();
+    let mut shared_builds: Vec<DerivationId> = answers.into_iter().flatten().collect();
+    shared_builds.sort_unstable();
+    shared_builds.dedup();
+    let shared_builds = &shared_builds;
+    let limits = GraphWriterTransactionLimits::for_message_kind("upstream_probed");
+    let result = transact(&st.ctx, limits, move |scoped| async move {
+        record::mark_probed(&scoped, shared_builds).await
+    })
+    .await;
+    st.record(&result.as_ref().map(|_| ()).map_err(|e| anyhow!("{e}")));
+    match ask_probe(st, result) {
+        Ok(()) => {
+            for reply in replies {
+                let _ = reply.send(Ok(()));
+            }
+        }
+        Err(e) => {
+            for reply in replies {
+                let _ = reply.send(Err(anyhow!("{e:#}")));
             }
         }
     }
