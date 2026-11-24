@@ -374,7 +374,6 @@ def wait_until_delivered():
     deadline = time.monotonic() + EVAL_TIMEOUT
     while int(psql(
         "SELECT count(*) FROM pending_delivery WHERE delivered_at IS NULL AND failed_at IS NULL"
-        " AND next_attempt_at <= (now() AT TIME ZONE 'UTC')"
     )):
         assert time.monotonic() < deadline, "the delivery queue of the previous run never drained"
         time.sleep(2)
