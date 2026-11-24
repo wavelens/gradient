@@ -4,10 +4,14 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use std::sync::Arc;
+
 use gradient_entity::build::BuildStatus;
+use gradient_entity::evaluation_message;
 use gradient_entity::ids::EvaluationId;
+use gradient_entity::{EXAMPLE_ORIGINAL_HASH, EXAMPLE_STORED_HASH, RotatedHashMapping};
 use gradient_fixtures::shape::shape;
-use gradient_wire::types::{BuildOutput, DerivationOutput};
+use gradient_wire::types::{BuildOutput, BuildProduct, DerivationOutput};
 
 use super::{A, A_OUT, B_OUT, Case, drv, nar, store_path, with_attr};
 
@@ -126,5 +130,40 @@ async fn build_output_report_for_old_dispatched_job_after_requeue_is_ignored() {
         (Some(A_OUT), Some("a")),
         "after 2: the report of the open dispatch is recorded"
     );
+    case.finish().await;
+}
+
+#[tokio::test]
+async fn missing_hydra_build_product_warning_names_original_path_not_stored_path_with_rotated_mapping()
+ {
+    let e1 = EvaluationId::now_v7();
+    let case = Case::start_with_mapping(shape().evaluation(e1), Arc::new(RotatedHashMapping)).await;
+    case.walk(case.tasked(e1, vec![content_addressed(A)]).await)
+        .await;
+
+    let product = BuildProduct {
+        file_type: "file".into(),
+        subtype: "doc".into(),
+        name: "file".into(),
+        path: format!("/nix/store/{EXAMPLE_STORED_HASH}-out/file"),
+        size: None,
+    };
+    let output = BuildOutput {
+        products: vec![product],
+        ..realised(A_OUT, "a")
+    };
+    case.built_outputs(A, vec![output], false).await;
+
+    let messages: Vec<String> = case
+        .db
+        .rows::<evaluation_message::Entity>()
+        .await
+        .into_iter()
+        .filter(|m| m.evaluation == e1)
+        .map(|m| m.message)
+        .collect();
+    assert_eq!(messages.len(), 1, "{messages:?}");
+    assert!(messages[0].contains(EXAMPLE_ORIGINAL_HASH), "{messages:?}");
+    assert!(!messages[0].contains(EXAMPLE_STORED_HASH), "{messages:?}");
     case.finish().await;
 }
