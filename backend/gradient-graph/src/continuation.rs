@@ -15,6 +15,7 @@ use gradient_types::ids::{EvaluationId, ExecJobId};
 use tracing::info;
 
 use crate::messages::ContinuationOutcome;
+use crate::policy;
 
 const CONTINUE_MESSAGE_PREFIX: &str = "continue.json: ";
 
@@ -42,6 +43,7 @@ async fn done(ctx: &DbContext, exec_job: ExecJobId) -> Result<()> {
 }
 
 async fn failed(ctx: &DbContext, exec_job: ExecJobId, error: &str) -> Result<()> {
+    let error = &policy::strip_url_credentials_and_truncate_failure_message(error);
     let Some(evaluation) = end(
         ctx,
         exec_job,
