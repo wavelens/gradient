@@ -6,6 +6,7 @@
 
 use gradient_scheduler::Scheduler;
 use gradient_scheduler::eval_split::reply::{RETRY_AFTER_MS, ShardRequest};
+use gradient_types::StorePathMapper;
 use gradient_wire::messages::ServerMessage;
 use gradient_wire::types::{EvalShardOutcome, EvalShardSpec};
 use tracing::warn;
@@ -29,22 +30,34 @@ pub(super) async fn handle_eval_shard_request(
         }
     };
 
-    let reply = ServerMessage::EvalShardReply {
-        job_id: job_id.clone(),
-        outcome,
-    };
-    let project = scheduler
-        .active_job(&job_id)
-        .await
-        .map(|job| job.project_id());
-    let reply = match project {
-        Some(project) => match project_mapper(&scheduler.db, project).await {
-            Some(mapper) => outbound_message(reply, &mapper),
-            None => reply,
-        },
-        None => reply,
-    };
+    let mapper = active_job_project_store_path_mapper(scheduler, &job_id).await;
+    let reply =
+        build_eval_shard_reply_with_mapped_store_paths_or_wait(job_id, outcome, mapper.as_ref());
     let _ = send_server_msg(writer, &reply).await;
+}
+
+async fn active_job_project_store_path_mapper(
+    scheduler: &Scheduler,
+    job_id: &str,
+) -> Option<StorePathMapper> {
+    let project = scheduler.active_job(job_id).await?.project_id();
+    project_mapper(&scheduler.db, project).await
+}
+
+fn build_eval_shard_reply_with_mapped_store_paths_or_wait(
+    job_id: String,
+    outcome: EvalShardOutcome,
+    mapper: Option<&StorePathMapper>,
+) -> ServerMessage {
+    match mapper {
+        Some(mapper) => outbound_message(ServerMessage::EvalShardReply { job_id, outcome }, mapper),
+        None => ServerMessage::EvalShardReply {
+            job_id,
+            outcome: EvalShardOutcome::Wait {
+                retry_after_ms: RETRY_AFTER_MS,
+            },
+        },
+    }
 }
 
 pub(super) async fn send_reply(writer: &ProtoWriter, job_id: String, outcome: EvalShardOutcome) {
@@ -73,5 +86,53 @@ pub(super) async fn handle_eval_shards_planned(
 ) {
     if let Err(e) = scheduler.record_eval_plan(&job_id, shards).await {
         warn!(%job_id, error = %e, "recording the split evaluation plan failed");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use gradient_entity::{EXAMPLE_ORIGINAL_HASH, EXAMPLE_STORED_HASH, RotatedHashMapping};
+    use gradient_types::ids::CacheId;
+    use std::sync::Arc;
+
+    fn eval_shard_source_outcome_with_stored_path() -> EvalShardOutcome {
+        EvalShardOutcome::Source {
+            store_path: format!("/nix/store/{EXAMPLE_STORED_HASH}-source"),
+            fingerprint: "f".into(),
+        }
+    }
+
+    #[test]
+    fn eval_shard_reply_waits_without_project_mapper_and_maps_to_original_form_with_project_mapper()
+    {
+        let unmapped = build_eval_shard_reply_with_mapped_store_paths_or_wait(
+            "j1".into(),
+            eval_shard_source_outcome_with_stored_path(),
+            None,
+        );
+        assert!(matches!(
+            unmapped,
+            ServerMessage::EvalShardReply {
+                outcome: EvalShardOutcome::Wait {
+                    retry_after_ms: RETRY_AFTER_MS
+                },
+                ..
+            }
+        ));
+
+        let mapper = StorePathMapper::for_cache(Arc::new(RotatedHashMapping), CacheId::nil());
+        let mapped = build_eval_shard_reply_with_mapped_store_paths_or_wait(
+            "j1".into(),
+            eval_shard_source_outcome_with_stored_path(),
+            Some(&mapper),
+        );
+        assert!(matches!(
+            mapped,
+            ServerMessage::EvalShardReply {
+                outcome: EvalShardOutcome::Source { store_path, .. },
+                ..
+            } if store_path == format!("/nix/store/{EXAMPLE_ORIGINAL_HASH}-source")
+        ));
     }
 }
