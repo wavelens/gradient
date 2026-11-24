@@ -36,5 +36,6 @@ tracing = { workspace = true }
 [dev-dependencies]
 chrono = { workspace = true }
 gradient-fixtures = { workspace = true }
+gradient-entity = { workspace = true, features = ["testing"] }
 tempfile = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

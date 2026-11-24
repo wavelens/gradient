@@ -14,7 +14,7 @@ mod tables;
 
 pub use config_snapshot::write_config_snapshot;
 pub use extract::{
-    create_table, export_tables, fetch_rows, manifest_row, redact_row, scope_statement, write_rows,
+    create_table, fetch_rows, manifest_row, redact_row, scope_statement, write_rows,
 };
 pub use logs::{FetchedLogs, create_log_table, fetch_failed_logs, insert_log, write_failed_logs};
 pub use redact::Redactor;
@@ -27,13 +27,14 @@ use std::path::{Path, PathBuf};
 
 use anyhow::Result;
 use gradient_storage::LogStorage;
-use gradient_types::RuntimeConfig;
+use gradient_types::{RuntimeConfig, StorePathMapper};
 use sea_orm::ConnectionTrait;
 use sea_orm::prelude::Uuid;
 
 pub struct ReportContext<'a> {
     pub logs: &'a dyn LogStorage,
     pub config: &'a RuntimeConfig,
+    pub mapper: &'a StorePathMapper,
 }
 
 /// Fetching is async and writing is running on a blocking thread. A `rusqlite` connection is not
@@ -64,6 +65,7 @@ pub async fn generate_report<C: ConnectionTrait>(
     let path: PathBuf = out.to_path_buf();
     let evaluation = evaluation.to_string();
     let config = ctx.config.clone();
+    let mapper = ctx.mapper.clone();
 
     tokio::task::spawn_blocking(move || {
         let conn = open_report(&path)?;
@@ -75,7 +77,7 @@ pub async fn generate_report<C: ConnectionTrait>(
             create_table(&conn, spec)?;
             let redacted: Vec<Row> = rows
                 .iter()
-                .map(|r| redact_row(spec, &redactor, r))
+                .map(|r| redact_row(spec, &redactor, &mapper, r))
                 .collect();
             write_rows(&conn, spec, &redacted)?;
             manifest.push(manifest_row(spec, &redactor, redacted.len() as i64));

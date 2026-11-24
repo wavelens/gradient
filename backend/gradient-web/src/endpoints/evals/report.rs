@@ -103,9 +103,11 @@ pub async fn get_evaluation_report(
 
     let file = tempfile::NamedTempFile::new().context("create report file")?;
 
+    let mapper = state.project_mapper(ctx.project_id).await?;
     let report_ctx = ReportContext {
         logs: state.log_storage.as_ref(),
         config: &state.config,
+        mapper: &mapper,
     };
 
     generate_report(
