@@ -532,6 +532,17 @@ describe('ExecJobPageComponent', () => {
     expect(page.pickedOrHighestNumberedAttemptForSelectedNode()?.number).toBe(1);
   });
 
+  it('stays on Metrics and loads the metrics of an attempt picked in the sidebar', () => {
+    const { fixture, getJobAttemptMetrics, navigate } = setup('completed', SSH, { view: 'metrics' }, retried());
+    const page = fixture.componentInstance;
+    expect(getJobAttemptMetrics).toHaveBeenLastCalledWith('j1', 2, 0);
+    (fixture.nativeElement as HTMLElement).querySelectorAll<HTMLButtonElement>('.sidebar-attempt-row-button')[1].click();
+    fixture.detectChanges();
+    expect(page.view()).toBe('metrics');
+    expect(navigate).toHaveBeenLastCalledWith([], expect.objectContaining({ queryParams: { attempt: 1, view: 'metrics' } }));
+    expect(getJobAttemptMetrics).toHaveBeenLastCalledWith('j1', 1, 0);
+  });
+
   it('opens the attempt from the URL and times its program run', () => {
     const { fixture, logAfter } = setup('completed', SSH, { attempt: '1' }, retried());
     expect(logAfter).toHaveBeenLastCalledWith('j1', undefined, 1, 0);

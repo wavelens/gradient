@@ -138,7 +138,10 @@ export class ExecJobResourceUsageComponent {
         this.loadError.set(null);
         return refreshImmediatelyThenOnIntervalAndOnTabVisibleWhileTabVisible(this.document, metricsPollIntervalMilliseconds).pipe(
           switchMap(() => this.execJobs.getJobAttemptMetrics(job, attempt, node).pipe(
-            catchError((error: unknown) => (getForbiddenOrMissingKindFromError(error) === 'missing' ? of(null) : throwError(() => error))),
+            catchError((error: unknown) => {
+              if (getForbiddenOrMissingKindFromError(error) === 'missing') return of(null);
+              return this.execJobMetricsResponse() === null ? throwError(() => error) : EMPTY;
+            }),
           )),
           takeWhile((metrics) => metrics?.attempt_open === true, true),
           catchError((error: unknown) => {
