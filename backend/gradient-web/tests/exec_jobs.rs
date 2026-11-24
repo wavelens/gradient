@@ -108,14 +108,14 @@ fn with_job_and_attempt(
     status: ExecJobStatus,
     attempt: exec_job_attempt::Model,
 ) -> MockDatabase {
-    append_exec_job_of_task_with_status_to_mock_database(db, status, task(), attempt)
+    append_exec_job_of_task_with_status_to_mock_database(db, status, task(), vec![attempt])
 }
 
 fn append_exec_job_of_task_with_status_to_mock_database(
     db: MockDatabase,
     status: ExecJobStatus,
     task: gradient_entity::task::Model,
-    attempt: exec_job_attempt::Model,
+    attempts: Vec<exec_job_attempt::Model>,
 ) -> MockDatabase {
     db.append_query_results([vec![job(status)]])
         .append_query_results([vec![entry_point::Model {
@@ -127,7 +127,7 @@ fn append_exec_job_of_task_with_status_to_mock_database(
             ..eval_at(evaluation_id(), 0)
         }]])
         .append_query_results([vec![task.clone()]])
-        .append_query_results([vec![attempt]])
+        .append_query_results([attempts])
         .append_query_results([vec![exec_job_phase::Model {
             attempt: attempt_id(),
             name: "epoch-3".into(),
@@ -420,7 +420,7 @@ async fn job_token_reading_exec_job_of_another_task_in_public_project_gets_404()
         db,
         ExecJobStatus::Running,
         other_task,
-        lost_attempt(),
+        vec![lost_attempt()],
     )
     .append_query_results([vec![public_project()]])
     .append_query_results([Vec::<exec_job_output::Model>::new()])
@@ -652,6 +652,18 @@ fn node_attempt(node: i16, worker: &str, address: &str) -> exec_job_attempt::Mod
 }
 
 fn with_two_nodes(db: MockDatabase) -> MockDatabase {
+    with_two_nodes_and_attempts(
+        db,
+        node_attempt(0, "w1", "10.233.0.2"),
+        node_attempt(1, "w2", "10.234.0.2"),
+    )
+}
+
+fn with_two_nodes_and_attempts(
+    db: MockDatabase,
+    node_0_attempt: exec_job_attempt::Model,
+    node_1_attempt: exec_job_attempt::Model,
+) -> MockDatabase {
     db.append_query_results([vec![node_row(0), node_row(1)]])
         .append_query_results([vec![entry_point::Model {
             eval: "apps.x86_64-linux.pair".into(),
@@ -659,10 +671,7 @@ fn with_two_nodes(db: MockDatabase) -> MockDatabase {
         }]])
         .append_query_results([vec![eval_at(evaluation_id(), 0)]])
         .append_query_results([vec![task()]])
-        .append_query_results([vec![
-            node_attempt(0, "w1", "10.233.0.2"),
-            node_attempt(1, "w2", "10.234.0.2"),
-        ]])
+        .append_query_results([vec![node_0_attempt, node_1_attempt]])
         .append_query_results([Vec::<exec_job_phase::Model>::new()])
         .append_query_results([Vec::<BTreeMap<String, sea_orm::Value>>::new()])
         .append_query_results([Vec::<BTreeMap<String, sea_orm::Value>>::new()])
@@ -888,4 +897,73 @@ async fn metrics_of_a_private_project_need_view_access() {
     assert_eq!(body["message"]["points"], Value::Array(Vec::new()));
     assert_eq!(body["message"]["cpu_max"], 0.0);
     assert_eq!(body["message"]["usable_memory_bytes"], Value::Null);
+}
+
+#[tokio::test]
+async fn metrics_without_attempt_query_show_the_highest_numbered_attempt() {
+    let db = append_exec_job_of_task_with_status_to_mock_database(
+        mock_db(),
+        ExecJobStatus::Completed,
+        task(),
+        vec![
+            lost_attempt(),
+            exec_job_attempt::Model {
+                id: ExecJobAttemptId::new(Uuid::from_u128(0xa2)),
+                number: 2,
+                ..finished_attempt_with_metrics()
+            },
+        ],
+    )
+    .append_query_results([vec![public_project()]])
+    .append_query_results([vec![build_exec_attempt_usage_bucket_row(0, 0.5, 1.0)]]);
+
+    let res = make_test_server(db.into_connection())
+        .get(&format!("/api/v1/exec/{}/metrics", job_id()))
+        .await;
+
+    res.assert_status_ok();
+    let body: Value = res.json();
+    assert_eq!(body["message"]["attempt"], 2);
+    assert_eq!(body["message"]["attempt_open"], false);
+    assert_eq!(
+        body["message"]["points"].as_array().expect("points").len(),
+        1
+    );
+}
+
+#[tokio::test]
+async fn metrics_use_the_requested_node_index_of_a_two_node_exec_job() {
+    let db = with_two_nodes_and_attempts(
+        mock_db(),
+        node_attempt(0, "w1", "10.233.0.2"),
+        exec_job_attempt::Model {
+            program_started_at: Some(test_date()),
+            ..node_attempt(1, "w2", "10.234.0.2")
+        },
+    )
+    .append_query_results([vec![build_exec_attempt_usage_bucket_row(0, 0.5, 1.0)]]);
+
+    let res = make_test_server(db.into_connection())
+        .get(&format!("/api/v1/exec/{}/metrics?node=1", node_id(0)))
+        .await;
+
+    res.assert_status_ok();
+    let body: Value = res.json();
+    assert_eq!(body["message"]["attempt_open"], true);
+    assert_eq!(body["message"]["cpu_max"], 1.75);
+    assert_eq!(
+        body["message"]["points"].as_array().expect("points").len(),
+        1
+    );
+}
+
+#[tokio::test]
+async fn metrics_of_an_unknown_node_are_not_found() {
+    let res = make_test_server(with_two_nodes(mock_db()).into_connection())
+        .get(&format!("/api/v1/exec/{}/metrics?node=2", node_id(0)))
+        .await;
+
+    assert_eq!(res.status_code(), StatusCode::NOT_FOUND);
+    let body: Value = res.json();
+    assert_eq!(body["message"], "no node 2 in this job");
 }

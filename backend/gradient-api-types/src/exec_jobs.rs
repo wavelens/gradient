@@ -238,7 +238,7 @@ pub struct ExecUsageChartPoint {
 
 #[derive(Deserialize, Serialize, Debug, utoipa::ToSchema)]
 pub struct ExecJobMetricsResponse {
-    pub attempt: u32,
+    pub attempt: i32,
     pub attempt_open: bool,
     pub requested_cpus: u32,
     pub requested_memory_bytes: u64,

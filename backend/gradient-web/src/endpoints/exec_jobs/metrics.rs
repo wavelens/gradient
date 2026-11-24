@@ -29,7 +29,8 @@ const BYTES_PER_MEBIBYTE: u64 = 1024 * 1024;
 #[derive(Debug, Deserialize, utoipa::IntoParams)]
 #[into_params(parameter_in = Query)]
 pub struct ExecJobMetricsQuery {
-    pub attempt: Option<u32>,
+    pub attempt: Option<i32>,
+    pub node: Option<u32>,
 }
 
 #[utoipa::path(
@@ -38,7 +39,7 @@ pub struct ExecJobMetricsQuery {
     operation_id = "getExecJobMetrics",
     tag = "exec-jobs",
     summary = "Get metrics of exec job",
-    description = "Return CPU, RAM and disk usage of one attempt. The target is the latest attempt. ``attempt`` can select a different attempt by number. Multi-node jobs respond on node 0. ``attempt_open`` is true until the attempt is complete. The requested size is the guest size of the job. The available size is the memory and disk that the guest last reported. The available size is empty before the first report. ``cpu_avg``, ``cpu_max``, ``ram_max_bytes`` and ``disk_max_bytes`` cover the whole attempt. CPU values give the count of CPUs in use, not a percentage. ``points`` can hold at most 300 points. Each point can include ``elapsed_ms`` since program start and the average and maximum of reports in that time range. Empty before program start. Return 404 for an attempt number not in the job.\n\n**Access:** Public projects, or members of the project.",
+    description = "Returns CPU, RAM and disk usage of one attempt. The latest attempt is the target by default. Set `attempt` to an attempt number to select a different attempt. Set `node` to the node index in a multi-node job. The default is node 0. `attempt_open` is true for the duration of the attempt. The requested size is the guest size of the job. The available size is the memory and disk that the guest last reported. The available size is empty before the first report. `cpu_avg`, `cpu_max`, `ram_max_bytes` and `disk_max_bytes` cover the whole attempt. The CPU value is the number of CPUs in use, not a percentage. `points` can hold at most 300 points. All points carry `elapsed_ms` since the program started and the average and maximum of reports in that time range. The point list is empty before the program starts. Answers 404 for an attempt number the node does not have, for a node index the job does not have and for a job with no attempts.\n\n**Access:** Public projects, or members of the project.",
     params(("job" = ExecJobId, Path), ExecJobMetricsQuery),
     responses((status = OK, description = "Exec job metrics", body = ExecJobMetricsResponse), WebError)
 )]
@@ -57,11 +58,9 @@ pub async fn get_exec_job_metrics(
         ProjectItemAccessRequirement::PublicProjectOrCanViewProject,
     )
     .await?;
-    let attempts = &ctx.detail.attempts;
+    let attempts = &ctx.node(query.node)?.attempts;
     let attempt = match query.attempt {
-        Some(number) => attempts
-            .iter()
-            .find(|a| u32::try_from(a.number).ok() == Some(number)),
+        Some(number) => attempts.iter().find(|a| a.number == number),
         None => attempts.iter().max_by_key(|a| a.number),
     }
     .ok_or_else(|| WebError::not_found(Resource::ExecJobAttempt))?;
@@ -79,7 +78,7 @@ pub async fn get_exec_job_metrics(
     };
     let guest = spec_of(&ctx.detail.job).guest;
     Ok(ok_json(ExecJobMetricsResponse {
-        attempt: u32::try_from(attempt.number).unwrap_or_default(),
+        attempt: attempt.number,
         attempt_open: attempt.ended_at.is_none(),
         requested_cpus: guest.cpus,
         requested_memory_bytes: guest.memory_mb.saturating_mul(BYTES_PER_MEBIBYTE),
