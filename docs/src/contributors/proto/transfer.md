@@ -28,8 +28,8 @@ sequenceDiagram
 |---|---|---|
 | `Skip` | The path is already stored, or the project has no writable cache for an evaluation cache segment | Nothing |
 | `Passthrough { resume_offset }` | Local NAR storage | `UploadChunk` frames of `worker.nar.chunkBytes` into `<baseDir>/nar-partial`, resuming after a break |
-| `Put { url }` | S3, NAR up to 1 GiB | One signed PUT to a temporary object under `nar-uploads/` with a 1-hour lifetime. |
-| `Multipart` | S3, NAR over 1 GiB | Presigned parts of at least 64 MiB |
+| `Put { url }` | S3, NAR up to 256 MiB | A single signed PUT to a temporary object under `nar-uploads/`. The URL and lease duration are 1 hour plus transfer time at 256 KiB/s. |
+| `Multipart` | S3, NAR over 256 MiB | Presigned parts of at least 64 MiB |
 
 - **Admission** applies server-wide and treats all sessions fairly.
     - The limits are `upload.concurrency` (8) large uploads and `upload.bytesBudget` (8 GiB) at once.
@@ -126,5 +126,5 @@ Before any build work starts, workers fetch all inputs that the local store does
 
 ## Memory
 
-- A `Put` upload or a presigned download keeps the full compressed NAR (up to 1 GiB) in memory at once.
+- Uploads of `Put` (NAR up to 256 MiB) or signed downloads load the whole compressed NAR into memory at once.
 - Passthrough and multipart uploads from a store path pass data through a packer in chunks, so the whole NAR never has to fit in memory.

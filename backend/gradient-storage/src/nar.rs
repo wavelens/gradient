@@ -1334,7 +1334,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn one_gib_nar_upload_at_minimum_write_throughput_fits_inside_lease_and_presigned_url_expiry()
+    async fn nar_upload_at_multipart_threshold_minimum_write_throughput_fits_inside_lease_and_presigned_url_expiry()
      {
         let transfer = std::time::Duration::from_secs(
             MULTIPART_NAR_BYTES / MIN_WRITE_THROUGHPUT_BYTES_PER_SEC,

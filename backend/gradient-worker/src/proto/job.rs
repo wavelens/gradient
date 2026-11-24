@@ -348,6 +348,7 @@ impl JobUpdater {
 
     pub async fn push_eval_cache_segment(&self, fingerprint: &str, bytes: Vec<u8>) -> Result<()> {
         let size_bytes = bytes.len() as u64;
+        let bytes = bytes::Bytes::from(bytes);
         let mut guard = self.phase(JobPhase::EvalCachePush);
         guard.record(1, size_bytes);
         let object = UploadObject::EvalCacheSegment {
@@ -411,7 +412,7 @@ impl JobUpdater {
     async fn send_eval_cache(
         &self,
         request_id: u64,
-        bytes: &[u8],
+        bytes: &bytes::Bytes,
         target: GrantTarget,
     ) -> Result<()> {
         match target {
@@ -419,7 +420,7 @@ impl JobUpdater {
                 passthrough_blob(&self.uploads, request_id, bytes, resume_offset).await
             }
             GrantTarget::Put { url } => {
-                gradient_worker_client::object_put::put_object(&url, bytes.to_vec().into(), None)
+                gradient_worker_client::object_put::put_object(&url, bytes.clone(), None)
                     .await
                     .with_context(|| {
                         format!(
