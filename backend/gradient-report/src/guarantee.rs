@@ -10,7 +10,7 @@ mod tests {
     use crate::logs::{create_log_table, insert_log};
     use crate::redact::Redactor;
     use crate::schema::{ReportOptions, open_report};
-    use crate::tables::{Row, TableSpec, eval_scope_tables};
+    use crate::tables::{Row, TableSpec, eval_scope_tables, identity_store_path_mapper};
 
     const REPO: &str = "git@git.supersandro.de:sandro/nixos-config.git";
     const EMAIL: &str = "sandro@example.invalid";
@@ -75,7 +75,8 @@ mod tests {
             let spec = spec(name);
             create_table(conn, spec).expect("ddl");
             let row = row_with(spec, &values);
-            write_rows(conn, spec, &[redact_row(spec, redactor, &row)]).expect("write");
+            let mapper = identity_store_path_mapper();
+            write_rows(conn, spec, &[redact_row(spec, redactor, &mapper, &row)]).expect("write");
         }
 
         create_log_table(conn).expect("log ddl");
@@ -196,7 +197,8 @@ mod tests {
             "upload of {STORE_PATH} failed: error sending request for url (https://s3.example.com/bucket/nar-uploads/a.nar.zst?X-Amz-Credential=AKIAEXAMPLE%2F20260101&X-Amz-Signature=0123abcd)"
         );
         let row = row_with(spec, &[("failure_message", &failure_message)]);
-        write_rows(&conn, spec, &[redact_row(spec, &redactor, &row)]).expect("write");
+        let mapper = identity_store_path_mapper();
+        write_rows(&conn, spec, &[redact_row(spec, &redactor, &mapper, &row)]).expect("write");
         drop(conn);
 
         let conn = rusqlite::Connection::open(&path).expect("reopen");

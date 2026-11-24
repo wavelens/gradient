@@ -575,27 +575,6 @@ pub struct JobDerivationView {
     pub pname: Option<String>,
 }
 
-fn outbound_drv_paths(value: &mut serde_json::Value, mapper: &StorePathMapper) {
-    match value {
-        serde_json::Value::Object(fields) => {
-            for (key, field) in fields.iter_mut() {
-                match field {
-                    serde_json::Value::String(path) if key == "drv_path" => {
-                        *path = original_text(mapper, std::mem::take(path));
-                    }
-                    _ => outbound_drv_paths(field, mapper),
-                }
-            }
-        }
-        serde_json::Value::Array(items) => {
-            for item in items {
-                outbound_drv_paths(item, mapper);
-            }
-        }
-        _ => {}
-    }
-}
-
 fn snapshot_derivations(
     job_context: &serde_json::Value,
 ) -> Vec<(DerivationBuildId, String, Option<String>)> {
@@ -730,7 +709,10 @@ pub async fn get_dispatched_job(
             return Err(WebError::not_found(Resource::Job));
         }
 
-        outbound_drv_paths(&mut c.job_context, &state.project_mapper(c.project).await?);
+        state
+            .project_mapper(c.project)
+            .await?
+            .rewrite_stored_drv_paths_in_json_to_outbound(&mut c.job_context);
 
         let (project, worker_name) =
             job_names(&state.web_db, &scope, c.project, &c.worker_id).await?;
@@ -820,9 +802,9 @@ pub async fn get_dispatched_job(
     }
 
     let mapper = state.project_mapper(j.project).await?;
-    outbound_drv_paths(&mut j.job_context, &mapper);
+    mapper.rewrite_stored_drv_paths_in_json_to_outbound(&mut j.job_context);
     if let Some(candidates) = &mut j.candidates {
-        outbound_drv_paths(candidates, &mapper);
+        mapper.rewrite_stored_drv_paths_in_json_to_outbound(candidates);
     }
 
     let (project, worker_name) = job_names(&state.web_db, &scope, j.project, &j.worker_id).await?;
@@ -1988,30 +1970,6 @@ mod tests {
                 "aaa-curl.drv".to_string(),
                 Some("curl".to_string())
             )]
-        );
-    }
-
-    #[test]
-    fn drv_paths_inside_job_context_are_mapped_outbound() {
-        let (original, stored) = (
-            gradient_entity::EXAMPLE_ORIGINAL_HASH,
-            gradient_entity::EXAMPLE_STORED_HASH,
-        );
-        let mapper = StorePathMapper::for_cache(
-            Arc::new(gradient_entity::RotatedHashMapping),
-            CacheId::nil(),
-        );
-        let mut value = serde_json::json!({
-            "derivations": [{ "drv_path": format!("{stored}-a.drv"), "name": "a" }]
-        });
-
-        outbound_drv_paths(&mut value, &mapper);
-
-        assert_eq!(
-            value,
-            serde_json::json!({
-                "derivations": [{ "drv_path": format!("{original}-a.drv"), "name": "a" }]
-            })
         );
     }
 

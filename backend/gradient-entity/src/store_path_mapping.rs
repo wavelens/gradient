@@ -182,6 +182,29 @@ impl StorePathMapper {
         rewritten
     }
 
+    pub fn rewrite_stored_drv_paths_in_json_to_outbound(&self, value: &mut serde_json::Value) {
+        match value {
+            serde_json::Value::Object(fields) => {
+                for (key, field) in fields.iter_mut() {
+                    match field {
+                        serde_json::Value::String(path) if key == "drv_path" => {
+                            if let Ok(original) = self.outbound_text(path) {
+                                *path = original;
+                            }
+                        }
+                        _ => self.rewrite_stored_drv_paths_in_json_to_outbound(field),
+                    }
+                }
+            }
+            serde_json::Value::Array(items) => {
+                for item in items {
+                    self.rewrite_stored_drv_paths_in_json_to_outbound(item);
+                }
+            }
+            _ => {}
+        }
+    }
+
     pub fn inbound_if_store_path(&self, text: &str) -> Result<String, StorePathError> {
         match text.starts_with(STORE_DIR) {
             true => self.map_and_validate_build_product_path(text),
@@ -360,6 +383,23 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(identity.context(), MappingContext::Project(project));
+    }
+
+    #[test]
+    fn drv_paths_inside_job_context_are_mapped_outbound() {
+        let (original, stored) = (EXAMPLE_ORIGINAL_HASH, EXAMPLE_STORED_HASH);
+        let mut value = serde_json::json!({
+            "derivations": [{ "drv_path": format!("{stored}-a.drv"), "name": "a" }]
+        });
+
+        rotated().rewrite_stored_drv_paths_in_json_to_outbound(&mut value);
+
+        assert_eq!(
+            value,
+            serde_json::json!({
+                "derivations": [{ "drv_path": format!("{original}-a.drv"), "name": "a" }]
+            })
+        );
     }
 
     #[test]

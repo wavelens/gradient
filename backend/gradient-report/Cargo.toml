@@ -34,4 +34,5 @@ tokio = { workspace = true, features = ["rt"] }
 tracing = { workspace = true }
 
 [dev-dependencies]
+gradient-entity = { workspace = true, features = ["testing"] }
 tempfile = { workspace = true }
