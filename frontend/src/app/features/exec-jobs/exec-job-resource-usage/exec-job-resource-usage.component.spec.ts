@@ -88,6 +88,44 @@ describe('ExecJobResourceUsageComponent', () => {
     expect(root.textContent).not.toContain(EMPTY_TITLE);
   });
 
+  it('keeps the charts on screen and polling on after a later poll fails', async () => {
+    vi.useFakeTimers();
+    try {
+      const open = () => of(createExecJobMetricsResponseFixture({ attempt_open: true }));
+      const responses: (() => Observable<ExecJobMetricsResponse>)[] = [
+        open,
+        () => throwError(() => new ApiError('bad gateway', 502)),
+        () => of(createExecJobMetricsResponseFixture({ attempt_open: true, cpu_max: 1.9 })),
+      ];
+      const { fixture, fetch, root } = createComponentWithMockedExecJobsService(() => (responses.shift() ?? open)());
+      await vi.advanceTimersByTimeAsync(2000);
+      fixture.detectChanges();
+      expect(fetch).toHaveBeenCalledTimes(2);
+      expect(root.textContent).toContain('1.8 / 2 CPUs');
+      expect(root.textContent).not.toContain('Failed to Load Metrics');
+
+      await vi.advanceTimersByTimeAsync(2000);
+      fixture.detectChanges();
+      expect(fetch).toHaveBeenCalledTimes(3);
+      expect(root.textContent).toContain('1.9 / 2 CPUs');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('loads again on Try Again after the first request failed', () => {
+    const responses: Observable<ExecJobMetricsResponse>[] = [throwError(() => new ApiError('database is down', 500))];
+    const { fixture, fetch, root } = createComponentWithMockedExecJobsService(() => responses.shift() ?? of(createExecJobMetricsResponseFixture()));
+    expect(root.textContent).toContain('Failed to Load Metrics');
+
+    root.querySelector<HTMLButtonElement>('button[label="Try Again"]')?.click();
+    fixture.detectChanges();
+    expect(fetch).toHaveBeenCalledTimes(2);
+    expect(fetch).toHaveBeenLastCalledWith('j1', 1, 0);
+    expect(root.textContent).toContain('1.8 / 2 CPUs');
+    expect(root.textContent).not.toContain('Failed to Load Metrics');
+  });
+
   it('stops polling after the attempt ends', async () => {
     vi.useFakeTimers();
     try {

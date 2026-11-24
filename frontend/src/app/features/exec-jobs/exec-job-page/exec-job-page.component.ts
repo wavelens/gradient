@@ -271,15 +271,15 @@ export class ExecJobPageComponent implements OnInit {
     this.watch();
   }
 
-  selectAttemptFromSidebarClosePhoneDrawerShowLogViewAndLoadLog(attempt: number): void {
+  selectAttemptFromSidebarAndShowLogUnlessMetricsView(attempt: number): void {
     const clickedAttemptIsLogOnScreenAttempt = attempt === this.pickedOrHighestNumberedAttemptForSelectedNode()?.number;
     if (!clickedAttemptIsLogOnScreenAttempt) this.selectedAttemptNumber.set(attempt);
     this.sidebarOpen.set(false);
-    this.view.set(LOG_VIEW.value);
+    if (this.view() !== METRICS_VIEW.value) this.view.set(LOG_VIEW.value);
     this.terminal.set(null);
     this.router.navigate([], {
       relativeTo: this.route,
-      queryParams: { attempt: this.selectedAttemptNumber(), view: null },
+      queryParams: { attempt: this.selectedAttemptNumber(), view: this.view() === LOG_VIEW.value ? null : this.view() },
       queryParamsHandling: 'merge',
       replaceUrl: true,
     });

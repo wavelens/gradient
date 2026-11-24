@@ -55,7 +55,7 @@
             </div>
             <gr-log-attempt-list [attemptRows]="attemptRows"
                                  [attemptNumberForLogOnScreenOrNull]="pickedOrHighestNumberedAttemptForSelectedNode()?.number ?? null"
-                                 (selectAttempt)="selectAttemptFromSidebarClosePhoneDrawerShowLogViewAndLoadLog($event)" />
+                                 (selectAttempt)="selectAttemptFromSidebarAndShowLogUnlessMetricsView($event)" />
           }
         }
 
