@@ -49,7 +49,7 @@ The saturation check can use live worker load and the predicted peak memory. The
 - Every assigned job can reserve its predicted peak memory for the whole duration of the job.
 - Builds keep the maximum number of cores that fit in the total memory of the workers that the project can use. Builds wait for free memory. A build can start with fewer cores only on workers that have no reservations to release. Each step can reduce the core count by one third, down to 1 core.
 - After an out-of-memory kill, the next attempt can get a third fewer cores than the attempt killed.
-- Workers with `worker.build.cgroup` report the peak memory of each running build every 10 seconds. When a build go above its prediction, it will reserve the reported peak instead.
+- Workers with `worker.build.cgroup` sample memory for each running build every 2 seconds. They report the maximum every 10 seconds. Page cache that the kernel can free doesn't count. Workers reserve the reported peak instead for builds that go over the estimate.
 - On such a worker, reserved memory that no build has touched yet also count against the measured free memory.
 - If a build get lost together with its worker, the last reported peak remain in the history as a sample.
 - A build on an architecture without any history can reserve the mean peak memory of the instance's builds over the last 24 hours.

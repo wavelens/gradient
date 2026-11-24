@@ -39,6 +39,7 @@ use super::jobs::{Readoption, WorkerJobs, report_when_drained};
 use super::local_store_path_bloom_filter_sender::BloomFilterRebuildLastStartAndRunningTaskHandle;
 
 const STOP_BUDGET: Duration = Duration::from_secs(5);
+const WORKER_UNRECLAIMABLE_RAM_SAMPLE_INTERVAL: Duration = Duration::from_secs(2);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) struct LoopEnd {
@@ -57,6 +58,10 @@ pub(super) async fn run_message_loop(
 
     let mut heartbeat = tokio::time::interval(std::time::Duration::from_secs(10));
     heartbeat.tick().await;
+    let mut build_ram_sample_interval =
+        tokio::time::interval(WORKER_UNRECLAIMABLE_RAM_SAMPLE_INTERVAL);
+    build_ram_sample_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    let daemon_cgroup = state.config.build.cgroup.clone();
 
     let mut stop_deadline = None;
 
@@ -117,6 +122,18 @@ pub(super) async fn run_message_loop(
 
             _ = heartbeat.tick() => {
                 state.on_heartbeat().await?;
+            }
+
+            _ = build_ram_sample_interval.tick(), if daemon_cgroup.is_some() => {
+                if let Some(daemon_cgroup) = daemon_cgroup.clone()
+                    && crate::executor::worker_has_any_running_build()
+                {
+                    drop(tokio::task::spawn_blocking(move || {
+                        crate::executor::sample_running_build_unreclaimable_ram_maxima_from_nix_daemon_cgroup(
+                            &daemon_cgroup,
+                        );
+                    }));
+                }
             }
 
             change = super::vm_report::next_change(&mut vm_changes) => {

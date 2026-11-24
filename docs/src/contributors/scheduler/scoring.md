@@ -49,7 +49,7 @@ flowchart LR
 - Pass `now` in as a caller. Rules never read the wall clock.
 - `JobContext::build_estimate` can only give an empty estimate, for a job with `outputs_present`. A worker holding every output has nothing to build.
 - `ram_reserved_mb` sums over the jobs assigned to the worker. Per job, count the larger of `RamNeed::reserved_mb` and its observed peak.
-- `WorkerMetrics::build_peak_ram_mb` holds the `memory.peak` of each running build, read from the cgroup `nix-build@<derivation hash>-<build user>`. A worker without `worker.build.cgroup` reports `None`.
+- `WorkerMetrics::build_peak_ram_mb` can keep the maximum unreclaimable RAM for each running build, sampled every 2 seconds from `memory.stat` in cgroup `nix-build@<derivation hash>-<build user>`. `anon + shmem + kernel - slab_reclaimable` is unreclaimable RAM, without page cache. The final `peak_ram_mb` for a build can use the same sampled peak. Otherwise, the final value can use `memory.peak` from the daemon. Workers without `worker.build.cgroup` report `None`.
 - `ram_reserved_unused_mb` sums reserved minus observed memory per job, on a worker reporting build memory. A build absent from the report has not started and counts as 0.
 - `SchedulerCore::unregister` can raise the estimate of a lost build to its observed peak. The graph writer can store that peak as a `derivation_metric` row.
     - `Predicted` is the predicted peak RAM of a build.
