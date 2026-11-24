@@ -6,14 +6,14 @@
 
 use anyhow::Result;
 use gradient_db::DbContext;
-use gradient_db::exec_jobs::attempts;
 use gradient_db::exec_jobs::run_again::RunRefusal;
+use gradient_db::exec_jobs::{attempts, exec_job_metrics};
 use gradient_db::scheduling::assignment_record::exec_job_of_key;
 use gradient_entity::exec_job_attempt::AttemptEndReason;
 use gradient_graph::{Graph, Transition};
 use gradient_types::ids::{ExecJobAttemptId, ExecJobId};
 use gradient_types::{EExecJob, MExecJob};
-use gradient_wire::types::BuildFailureKind;
+use gradient_wire::types::{BuildFailureKind, ExecMetrics};
 use sea_orm::EntityTrait;
 use tracing::{info, warn};
 
@@ -157,6 +157,23 @@ impl Scheduler {
             .await
         {
             warn!(error = %e, %worker_id, %job_id, "recording an exec phase failed");
+        }
+    }
+
+    pub async fn record_exec_usage_window(
+        &self,
+        worker_id: &str,
+        job_id: &str,
+        metrics: ExecMetrics,
+    ) {
+        let Some(attempt) = self.active_exec_attempt(worker_id, job_id).await else {
+            return;
+        };
+        if let Err(e) =
+            exec_job_metrics::record(&self.db.worker_db, attempt, &metrics, gradient_types::now())
+                .await
+        {
+            warn!(error = %e, %worker_id, %job_id, "Recording the usage window of an exec failed");
         }
     }
 

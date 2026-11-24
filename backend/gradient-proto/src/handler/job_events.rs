@@ -16,7 +16,7 @@ use gradient_scheduler::eval_split::reply::ShardRequest;
 use gradient_scheduler::{ReportedTimeline, Scheduler};
 use gradient_types::ids::{DispatchedJobId, EvaluationId};
 use gradient_util::shutdown::Shutdown;
-use gradient_wire::types::{BuildFailureKind, BuildMetrics, InputOutcome};
+use gradient_wire::types::{BuildFailureKind, BuildMetrics, ExecMetrics, InputOutcome};
 use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
 use tracing::{Instrument as _, debug, debug_span, error, info, warn};
@@ -72,6 +72,10 @@ pub(super) enum JobEvent {
         name: String,
         payload: Vec<u8>,
     },
+    ExecUsageWindow {
+        job_id: String,
+        metrics: ExecMetrics,
+    },
 }
 
 impl JobEvent {
@@ -84,6 +88,7 @@ impl JobEvent {
             | JobEvent::InputRequest { job_id, .. }
             | JobEvent::ShardRequest { job_id, .. }
             | JobEvent::Phase { job_id, .. }
+            | JobEvent::ExecUsageWindow { job_id, .. }
             | JobEvent::InputFetched {
                 fetch_id: job_id, ..
             } => job_id,
@@ -104,6 +109,7 @@ impl JobEvent {
             JobEvent::InputFetched { .. } => "input_fetched",
             JobEvent::ShardRequest { .. } => "shard_request",
             JobEvent::Phase { .. } => "phase",
+            JobEvent::ExecUsageWindow { .. } => "exec_usage_window",
         }
     }
 
@@ -302,6 +308,11 @@ impl ApplyJobEvent for SchedulerJobEvents {
             } => {
                 self.scheduler
                     .handle_exec_phase(&self.peer_id, &job_id, name, payload)
+                    .await;
+            }
+            JobEvent::ExecUsageWindow { job_id, metrics } => {
+                self.scheduler
+                    .record_exec_usage_window(&self.peer_id, &job_id, metrics)
                     .await;
             }
         }
