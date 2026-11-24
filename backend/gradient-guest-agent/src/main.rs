@@ -15,6 +15,7 @@ mod redaction;
 mod run;
 mod setup;
 mod shell;
+mod system_usage_sampler;
 mod terminal;
 mod tree_patch;
 mod upload;
