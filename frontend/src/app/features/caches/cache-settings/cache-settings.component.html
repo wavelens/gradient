@@ -13,7 +13,7 @@
                errorTitle="Failed to load cache settings" (retry)="loadCache()">
 @if (cache(); as c) {
     <gr-settings-section>
-      <gr-form-field label="Name" for="cache-name" hint="This name is part of the URL and can't be changed here. Change the display name instead.">
+      <gr-form-field label="Name" for="cache-name" [hint]="access().canEdit ? 'The name is part of the URL. Rename the name in the Danger Zone.' : 'The name is part of the URL.'">
         <input grInput id="cache-name" [value]="c.name" disabled />
       </gr-form-field>
 
@@ -177,6 +177,16 @@
               [loading]="toggling()"
             ></button>
           </gr-row>
+          <app-rename-url-name
+            noun="cache"
+            [currentUrlName]="cacheName"
+            [entityUuidToKeepOnRename]="c.id"
+            [access]="access()"
+            [names]="cacheNameAvailability"
+            [sendRenameRequestToServer]="renameCache"
+            [settingsFormHasUnsavedChanges]="unsaved.changed()"
+            (urlNameRenameAccepted)="afterRenameRememberDisplayNameForBreadcrumbsAndNavigateToNewSettingsUrl($event)"
+          />
         }
         @if (accessService.isWritable(deleteAccess())) {
           <gr-row>

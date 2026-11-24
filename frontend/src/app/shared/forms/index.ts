@@ -12,6 +12,7 @@ export * from './ip-network';
 export * from './lists';
 export * from './name-availability';
 export * from './name-fields.component';
+export * from './rename-row-and-dialog.component';
 export * from './reveal-invalid';
 export * from './unsaved-changes';
 export * from './validators';

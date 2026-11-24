@@ -93,12 +93,41 @@ describe('CacheSettingsComponent - first load', () => {
     expect(getCache).not.toHaveBeenCalled();
   });
 
-  it('says why the locked name cannot change and points to the display name', () => {
+  it('says the name is part of the URL and points to the rename in the Danger Zone', () => {
     const fixture = setup({ managed: false, canEdit: true, canTrigger: true });
     const nameInput = (fixture.nativeElement as HTMLElement).querySelector<HTMLInputElement>('#cache-name')!;
     const nameField = nameInput.closest('gr-form-field')!;
     const description = nameInput.getAttribute('aria-describedby')!.split(' ').map((id) => nameField.querySelector(`[id="${id}"]`)?.textContent).join(' ');
-    expect(description).toContain('display name');
+    expect(description).toContain('Danger Zone');
+  });
+});
+
+describe('CacheSettingsComponent - rename', () => {
+  it('renames through the cache PATCH and opens the settings under the new name', () => {
+    const fixture = setup({ managed: false, canEdit: true, canTrigger: true });
+    const updateCache = vi.fn(() => of('ok'));
+    Object.assign(TestBed.inject(CachesService), { updateCache });
+    const navigate = vi.spyOn(TestBed.inject(Router), 'navigateByUrl').mockResolvedValue(true);
+    const component = fixture.componentInstance as unknown as {
+      renameCache: (name: string) => unknown;
+      afterRenameRememberDisplayNameForBreadcrumbsAndNavigateToNewSettingsUrl: (name: string) => void;
+    };
+    component.renameCache('renamed');
+    component.afterRenameRememberDisplayNameForBreadcrumbsAndNavigateToNewSettingsUrl('renamed');
+    expect(updateCache).toHaveBeenCalledWith('demo', { name: 'renamed' });
+    expect(String(navigate.mock.calls[0][0])).toBe('/caches/renamed/settings');
+    expect(TestBed.inject(BreadcrumbsService).getLastKnownDisplayNameSignal('cache', 'renamed')?.()).toBe('Demo');
+  });
+
+  it('shows Rename disabled for a state-managed cache', () => {
+    const fixture = setup({ managed: true, canEdit: true, canTrigger: true });
+    const rename = (fixture.nativeElement as HTMLElement).querySelector<HTMLButtonElement>('app-rename-url-name button');
+    expect(rename?.disabled).toBe(true);
+  });
+
+  it('hides Rename under read-only access', () => {
+    const fixture = setup({ managed: false, canEdit: false, canTrigger: false });
+    expect(findByText(fixture.nativeElement, 'rename')).toBeNull();
   });
 });
 

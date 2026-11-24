@@ -11,7 +11,7 @@
                errorTitle="Failed to load task settings" (retry)="loadTask()">
 @if (task(); as proj) {
   <gr-settings-section>
-    <gr-form-field label="Name" for="task-name" hint="The name is part of every URL and stays locked here. Edit the Display Name instead.">
+    <gr-form-field label="Name" for="task-name" [hint]="access().canEdit ? 'The name is part of the URL. Rename the name in the Danger Zone.' : 'The name is part of the URL.'">
       <input grInput id="task-name" [value]="proj.name" disabled />
     </gr-form-field>
 
@@ -184,49 +184,61 @@
     }
   </gr-settings-section>
 
-  @if (accessService.isWritable(access())) {
+  @if (access().canEdit) {
     <gr-settings-section title="Danger Zone" danger>
-      <gr-row>
-        Transfer Ownership
-        <span slot="meta">Transfer this task to another project.</span>
-        <button
-            slot="actions"
-            grButton
-            label="Transfer Ownership"
-            icon="send"
-            severity="danger"
-            (click)="openTransferOwnershipDialogAndLoadTargetProjects()"
-        ></button>
-      </gr-row>
-      <gr-row>
-        Delete old evaluations
-        <span slot="meta">Delete completed evaluations that were created before a specified date. Running evaluations and the latest completed evaluation stay.</span>
-        <div slot="actions" class="delete-before">
-          <label for="task-delete-before">Created before</label>
-          <input grInput id="task-delete-before" type="date" [(ngModel)]="deleteCompletedEvaluationsBeforeDate" />
+      <app-rename-url-name
+        noun="task"
+        [currentUrlName]="taskName"
+        [entityUuidToKeepOnRename]="proj.id"
+        [access]="access()"
+        [names]="taskNameAvailability"
+        [sendRenameRequestToServer]="renameTask"
+        [settingsFormHasUnsavedChanges]="unsaved.changed()"
+        (urlNameRenameAccepted)="afterRenameRememberDisplayNameForBreadcrumbsAndNavigateToNewSettingsUrl($event)"
+      />
+      @if (accessService.isWritable(access())) {
+        <gr-row>
+          Transfer Ownership
+          <span slot="meta">Transfer this task to another project.</span>
           <button
+              slot="actions"
               grButton
-              label="Delete"
-              icon="delete_sweep"
+              label="Transfer Ownership"
+              icon="send"
               severity="danger"
-              aria-label="Delete old evaluations"
-              [disabled]="!deleteCompletedEvaluationsBeforeDate"
-              (click)="deleteCompletedEvaluationsCreatedBeforeDate()"
+              (click)="openTransferOwnershipDialogAndLoadTargetProjects()"
           ></button>
-        </div>
-      </gr-row>
-      <gr-row>
-        Delete task
-        <span slot="meta">Delete this task completely along with all its evaluations, triggers, actions, and overrides of flake inputs.</span>
-        <button
-            slot="actions"
-            grButton
-            label="Delete task"
-            icon="delete"
-            severity="danger"
-            (click)="deleteTask()"
-        ></button>
-      </gr-row>
+        </gr-row>
+        <gr-row>
+          Delete old evaluations
+          <span slot="meta">Delete completed evaluations that were created before a specified date. Running evaluations and the latest completed evaluation stay.</span>
+          <div slot="actions" class="delete-before">
+            <label for="task-delete-before">Created before</label>
+            <input grInput id="task-delete-before" type="date" [(ngModel)]="deleteCompletedEvaluationsBeforeDate" />
+            <button
+                grButton
+                label="Delete"
+                icon="delete_sweep"
+                severity="danger"
+                aria-label="Delete old evaluations"
+                [disabled]="!deleteCompletedEvaluationsBeforeDate"
+                (click)="deleteCompletedEvaluationsCreatedBeforeDate()"
+            ></button>
+          </div>
+        </gr-row>
+        <gr-row>
+          Delete task
+          <span slot="meta">Delete this task completely along with all its evaluations, triggers, actions, and overrides of flake inputs.</span>
+          <button
+              slot="actions"
+              grButton
+              label="Delete task"
+              icon="delete"
+              severity="danger"
+              (click)="deleteTask()"
+          ></button>
+        </gr-row>
+      }
     </gr-settings-section>
   }
 }

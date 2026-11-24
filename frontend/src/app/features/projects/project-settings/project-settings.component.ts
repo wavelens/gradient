@@ -34,7 +34,7 @@ import { LabelHelpComponent, formatEntityLabel } from '@shared/ui';
 import { RelativeTimePipe, ServerTimestampToLocalDateTimePipe } from '@shared/text';
 import { AccessService, ManagedDisableDirective, ServerConfigurationManagedLockButtonComponent, SettingsAccessStateBadgeComponent, requestIfProjectMember, isViewerProjectMember, injectSaveSettingsWithPrivateToPublicConfirmation } from '@shared/access';
 import { ConfirmService } from '@shared/confirm';
-import { maxDisplayNameCharacterCount, unsavedChanges } from '@shared/forms';
+import { RenameUrlNameComponent, maxDisplayNameCharacterCount, nameAvailability, unsavedChanges } from '@shared/forms';
 import { CanComponentDeactivate } from '@core/guards/unsaved-changes.guard';
 import { GitHttpsCredentialResponse, GitSshHostKeyResponse, PatchProjectRequest, ProjectResponse, accessTo } from '@core/models';
 import { injectProject } from '@core/resolvers/project-access.resolver';
@@ -75,6 +75,7 @@ interface ProjectForm {
     SelectComponent,
     RowListComponent,
     SubmitDirective,
+    RenameUrlNameComponent,
   ],
   templateUrl: './project-settings.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,
@@ -157,8 +158,17 @@ export class ProjectSettingsComponent implements OnInit, CanComponentDeactivate 
     return this.displayNameError ? 'Fix the marked fields to save.' : null;
   }
 
+  protected projectNameAvailability = nameAvailability((name) => this.projectsService.checkProjectNameAvailable(name));
+  protected renameProject = (name: string) => this.projectsService.updateProject(this.projectName, { name });
+
   canDeactivate(): boolean | Observable<boolean> {
     return this.unsaved.canLeave();
+  }
+
+  afterRenameRememberDisplayNameForBreadcrumbsAndNavigateToNewSettingsUrl(name: string): void {
+    const displayName = this.project()?.display_name;
+    if (displayName) this.crumbs.rememberProject(name, displayName);
+    this.router.navigateByUrl(links.projectPage(name, 'settings'), { replaceUrl: true });
   }
 
   ngOnInit(): void {
