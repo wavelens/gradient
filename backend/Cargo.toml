@@ -215,7 +215,7 @@ rustls-native-certs = { version = "0.8", default-features = false }
 subtle        = { version = "2.6", default-features = false }
 tempfile      = { version = "3.27", default-features = false }
 toml          = { version = "1.1", default-features = false, features = ["std", "serde", "parse", "display"] }
-rusqlite      = { version = "0.40", default-features = false, features = ["bundled"] }
+rusqlite      = { version = "0.41", default-features = false, features = ["bundled"] }
 url           = { version = "2.5", default-features = false }
 
 # Enum primitive conversions
@@ -249,13 +249,6 @@ opt-level = 2
 
 [patch.crates-io]
 nix-bindings = { git = "https://github.com/DerDennisOP/nix-bindings", branch = "feat/nix-2.35.3" }
-sqlx             = { git = "https://github.com/launchbadge/sqlx", rev = "b54008a329541c0ce230d8b203e0c00fc8e8ea48" }
-sqlx-core        = { git = "https://github.com/launchbadge/sqlx", rev = "b54008a329541c0ce230d8b203e0c00fc8e8ea48" }
-sqlx-macros      = { git = "https://github.com/launchbadge/sqlx", rev = "b54008a329541c0ce230d8b203e0c00fc8e8ea48" }
-sqlx-macros-core = { git = "https://github.com/launchbadge/sqlx", rev = "b54008a329541c0ce230d8b203e0c00fc8e8ea48" }
-sqlx-mysql       = { git = "https://github.com/launchbadge/sqlx", rev = "b54008a329541c0ce230d8b203e0c00fc8e8ea48" }
-sqlx-postgres    = { git = "https://github.com/launchbadge/sqlx", rev = "b54008a329541c0ce230d8b203e0c00fc8e8ea48" }
-sqlx-sqlite      = { git = "https://github.com/launchbadge/sqlx", rev = "b54008a329541c0ce230d8b203e0c00fc8e8ea48" }
 
 
 [package]
