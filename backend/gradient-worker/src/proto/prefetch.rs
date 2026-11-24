@@ -13,7 +13,7 @@ use gradient_derivation::parse_drv;
 use gradient_util::store_path::nix_store_path;
 use gradient_wire::CachedPathInfo;
 use gradient_wire::messages::{BuildSpec, CachedPath, EvalMessageLevel, QueryMode, Realisation};
-use gradient_wire::types::{BuildProgressPhase, JobPhase};
+use gradient_wire::types::{BuildProgressPhase, JobPhase, RedactedPresignedS3Url};
 use tracing::{debug, error, warn};
 
 use crate::count::clamp_to_u32;
@@ -177,12 +177,16 @@ pub(crate) async fn stage_one_presigned(
 ) -> Result<StagedFetch> {
     let url = cp.url.clone().expect("by_url entries have a URL");
     let presigned_url_without_query_string =
-        presigned_url_without_signature_credential_user_info_and_fragment_for_error_and_log_messages_or_placeholder(&url);
+        presigned_url_without_signature_credential_user_info_and_fragment_for_error_and_log_messages_or_placeholder(url.as_presigned_url_with_secret_query());
     let path = cp.path.clone();
     let mut backoff = PRESIGNED_RETRY_BASE;
 
     for attempt in 1..=PRESIGNED_DOWNLOAD_MAX_ATTEMPTS {
-        let attempt_err = match http.get(&url).send().await {
+        let attempt_err = match http
+            .get(url.as_presigned_url_with_secret_query())
+            .send()
+            .await
+        {
             Ok(resp) => {
                 let status = resp.status().as_u16();
                 if presigned_status_is_missing(status) {
@@ -580,7 +584,12 @@ impl<'a> InputPrefetcher<'a> {
                         continue;
                     }
                 };
-                let compression = resolve_compression(&bytes, meta.url.as_deref());
+                let compression = resolve_compression(
+                    &bytes,
+                    meta.url
+                        .as_ref()
+                        .map(RedactedPresignedS3Url::as_presigned_url_with_secret_query),
+                );
                 for seed in drv_closure_seeds_from_compressed_nar(&bytes, compression, path).await {
                     if !queried.contains(&seed) {
                         tracing::trace!(
@@ -885,7 +894,7 @@ mod tests {
             cached: true,
             file_size: None,
             nar_size: Some(0),
-            url: url.map(|s| s.to_owned()),
+            url: url.map(Into::into),
             nar_hash: Some("sha256:0mdqa9w1p6cmli6976v4wi0sw9r4p5prkj7lzfd1877wk11c9c73".into()),
             file_hash: None,
             references: None,

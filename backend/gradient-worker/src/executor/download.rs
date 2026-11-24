@@ -201,7 +201,10 @@ impl DownloadIo for JobUpdaterIo<'_> {
         .ok_or_else(|| anyhow::Error::new(MissingInputs(vec![drv_path.to_owned()])))?;
         let nar = decompress(
             &compressed,
-            resolve_compression(&compressed, entry.url.as_deref()),
+            resolve_compression(&compressed, entry
+                .url
+                .as_ref()
+                .map(gradient_wire::types::RedactedPresignedS3Url::as_presigned_url_with_secret_query)),
         )?;
         gradient_derivation::parse_drv(&extract_single_file_from_nar(&nar).await?)
     }

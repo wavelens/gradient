@@ -58,7 +58,13 @@ impl<'a> NarImporter<'a> {
 
     async fn import(&self, payload: NarPayload) -> Result<()> {
         let compressed_len = payload.byte_len().await;
-        let nar = Arc::new(FetchedNar::new(payload, self.meta.url.clone()));
+        let nar = Arc::new(FetchedNar::new(
+            payload,
+            self.meta
+                .url
+                .as_ref()
+                .map(|url| url.as_presigned_url_with_secret_query().to_owned()),
+        ));
         self.verify_and_import(&nar).await?;
         debug!(%self.store_path, bytes = compressed_len, "imported NAR into local store");
         Ok(())
@@ -192,7 +198,12 @@ pub(crate) async fn digest_of(nar: Arc<dyn NarReader>) -> Result<NarDigest> {
 }
 
 pub(crate) async fn holds_claimed_nar(compressed: &NarPayload, cp: &CachedPath) -> bool {
-    let nar = FetchedNar::new(compressed.clone(), cp.url.clone());
+    let nar = FetchedNar::new(
+        compressed.clone(),
+        cp.url
+            .as_ref()
+            .map(|url| url.as_presigned_url_with_secret_query().to_owned()),
+    );
     let nar_size = cp.nar_size;
     let claimed = cp
         .nar_hash

@@ -345,7 +345,7 @@ impl NarStore {
         method: reqwest::Method,
         path: &Path,
         expires_in: std::time::Duration,
-    ) -> Result<Option<String>> {
+    ) -> Result<Option<gradient_wire::types::RedactedPresignedS3Url>> {
         use object_store::signer::Signer as _;
 
         let Some(signer) = &self.s3_signer else {
@@ -357,7 +357,7 @@ impl NarStore {
             .await
             .context("generate presigned URL")?;
 
-        Ok(Some(url.to_string()))
+        Ok(Some(url.to_string().into()))
     }
 
     pub async fn ping(&self) -> Result<()> {
@@ -541,7 +541,7 @@ impl NarStore {
         &self,
         hash: &str,
         expires_in: std::time::Duration,
-    ) -> Result<Option<String>> {
+    ) -> Result<Option<gradient_wire::types::RedactedPresignedS3Url>> {
         self.presign_object(reqwest::Method::GET, &self.object_path(hash), expires_in)
             .await
     }
@@ -730,7 +730,7 @@ impl NarStore {
         &self,
         key: &str,
         expires_in: std::time::Duration,
-    ) -> Result<Option<String>> {
+    ) -> Result<Option<gradient_wire::types::RedactedPresignedS3Url>> {
         self.presign_object(reqwest::Method::GET, &self.eval_cache_path(key), expires_in)
             .await
     }
@@ -739,7 +739,7 @@ impl NarStore {
         &self,
         key: &str,
         expires_in: std::time::Duration,
-    ) -> Result<Option<String>> {
+    ) -> Result<Option<gradient_wire::types::RedactedPresignedS3Url>> {
         self.presign_object(reqwest::Method::PUT, &self.eval_cache_path(key), expires_in)
             .await
     }
@@ -1090,10 +1090,10 @@ impl NarStore {
 pub enum StorageTarget {
     Passthrough,
     Put {
-        url: String,
+        url: gradient_wire::types::RedactedPresignedS3Url,
     },
     PresignedPutToTemporaryUploadObject {
-        url: String,
+        url: gradient_wire::types::RedactedPresignedS3Url,
         temporary_nar_storage_key: String,
     },
     Multipart {
@@ -1253,7 +1253,10 @@ mod tests {
             panic!("{target:?}")
         };
         assert!(
-            grant.part_urls.iter().all(|url| !url.contains("/nars/")),
+            grant
+                .part_urls
+                .iter()
+                .all(|url| !url.as_presigned_url_with_secret_query().contains("/nars/")),
             "{:?}",
             grant.part_urls.first()
         );
@@ -1287,7 +1290,10 @@ mod tests {
             temporary_nar_storage_key.starts_with(&format!("nar-uploads/{}-", "a".repeat(32))),
             "{temporary_nar_storage_key}"
         );
-        assert!(!url.contains("/nars/"), "{url}");
+        assert!(
+            !url.as_presigned_url_with_secret_query().contains("/nars/"),
+            "{url:?}"
+        );
         let blob = store
             .upload_target(&ObjectKey::EvalCache("eval-cache/c/fp".into()), 1024)
             .await
@@ -1300,6 +1306,40 @@ mod tests {
                 .unwrap(),
             StorageTarget::Passthrough
         );
+    }
+
+    #[tokio::test]
+    async fn presigned_put_storage_target_debug_output_does_not_contain_amz_credential_or_amz_signature()
+     {
+        let store = NarStore::s3(
+            "bucket",
+            "us-east-1",
+            Some("http://127.0.0.1:1"),
+            Some("key"),
+            Some("secret"),
+            "",
+            false,
+            S3Timeouts::default(),
+        )
+        .unwrap();
+        for key in [
+            ObjectKey::Nar("a".repeat(32)),
+            ObjectKey::EvalCache("eval-cache/c/fp".into()),
+        ] {
+            let target = store.upload_target(&key, 1024).await.unwrap();
+            let (StorageTarget::Put { url }
+            | StorageTarget::PresignedPutToTemporaryUploadObject { url, .. }) = &target
+            else {
+                panic!("{target:?}")
+            };
+            assert!(
+                url.as_presigned_url_with_secret_query()
+                    .contains("X-Amz-Signature=")
+            );
+            let printed = format!("{target:?}");
+            assert!(!printed.contains("X-Amz-Credential"), "{printed}");
+            assert!(!printed.contains("X-Amz-Signature"), "{printed}");
+        }
     }
 
     async fn request_nar_upload_target_for_single_presigned_put_and_return_lease_and_expiry_durations(
@@ -1323,13 +1363,13 @@ mod tests {
         let StorageTarget::PresignedPutToTemporaryUploadObject { url, .. } = &target else {
             panic!("{target:?}")
         };
-        let expires = reqwest::Url::parse(url)
+        let expires = reqwest::Url::parse(url.as_presigned_url_with_secret_query())
             .unwrap()
             .query_pairs()
             .find(|(name, _)| name == "X-Amz-Expires")
             .and_then(|(_, seconds)| seconds.parse().ok())
             .map(std::time::Duration::from_secs)
-            .unwrap_or_else(|| panic!("{url}"));
+            .unwrap_or_else(|| panic!("{url:?}"));
         (upload_lease(&target, nar_size).unwrap(), expires)
     }
 

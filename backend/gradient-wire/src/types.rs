@@ -248,7 +248,7 @@ pub enum EvalCachePullOutcome {
     Miss,
     #[proto(removed(38))]
     Presigned {
-        url: String,
+        url: RedactedPresignedS3Url,
     },
     #[proto(removed(38))]
     Inline {
@@ -270,7 +270,7 @@ pub struct SegmentFetch {
 
 #[derive(Proto, Debug, Clone, PartialEq)]
 pub enum SegmentSource {
-    Presigned { url: String },
+    Presigned { url: RedactedPresignedS3Url },
     Inline { size_bytes: u64 },
 }
 
@@ -317,11 +317,62 @@ pub enum QueryMode {
     Push,
 }
 
+/// The query string of a presigned URL can grant access to the object until expiry of the URL. The Debug output is the URL without the query, user information and fragment. This type has no Display. The wire encoding is the same as for String, so peers on older versions can read this field unchanged.
+#[derive(Clone, PartialEq, Eq)]
+pub struct RedactedPresignedS3Url(String);
+
+impl RedactedPresignedS3Url {
+    pub fn as_presigned_url_with_secret_query(&self) -> &str {
+        &self.0
+    }
+}
+
+impl From<String> for RedactedPresignedS3Url {
+    fn from(url: String) -> Self {
+        Self(url)
+    }
+}
+
+impl From<&str> for RedactedPresignedS3Url {
+    fn from(url: &str) -> Self {
+        Self(url.to_owned())
+    }
+}
+
+impl std::fmt::Debug for RedactedPresignedS3Url {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_tuple("RedactedPresignedS3Url")
+            .field(&gradient_util::http_base_url::presigned_url_without_signature_credential_user_info_and_fragment_for_error_and_log_messages_or_placeholder(&self.0))
+            .finish()
+    }
+}
+
+impl Proto for RedactedPresignedS3Url {
+    fn encode(
+        &self,
+        version: u16,
+        out: &mut crate::codec::bytes::BytesMut,
+    ) -> Result<(), crate::codec::EncodeError> {
+        self.0.encode(version, out)
+    }
+
+    fn decode(
+        input: &mut crate::codec::bytes::Bytes,
+        version: u16,
+    ) -> Result<Self, crate::codec::DecodeError> {
+        String::decode(input, version).map(Self)
+    }
+
+    fn describe(version: u16, out: &mut String) {
+        String::describe(version, out);
+    }
+}
+
 #[derive(Proto, Clone, PartialEq)]
 pub struct PresignedMultipart {
     pub upload_id: String,
     pub part_size: u64,
-    pub part_urls: Vec<String>,
+    pub part_urls: Vec<RedactedPresignedS3Url>,
 }
 
 impl std::fmt::Debug for PresignedMultipart {
@@ -362,29 +413,12 @@ pub enum UploadObject {
     },
 }
 
-#[derive(Proto, Clone, PartialEq)]
+#[derive(Proto, Debug, Clone, PartialEq)]
 pub enum GrantTarget {
     Skip,
     Passthrough { resume_offset: u64 },
-    Put { url: String },
+    Put { url: RedactedPresignedS3Url },
     Multipart(PresignedMultipart),
-}
-
-impl std::fmt::Debug for GrantTarget {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Skip => f.write_str("Skip"),
-            Self::Passthrough { resume_offset } => f
-                .debug_struct("Passthrough")
-                .field("resume_offset", resume_offset)
-                .finish(),
-            Self::Put { url } => f
-                .debug_struct("Put")
-                .field("url", &gradient_util::http_base_url::presigned_url_without_signature_credential_user_info_and_fragment_for_error_and_log_messages_or_placeholder(url))
-                .finish(),
-            Self::Multipart(multipart) => f.debug_tuple("Multipart").field(multipart).finish(),
-        }
-    }
 }
 
 #[derive(Proto, Debug, Clone, PartialEq)]
@@ -424,7 +458,7 @@ pub struct CachedPath {
     pub cached: bool,
     pub file_size: Option<u64>,
     pub nar_size: Option<u64>,
-    pub url: Option<String>,
+    pub url: Option<RedactedPresignedS3Url>,
     pub nar_hash: Option<String>,
     pub file_hash: Option<String>,
     pub references: Option<Vec<String>>,
@@ -861,24 +895,50 @@ pub enum BuildFailureKind {
 
 #[cfg(test)]
 mod tests {
-    use super::{GrantTarget, JobPhase, PresignedMultipart};
+    use super::{
+        CachedPath, EvalCachePullOutcome, GrantTarget, JobPhase, PresignedMultipart, SegmentFetch,
+        SegmentSource,
+    };
 
     #[test]
-    fn grant_debug_output_does_not_contain_presigned_url_signature_or_credential() {
+    fn debug_output_does_not_contain_presigned_s3_url_credentials() {
         let url = "https://s3.example.com/bucket/nar-uploads/obj?X-Amz-Credential=secret-key&X-Amz-Signature=secret-signature";
-        for grant in [
-            GrantTarget::Put {
-                url: url.to_owned(),
-            },
-            GrantTarget::Multipart(PresignedMultipart {
-                upload_id: "upload".to_owned(),
-                part_size: 64 << 20,
-                part_urls: vec![url.to_owned(), format!("{url}&partNumber=2")],
-            }),
-        ] {
-            let printed = format!("{grant:?}");
-            assert!(!printed.contains("secret-key"), "{printed}");
-            assert!(!printed.contains("secret-signature"), "{printed}");
+        let cached = CachedPath {
+            path: "/nix/store/aaaa-pkg".to_owned(),
+            cached: true,
+            url: Some(url.into()),
+            ..CachedPath::default()
+        };
+        let printed = [
+            format!("{:?}", GrantTarget::Put { url: url.into() }),
+            format!(
+                "{:?}",
+                GrantTarget::Multipart(PresignedMultipart {
+                    upload_id: "upload".to_owned(),
+                    part_size: 64 << 20,
+                    part_urls: vec![url.into(), format!("{url}&partNumber=2").into()],
+                })
+            ),
+            format!(
+                "{:?}",
+                SegmentFetch {
+                    key: "segment".to_owned(),
+                    source: SegmentSource::Presigned { url: url.into() },
+                }
+            ),
+            format!("{:?}", EvalCachePullOutcome::Presigned { url: url.into() }),
+            format!("{cached:?}"),
+            format!("{:?}", cached.as_info()),
+        ];
+        for printed in printed {
+            for secret in [
+                "X-Amz-Credential",
+                "X-Amz-Signature",
+                "secret-key",
+                "secret-signature",
+            ] {
+                assert!(!printed.contains(secret), "{printed}");
+            }
         }
     }
 

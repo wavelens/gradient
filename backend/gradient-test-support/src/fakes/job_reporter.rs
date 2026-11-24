@@ -208,7 +208,7 @@ impl JobReporter for RecordingJobReporter {
             cached: true,
             file_size: None,
             nar_size: None,
-            url: Some(url.clone()),
+            url: Some(url.clone().into()),
             nar_hash: None,
             file_hash: None,
             references: None,

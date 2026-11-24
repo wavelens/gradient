@@ -132,7 +132,13 @@ async fn fetch_one(
         .await?
         .ok_or_else(|| anyhow::Error::new(MissingInputs(vec![path.clone()])))?;
     progress.transfer_done();
-    let nar: Arc<dyn NarReader> = Arc::new(FetchedNar::new(compressed, upstream.url.clone()));
+    let nar: Arc<dyn NarReader> = Arc::new(FetchedNar::new(
+        compressed,
+        upstream
+            .url
+            .as_ref()
+            .map(|url| url.as_presigned_url_with_secret_query().to_owned()),
+    ));
     let digest = digest_of(Arc::clone(&nar))
         .await
         .with_context(|| format!("decompress the upstream NAR of {path}"))?;
@@ -254,7 +260,7 @@ mod tests {
             cached: true,
             file_size: None,
             nar_size: Some(nar().len() as u64),
-            url: Some(format!("https://cache.example/{path}.nar.zst")),
+            url: Some(format!("https://cache.example/{path}.nar.zst").into()),
             nar_hash: Some(nar_hash.to_owned()),
             file_hash: None,
             references: Some(references.iter().map(|r| (*r).to_owned()).collect()),
