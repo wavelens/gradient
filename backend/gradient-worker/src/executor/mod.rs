@@ -7,6 +7,7 @@
 pub mod abort;
 pub mod build;
 mod build_metrics;
+mod built_derivations_awaiting_output_upload;
 mod capped_regular_file_below_trusted_root_reader;
 pub mod compress;
 mod dependencies;
@@ -56,6 +57,7 @@ use gradient_worker_client::nar;
 pub use abort::AbortSignal;
 pub use build_metrics::BuildHost;
 pub(crate) use build_metrics::peak_ram_of_running_builds;
+use built_derivations_awaiting_output_upload::UnreportedBuildMetricsByDerivationPath;
 pub use eval::WorkerEvaluator;
 
 async fn query_fetched_paths(
@@ -285,6 +287,7 @@ pub struct JobExecutor {
     pub(crate) log_fetch_from_store: bool,
     pub(crate) host: BuildHost,
     pub(crate) exec: Option<Arc<ExecHost>>,
+    locally_built_unuploaded_derivations: UnreportedBuildMetricsByDerivationPath,
 }
 
 impl JobExecutor {
@@ -310,6 +313,7 @@ impl JobExecutor {
             log_fetch_from_store,
             host,
             exec: None,
+            locally_built_unuploaded_derivations: UnreportedBuildMetricsByDerivationPath::default(),
         }
     }
 
@@ -525,9 +529,16 @@ impl JobExecutor {
             gc_handles.push(self.gcroots.add(path).await);
         }
         let reported = realised_outputs(&realised).await;
+        let (metrics, substituted) = self
+            .locally_built_unuploaded_derivations
+            .report_for_outputs_already_in_store(&build.drv_path);
         updater
-            .report_build_output(build.build_id.clone(), reported, None, true)
+            .report_build_output(build.build_id.clone(), reported, metrics, substituted)
             .await?;
+        if !substituted {
+            self.locally_built_unuploaded_derivations
+                .record_built_derivation(&build.drv_path, None);
+        }
         Ok(realised
             .into_iter()
             .map(|(_, store_path)| compress::OutputNar {
@@ -673,10 +684,28 @@ impl JobExecutor {
             self.host,
         )
         .await?;
-        for o in &built {
+        if !built.substituted {
+            self.locally_built_unuploaded_derivations
+                .record_built_derivation(&build.drv_path, Some(built.metrics.clone()));
+        }
+        updater
+            .report_build_output(
+                build.build_id.clone(),
+                built.outputs.clone(),
+                Some(built.metrics),
+                built.substituted,
+            )
+            .await
+            .map_err(build::BuildError::transient)?;
+        if !built.substituted {
+            self.locally_built_unuploaded_derivations
+                .record_built_derivation(&build.drv_path, None);
+        }
+        for o in &built.outputs {
             gc_handles.push(self.gcroots.add(&o.store_path).await);
         }
         Ok(built
+            .outputs
             .into_iter()
             .map(|o| compress::OutputNar {
                 build_id: build.build_id.clone(),
@@ -708,6 +737,8 @@ impl JobExecutor {
                 .map_err(failure::BuildError::transient)?;
             compress.record(0, packed.nar_size);
         }
+        self.locally_built_unuploaded_derivations
+            .remove_derivation_with_uploaded_outputs(&job.build.drv_path);
 
         drop(gc_handles);
         Ok(())

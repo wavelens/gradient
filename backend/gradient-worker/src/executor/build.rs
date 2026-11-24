@@ -10,6 +10,7 @@ use gradient_sources::{StoreDaemonError, get_hash_from_path};
 use gradient_util::hydra::parse_hydra_product_line;
 use gradient_util::store_path::{nix_store_path, strip_store_prefix};
 use gradient_wire::messages::{BuildOutput, BuildProduct, BuildSpec};
+use gradient_wire::types::BuildMetrics;
 use harmonia_protocol::daemon_wire::types2::{
     BuildMode, BuildResult, BuildResultInner, KeyedBuildResult,
 };
@@ -341,6 +342,12 @@ async fn is_build_product_path_inside_build_output_store_path(output: &str, path
     }
 }
 
+pub struct LocalBuildResult {
+    pub outputs: Vec<BuildOutput>,
+    pub metrics: BuildMetrics,
+    pub substituted: bool,
+}
+
 pub async fn build_derivation(
     store: &LocalNixStore,
     task: &BuildSpec,
@@ -349,7 +356,7 @@ pub async fn build_derivation(
     log_limits: crate::executor::log_limit::LogRateLimits,
     log_fetch_from_store: bool,
     host: BuildHost,
-) -> Result<Vec<BuildOutput>, BuildError> {
+) -> Result<LocalBuildResult, BuildError> {
     let parsed = ParsedDerivation::load(&task.drv_path)
         .await
         .map_err(BuildError::transient)?;
@@ -410,16 +417,11 @@ pub async fn build_derivation(
     };
 
     let (outputs, substituted) = built.map_err(|e| e.with_metrics(metrics.clone()))?;
-    updater
-        .report_build_output(
-            task.build_id.clone(),
-            outputs.clone(),
-            Some(metrics),
-            substituted,
-        )
-        .await
-        .map_err(BuildError::transient)?;
-    Ok(outputs)
+    Ok(LocalBuildResult {
+        outputs,
+        metrics,
+        substituted,
+    })
 }
 
 pub(super) async fn forward_store_build_log(
