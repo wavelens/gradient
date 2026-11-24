@@ -166,6 +166,7 @@ Workers provide a budget for guest CPUs, memory and disk. Both running guests an
 | `exec.guestDiskMb` | 80 % of the free space under `<worker.baseDir>/guests` at worker start |
 
 - Only workers with enough free budget start jobs. Jobs with no such worker stay queued, the same way jobs wait on busy devices.
+- Set guest size to match the peak values in the [Metrics](phases-and-outputs.md#metrics) view for completed jobs.
 - Sizes above the budget of all workers appear in the wait reason (example: `needs 64 CPUs`).
 - Jobs that no connected worker can handle fail after 300 seconds. Set task option `wait_for_workers` to keep them queued instead.
 - `exec.preWarm` guests boot with `gradient.guest.cpus` and `gradient.guest.memoryMb` of the image, `2` and `500` by default.
