@@ -20,6 +20,7 @@ export interface NameAvailability {
   state: Signal<NameCheckState>;
   blocksSubmit(): boolean;
   check(name: string): void;
+  markTaken(): void;
   suggest(displayName: string): string | null;
   markEdited(): void;
   reset(): void;
@@ -65,6 +66,7 @@ export function nameAvailability(
     state: state.asReadonly(),
     blocksSubmit: () => BLOCKING.includes(state()),
     check,
+    markTaken: () => settle('taken'),
     suggest(displayName) {
       if (edited) return null;
       const name = slugify(displayName).slice(0, maxSlugNameCharacterCount).replace(/-+$/, '');

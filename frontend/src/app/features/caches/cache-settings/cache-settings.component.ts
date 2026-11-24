@@ -39,7 +39,7 @@ import { CachePublicKeyHistory, CacheResponse, CacheSubscribersResponse, PatchCa
 import { ConfigService } from '@core/services/config.service';
 import { LabelHelpComponent, formatEntityLabel } from '@shared/ui';
 import { ConfirmService } from '@shared/confirm';
-import { maxDisplayNameCharacterCount, unsavedChanges } from '@shared/forms';
+import { RenameUrlNameComponent, maxDisplayNameCharacterCount, nameAvailability, unsavedChanges } from '@shared/forms';
 import { links } from '@shared/routing';
 import { plural, ServerTimestampToLocalDateTimePipe } from '@shared/text';
 import { BinaryCacheSettingsNavigationComponent } from '../cache-settings-navigation/cache-settings-navigation.component';
@@ -100,6 +100,7 @@ function isWholeNumber(value: unknown, min: number, max: number): boolean {
     CopyFieldComponent,
     LabelHelpComponent,
     ServerTimestampToLocalDateTimePipe,
+    RenameUrlNameComponent,
   ],
   templateUrl: './cache-settings.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,
@@ -162,8 +163,17 @@ export class CacheSettingsComponent implements OnInit, CanComponentDeactivate {
   private saved: CacheForm = { ...this.formData };
   readonly unsaved = unsavedChanges(() => this.formData, 'Cache Settings');
 
+  protected cacheNameAvailability = nameAvailability((name) => this.cachesService.checkCacheNameAvailable(name));
+  protected renameCache = (name: string) => this.cachesService.updateCache(this.cacheName, { name });
+
   canDeactivate() {
     return this.unsaved.canLeave();
+  }
+
+  afterRenameRememberDisplayNameForBreadcrumbsAndNavigateToNewSettingsUrl(name: string): void {
+    const displayName = this.cache()?.display_name;
+    if (displayName) this.crumbs.rememberCache(name, displayName);
+    this.router.navigateByUrl(links.cachePage(name, 'settings'), { replaceUrl: true });
   }
 
   ngOnInit(): void {

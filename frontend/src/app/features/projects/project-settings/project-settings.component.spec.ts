@@ -109,13 +109,49 @@ describe('ProjectSettingsComponent - validation and unsaved edits', () => {
     return writes;
   }
 
-  it('says why the locked name cannot change and points to the display name', async () => {
+  it('says the name is part of the URL and points to the rename in the Danger Zone', async () => {
     const fixture = setup(admin);
     await settled(fixture);
     const nameInput = (fixture.nativeElement as HTMLElement).querySelector<HTMLInputElement>('#project-name')!;
     const nameField = nameInput.closest('gr-form-field')!;
     const description = nameInput.getAttribute('aria-describedby')!.split(' ').map((id) => nameField.querySelector(`[id="${id}"]`)?.textContent).join(' ');
-    expect(description).toContain('display name');
+    expect(description).toContain('Danger Zone');
+  });
+
+  it('renames through the project PATCH and opens the settings under the new name', async () => {
+    const fixture = setup(admin);
+    await settled(fixture);
+    const { updateProject } = spyOnWrites();
+    const navigate = vi.spyOn(TestBed.inject(Router), 'navigateByUrl').mockResolvedValue(true);
+    const component = fixture.componentInstance as unknown as {
+      renameProject: (name: string) => unknown;
+      afterRenameRememberDisplayNameForBreadcrumbsAndNavigateToNewSettingsUrl: (name: string) => void;
+    };
+    component.renameProject('renamed');
+    component.afterRenameRememberDisplayNameForBreadcrumbsAndNavigateToNewSettingsUrl('renamed');
+    expect(updateProject).toHaveBeenCalledWith('acme', { name: 'renamed' });
+    expect(String(navigate.mock.calls[0][0])).toBe('/project/renamed/settings');
+  });
+
+  it('disables Rename while the settings form has unsaved edits', async () => {
+    const fixture = setup(admin);
+    const element = fixture.nativeElement as HTMLElement;
+    const rename = () => element.querySelector<HTMLButtonElement>('app-rename-url-name button')!;
+    await settled(fixture);
+    expect(rename().disabled).toBe(false);
+    await typeDisplayName(fixture, 'Renamed');
+    expect(rename().disabled).toBe(true);
+    expect(element.querySelector('app-rename-url-name')!.textContent).toContain('Save or discard the unsaved changes');
+    await typeDisplayName(fixture, 'Acme');
+    expect(rename().disabled).toBe(false);
+  });
+
+  it('shows Rename disabled for a state-managed project', async () => {
+    const fixture = setup({ managed: true, canEdit: true, canTrigger: true });
+    await settled(fixture);
+    const rename = (fixture.nativeElement as HTMLElement).querySelector<HTMLButtonElement>('app-rename-url-name button');
+    expect(rename?.disabled).toBe(true);
+    expect((fixture.nativeElement as HTMLElement).textContent).toContain('state file');
   });
 
   it('disables Save without a hint while nothing changed', async () => {
