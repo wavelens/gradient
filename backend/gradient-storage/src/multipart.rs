@@ -217,7 +217,7 @@ mod tests {
             .with_access_key_id("key")
             .with_secret_access_key("secret")
             .with_http_connector(crate::nar::SharedHttpConnector {
-                read_timeout: std::time::Duration::from_secs(5),
+                no_progress_timeout: std::time::Duration::from_secs(5),
                 allow_http: endpoint.is_some(),
             });
         if let Some(endpoint) = endpoint {

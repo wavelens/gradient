@@ -76,7 +76,7 @@ pub fn write_config_snapshot(conn: &Connection, config: &RuntimeConfig) -> Resul
             entries.push(("storage_backend", "s3".to_owned()));
             entries.push((
                 "s3_read_timeout_secs",
-                s3.read_timeout.as_secs().to_string(),
+                s3.no_progress_timeout.as_secs().to_string(),
             ));
             entries.push(("s3_max_retries", s3.max_retries.to_string()));
             entries.push((

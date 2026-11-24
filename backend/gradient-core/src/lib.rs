@@ -164,7 +164,7 @@ async fn load_and_check_secret_files_and_external_endpoints_before_database(
             &s3.prefix,
             s3.virtual_hosted_style,
             gradient_storage::S3Timeouts {
-                read_timeout: s3.read_timeout,
+                no_progress_timeout: s3.no_progress_timeout,
                 max_retries: s3.max_retries,
                 retry_timeout: s3.retry_timeout,
             },

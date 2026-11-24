@@ -77,7 +77,7 @@ pub struct S3Config {
     /// The `false` default is requesting path-style URLs. MinIO, Garage and most self-hosted
     /// backends are requiring path-style. AWS direct is ignoring this flag.
     pub virtual_hosted_style: bool,
-    pub read_timeout: std::time::Duration,
+    pub no_progress_timeout: std::time::Duration,
     pub max_retries: usize,
     pub retry_timeout: std::time::Duration,
 }
@@ -153,7 +153,7 @@ impl Cli {
             secret_access_key_file: self.s3.secret_access_key_file.clone(),
             prefix: self.s3.prefix.clone(),
             virtual_hosted_style: self.s3.virtual_hosted_style,
-            read_timeout: std::time::Duration::from_secs(self.s3.read_timeout_secs),
+            no_progress_timeout: std::time::Duration::from_secs(self.s3.read_timeout_secs),
             max_retries: self.s3.max_retries,
             retry_timeout: std::time::Duration::from_secs(self.s3.retry_timeout_secs),
         })

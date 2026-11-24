@@ -30,7 +30,7 @@ use tokio::io::{AsyncRead, AsyncReadExt as _, AsyncSeekExt as _};
 
 #[derive(Clone, Copy, Debug)]
 pub struct S3Timeouts {
-    pub read_timeout: std::time::Duration,
+    pub no_progress_timeout: std::time::Duration,
     pub max_retries: usize,
     pub retry_timeout: std::time::Duration,
 }
@@ -38,7 +38,7 @@ pub struct S3Timeouts {
 impl Default for S3Timeouts {
     fn default() -> Self {
         Self {
-            read_timeout: std::time::Duration::from_secs(60),
+            no_progress_timeout: std::time::Duration::from_secs(60),
             max_retries: 3,
             retry_timeout: std::time::Duration::from_secs(250),
         }
@@ -61,14 +61,13 @@ impl ServerWrittenTemporaryNarKey {
 
 #[derive(Debug)]
 pub(crate) struct SharedHttpConnector {
-    pub(crate) read_timeout: std::time::Duration,
+    pub(crate) no_progress_timeout: std::time::Duration,
     pub(crate) allow_http: bool,
 }
 
 impl object_store::client::HttpConnector for SharedHttpConnector {
     fn connect(&self, _: &ClientOptions) -> object_store::Result<object_store::client::HttpClient> {
         let client = gradient_util::http::untimed_client_builder()
-            .read_timeout(self.read_timeout)
             .no_gzip()
             .no_brotli()
             .no_deflate()
@@ -79,7 +78,12 @@ impl object_store::client::HttpConnector for SharedHttpConnector {
                 source: Box::new(e),
             })?;
 
-        Ok(object_store::client::HttpClient::new(client))
+        Ok(object_store::client::HttpClient::new(
+            crate::s3_http_transport_with_stall_failure::NoProgressTimeoutHttpService {
+                client,
+                no_progress_timeout: self.no_progress_timeout,
+            },
+        ))
     }
 }
 
@@ -190,15 +194,16 @@ impl NarStore {
             ..Default::default()
         };
 
-        // The object_store default total timeout of 30s was cancelling every larger NAR and
-        // retrying it into a hard failure. The read timeout is policing progress instead, reset on
-        // every chunk.
+        // object_store had a default total timeout of 30 seconds. That timeout canceled every
+        // larger NAR. Requests now fail when there's no progress for a configured duration.
+        // Examples include an upload with zero bytes sent, response headers that don't arrive and
+        // a response body with no data.
         let mut builder = object_store::aws::AmazonS3Builder::new()
             .with_bucket_name(bucket)
             .with_region(region)
             .with_retry(retry_config)
             .with_http_connector(SharedHttpConnector {
-                read_timeout: timeouts.read_timeout,
+                no_progress_timeout: timeouts.no_progress_timeout,
                 allow_http: endpoint.is_some(),
             });
 
@@ -1937,10 +1942,10 @@ mod tests {
         let t = S3Timeouts::default();
         let attempts = u32::try_from(t.max_retries + 1).expect("retry count fits");
         assert!(
-            t.retry_timeout > t.read_timeout * attempts,
+            t.retry_timeout > t.no_progress_timeout * attempts,
             "retry_timeout {:?} must exceed {attempts} attempts of {:?}",
             t.retry_timeout,
-            t.read_timeout,
+            t.no_progress_timeout,
         );
         assert!(t.retry_timeout < std::time::Duration::from_secs(300));
     }

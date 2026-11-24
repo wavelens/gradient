@@ -35,16 +35,18 @@ pub struct S3Args {
     /// path style. It has no effect without a custom endpoint.
     #[arg(default_value_t = false)]
     pub virtual_hosted_style: bool,
-    /// Seconds an S3 response can stall before failing the request. Received chunks reset the
-    /// timer, and large NARs keep streaming as long as they make progress.
+    /// The number of seconds that pass without progress before an S3 request can fail. Bytes of
+    /// the request body that were sent, response headers and response data that was received all
+    /// count as progress. Uploads and downloads of any size continue when progress is present.
     #[arg(default_value_t = 60)]
     pub read_timeout_secs: u64,
     /// Retries of a failed S3 request.
     #[arg(default_value_t = 3)]
     pub max_retries: usize,
-    /// Seconds after the first attempt past which no S3 retries start. Keep it above
-    /// `(maxRetries + 1) * readTimeoutSecs` to still retry requests that fail on the read
-    /// timeout. Keep it below 5 minutes as well, since retries reuse the original credentials.
+    /// S3 retries no longer start after this many seconds from the first attempt. Set a value
+    /// greater than `(maxRetries + 1) * readTimeoutSecs` to keep retrying requests that fail due
+    /// to lack of progress. Retries reuse the original credentials. Keep this value below 5
+    /// minutes as well.
     #[arg(default_value_t = 250)]
     pub retry_timeout_secs: u64,
 }

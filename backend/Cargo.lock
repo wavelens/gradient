@@ -3476,6 +3476,10 @@ dependencies = [
  "harmonia-store-path",
  "harmonia-utils-hash",
  "hex",
+ "http",
+ "http-body",
+ "http-body-util",
+ "hyper",
  "nix",
  "object_store",
  "reqwest",
@@ -3575,6 +3579,7 @@ name = "gradient-util"
 version = "2.0.1"
 dependencies = [
  "base64 0.23.1",
+ "bytes",
  "futures",
  "gradient-secret",
  "gradient-wildcard",
@@ -3822,7 +3827,6 @@ dependencies = [
  "rand 0.10.3",
  "reqwest",
  "sha2 0.11.1",
- "socket2",
  "tempfile",
  "tokio",
  "tokio-tungstenite 0.30.0",
