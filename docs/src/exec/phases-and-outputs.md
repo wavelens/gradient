@@ -70,7 +70,7 @@ The job page has a **Metrics** view with CPU, RAM and disk use of the guest over
 - Usable size is the memory and disk the guest reports and requested size is the guest size of the job.
 - Workers and guest agents too old to send usage windows produce no metrics and the view stays empty.
 - Metrics never fail a job.
-- The same data is available in the API, see [API](../reference/api.md).
+- The same data is available through `GET /api/v1/exec/{job}/metrics`. The `attempt` and `node` query parameters pick the attempt and the node, see [API](../reference/api.md).
 
 ## Verify Deployment
 
