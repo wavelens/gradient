@@ -36,5 +36,6 @@ uuid       = { workspace = true }
 
 [dev-dependencies]
 gradient-fixtures = { workspace = true }
+gradient-test-support = { workspace = true }
 reqwest = { workspace = true }
 tokio = { workspace = true, features = ["macros", "test-util"] }

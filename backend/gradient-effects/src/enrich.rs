@@ -9,28 +9,11 @@
 
 use anyhow::{Context, Result};
 use gradient_ci::reporting::eval_kind_str;
-use gradient_db::DbContext;
-use gradient_types::events::{Event, build, evaluation, exec_job};
+use gradient_types::events::Event;
 use gradient_types::*;
-use sea_orm::{ConnectionTrait, EntityTrait};
+use sea_orm::{ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter};
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
-
-pub async fn enrich(ctx: &DbContext, event: Event) -> Result<Option<Event>> {
-    enrich_with(&ctx.worker_db, &ctx.store_path_mapping, event).await
-}
-
-pub async fn enrich_with<C: ConnectionTrait>(
-    db: &C,
-    mapping: &Arc<dyn StorePathMapping>,
-    event: Event,
-) -> Result<Option<Event>> {
-    Ok(match event {
-        Event::BuildReported(b) => enrich_build(db, mapping, b).await?.map(Event::from),
-        Event::EvaluationReported(e) => enrich_evaluation(db, mapping, e).await?.map(Event::from),
-        Event::ExecJobReported(r) => enrich_exec_job(db, r).await?.map(Event::from),
-        other => Some(other),
-    })
-}
 
 struct Scope {
     evaluation: MEvaluation,
@@ -38,93 +21,166 @@ struct Scope {
     project: ProjectId,
 }
 
-async fn evaluation_scope<C: ConnectionTrait>(db: &C, id: EvaluationId) -> Result<Option<Scope>> {
-    let Some(evaluation) = EEvaluation::find_by_id(id)
-        .one(db)
-        .await
-        .context("look up the evaluation of an event")?
-    else {
-        return Ok(None);
-    };
-    let Some(task) = evaluation.task else {
-        return Ok(None);
-    };
-    let Some(task_row) = ETask::find_by_id(task)
-        .one(db)
-        .await
-        .context("look up the task of an event")?
-    else {
-        return Ok(None);
-    };
-    Ok(Some(Scope {
-        evaluation,
-        task,
-        project: task_row.project,
-    }))
-}
-
-async fn enrich_build<C: ConnectionTrait>(
+pub async fn fill_event_fields_in_batch<C: ConnectionTrait>(
     db: &C,
     mapping: &Arc<dyn StorePathMapping>,
-    mut b: build::Reported,
-) -> Result<Option<build::Reported>> {
-    let Some(scope) = evaluation_scope(db, b.evaluation_id).await? else {
-        return Ok(None);
-    };
-    b.task = Some(scope.task);
-    b.project = Some(scope.project);
-    b.evaluation_kind = Some(eval_kind_str(scope.evaluation.kind).to_owned());
-    b.allows_project_credentials_and_privileged_actions = scope
-        .evaluation
-        .allows_project_credentials_and_privileged_actions;
-    if let Some(mapper) = project_mapper(mapping, scope.project).await {
-        b.derivation_path = EDerivation::find_by_id(b.derivation)
-            .one(db)
-            .await
-            .context("look up the derivation of a build report")?
-            .map(|d| mapper.outbound(&d.as_store_path()).full());
+    events: Vec<Event>,
+) -> Result<Vec<Option<Event>>> {
+    let scopes =
+        load_evaluation_scopes_for_ids(db, events.iter().filter_map(evaluation_id_from_event))
+            .await?;
+
+    let mapped_projects: HashSet<ProjectId> = events
+        .iter()
+        .filter(|event| !matches!(event, Event::ExecJobReported(_)))
+        .filter_map(|event| scopes.get(&evaluation_id_from_event(event)?))
+        .map(|scope| scope.project)
+        .collect();
+    let mut mappers = HashMap::new();
+    for project in mapped_projects {
+        if let Some(mapper) = project_mapper(mapping, project).await {
+            mappers.insert(project, mapper);
+        }
     }
-    Ok(Some(b))
+
+    let derivation_ids: Vec<DerivationId> = events
+        .iter()
+        .filter_map(|event| match event {
+            Event::BuildReported(b) => scopes
+                .get(&b.evaluation_id)
+                .filter(|scope| mappers.contains_key(&scope.project))
+                .map(|_| b.derivation),
+            _ => None,
+        })
+        .collect();
+    let derivations: HashMap<DerivationId, MDerivation> = if derivation_ids.is_empty() {
+        HashMap::new()
+    } else {
+        EDerivation::find()
+            .filter(CDerivation::Id.is_in(derivation_ids))
+            .all(db)
+            .await
+            .context("look up the derivations of build reports")?
+            .into_iter()
+            .map(|d| (d.id, d))
+            .collect()
+    };
+
+    let entry_point_ids: Vec<EntryPointId> = events
+        .iter()
+        .filter_map(|event| match event {
+            Event::ExecJobReported(r) => Some(r.entry_point),
+            _ => None,
+        })
+        .collect();
+    let entry_point_names: HashMap<EntryPointId, String> = if entry_point_ids.is_empty() {
+        HashMap::new()
+    } else {
+        EEntryPoint::find()
+            .filter(CEntryPoint::Id.is_in(entry_point_ids))
+            .all(db)
+            .await
+            .context("look up the entry points of exec job reports")?
+            .into_iter()
+            .map(|entry_point| (entry_point.id, entry_point.eval))
+            .collect()
+    };
+
+    Ok(events
+        .into_iter()
+        .map(|event| match event {
+            Event::BuildReported(mut b) => {
+                let scope = scopes.get(&b.evaluation_id)?;
+                b.task = Some(scope.task);
+                b.project = Some(scope.project);
+                b.evaluation_kind = Some(eval_kind_str(scope.evaluation.kind).to_owned());
+                b.allows_project_credentials_and_privileged_actions = scope
+                    .evaluation
+                    .allows_project_credentials_and_privileged_actions;
+                if let Some(mapper) = mappers.get(&scope.project) {
+                    b.derivation_path = derivations
+                        .get(&b.derivation)
+                        .map(|d| mapper.outbound(&d.as_store_path()).full());
+                }
+                Some(Event::from(b))
+            }
+            Event::EvaluationReported(mut e) => {
+                let scope = scopes.get(&e.evaluation_id)?;
+                e.task = Some(scope.task);
+                e.project = Some(scope.project);
+                e.repository = mappers
+                    .get(&scope.project)
+                    .map(|mapper| mapper.outbound_if_store_path(&scope.evaluation.repository));
+                e.evaluation_kind = Some(eval_kind_str(scope.evaluation.kind).to_owned());
+                e.allows_project_credentials_and_privileged_actions = scope
+                    .evaluation
+                    .allows_project_credentials_and_privileged_actions;
+                Some(Event::from(e))
+            }
+            Event::ExecJobReported(mut r) => {
+                let scope = scopes.get(&r.evaluation)?;
+                r.task = Some(scope.task);
+                r.project = Some(scope.project);
+                r.allows_project_credentials_and_privileged_actions = scope
+                    .evaluation
+                    .allows_project_credentials_and_privileged_actions;
+                r.entry_point_name = entry_point_names.get(&r.entry_point).cloned();
+                Some(Event::from(r))
+            }
+            other => Some(other),
+        })
+        .collect())
 }
 
-async fn enrich_exec_job<C: ConnectionTrait>(
-    db: &C,
-    mut r: exec_job::Reported,
-) -> Result<Option<exec_job::Reported>> {
-    let Some(scope) = evaluation_scope(db, r.evaluation).await? else {
-        return Ok(None);
-    };
-    r.task = Some(scope.task);
-    r.project = Some(scope.project);
-    r.allows_project_credentials_and_privileged_actions = scope
-        .evaluation
-        .allows_project_credentials_and_privileged_actions;
-    r.entry_point_name = EEntryPoint::find_by_id(r.entry_point)
-        .one(db)
-        .await
-        .context("look up the entry point of an exec job report")?
-        .map(|entry_point| entry_point.eval);
-    Ok(Some(r))
+fn evaluation_id_from_event(event: &Event) -> Option<EvaluationId> {
+    match event {
+        Event::BuildReported(b) => Some(b.evaluation_id),
+        Event::EvaluationReported(e) => Some(e.evaluation_id),
+        Event::ExecJobReported(r) => Some(r.evaluation),
+        _ => None,
+    }
 }
 
-async fn enrich_evaluation<C: ConnectionTrait>(
+async fn load_evaluation_scopes_for_ids<C: ConnectionTrait>(
     db: &C,
-    mapping: &Arc<dyn StorePathMapping>,
-    mut e: evaluation::Reported,
-) -> Result<Option<evaluation::Reported>> {
-    let Some(scope) = evaluation_scope(db, e.evaluation_id).await? else {
-        return Ok(None);
-    };
-    e.task = Some(scope.task);
-    e.project = Some(scope.project);
-    e.repository = project_mapper(mapping, scope.project)
+    ids: impl Iterator<Item = EvaluationId>,
+) -> Result<HashMap<EvaluationId, Scope>> {
+    let ids: HashSet<EvaluationId> = ids.collect();
+    if ids.is_empty() {
+        return Ok(HashMap::new());
+    }
+    let evaluations = EEvaluation::find()
+        .filter(CEvaluation::Id.is_in(ids))
+        .all(db)
         .await
-        .map(|mapper| mapper.outbound_if_store_path(&scope.evaluation.repository));
-    e.evaluation_kind = Some(eval_kind_str(scope.evaluation.kind).to_owned());
-    e.allows_project_credentials_and_privileged_actions = scope
-        .evaluation
-        .allows_project_credentials_and_privileged_actions;
-    Ok(Some(e))
+        .context("look up the evaluations of events")?;
+    let task_ids: HashSet<TaskId> = evaluations.iter().filter_map(|e| e.task).collect();
+    if task_ids.is_empty() {
+        return Ok(HashMap::new());
+    }
+    let projects: HashMap<TaskId, ProjectId> = ETask::find()
+        .filter(CTask::Id.is_in(task_ids))
+        .all(db)
+        .await
+        .context("look up the tasks of events")?
+        .into_iter()
+        .map(|task| (task.id, task.project))
+        .collect();
+    Ok(evaluations
+        .into_iter()
+        .filter_map(|evaluation| {
+            let task = evaluation.task?;
+            let project = *projects.get(&task)?;
+            Some((
+                evaluation.id,
+                Scope {
+                    evaluation,
+                    task,
+                    project,
+                },
+            ))
+        })
+        .collect())
 }
 
 async fn project_mapper(
@@ -145,6 +201,11 @@ mod tests {
         EXAMPLE_ORIGINAL_HASH, EXAMPLE_STORED_HASH, RotatedHashMapping, UnresolvableProjectMapping,
     };
     use gradient_fixtures::mock::{empty_db, mock_db};
+    use gradient_types::events::{build, exec_job};
+
+    fn first_event_from_enriched_batch(mut events: Vec<Option<Event>>) -> Option<Event> {
+        events.remove(0)
+    }
 
     #[tokio::test]
     async fn a_build_whose_evaluation_was_collected_reports_nothing() {
@@ -158,7 +219,14 @@ mod tests {
         .into();
 
         let mapping: Arc<dyn StorePathMapping> = Arc::new(gradient_entity::IdentityMapping);
-        assert!(enrich_with(&db, &mapping, event).await.unwrap().is_none());
+        assert!(
+            first_event_from_enriched_batch(
+                fill_event_fields_in_batch(&db, &mapping, vec![event])
+                    .await
+                    .unwrap()
+            )
+            .is_none()
+        );
     }
 
     #[tokio::test]
@@ -192,8 +260,11 @@ mod tests {
         .into();
         let mapping: Arc<dyn StorePathMapping> = Arc::new(RotatedHashMapping);
 
-        let Some(Event::BuildReported(reported)) = enrich_with(&db, &mapping, event).await.unwrap()
-        else {
+        let Some(Event::BuildReported(reported)) = first_event_from_enriched_batch(
+            fill_event_fields_in_batch(&db, &mapping, vec![event])
+                .await
+                .unwrap(),
+        ) else {
             panic!("the build is reported");
         };
         assert_eq!(
@@ -226,8 +297,11 @@ mod tests {
         .into();
         let mapping: Arc<dyn StorePathMapping> = Arc::new(UnresolvableProjectMapping);
 
-        let Some(Event::BuildReported(reported)) = enrich_with(&db, &mapping, event).await.unwrap()
-        else {
+        let Some(Event::BuildReported(reported)) = first_event_from_enriched_batch(
+            fill_event_fields_in_batch(&db, &mapping, vec![event])
+                .await
+                .unwrap(),
+        ) else {
             panic!("the build is reported");
         };
         assert_eq!(reported.derivation_path, None);
@@ -266,9 +340,11 @@ mod tests {
         .into();
         let mapping: Arc<dyn StorePathMapping> = Arc::new(gradient_entity::IdentityMapping);
 
-        let Some(Event::ExecJobReported(reported)) =
-            enrich_with(&db, &mapping, event).await.unwrap()
-        else {
+        let Some(Event::ExecJobReported(reported)) = first_event_from_enriched_batch(
+            fill_event_fields_in_batch(&db, &mapping, vec![event])
+                .await
+                .unwrap(),
+        ) else {
             panic!("the exec job is reported");
         };
         assert_eq!(reported.task, Some(task.id));
@@ -290,7 +366,11 @@ mod tests {
 
         let mapping: Arc<dyn StorePathMapping> = Arc::new(gradient_entity::IdentityMapping);
         assert_eq!(
-            enrich_with(&db, &mapping, event.clone()).await.unwrap(),
+            first_event_from_enriched_batch(
+                fill_event_fields_in_batch(&db, &mapping, vec![event.clone()])
+                    .await
+                    .unwrap()
+            ),
             Some(event)
         );
         assert!(db.into_transaction_log().is_empty());

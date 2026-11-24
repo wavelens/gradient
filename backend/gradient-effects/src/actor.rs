@@ -24,13 +24,12 @@ pub trait PendingDeliveryStore: Send + Sync + 'static {
     ) -> impl Future<Output = anyhow::Result<Vec<PendingDelivery>>> + Send;
     fn mark(
         &self,
-        row: &PendingDelivery,
-        outcome: &Outcome,
+        settled: &[(PendingDelivery, Outcome)],
     ) -> impl Future<Output = anyhow::Result<()>> + Send;
 }
 
 pub trait Handoff: Send + Sync + 'static {
-    fn hand_off(&self, row: PendingDelivery, reply: ActorRef<EffectsMsg>);
+    fn hand_off(&self, rows: Vec<PendingDelivery>, reply: ActorRef<EffectsMsg>);
 }
 
 pub enum EffectsMsg {
@@ -38,8 +37,7 @@ pub enum EffectsMsg {
     Pass,
     Tick,
     Done {
-        row: PendingDelivery,
-        outcome: Outcome,
+        finished_rows_with_outcomes: Vec<(PendingDelivery, Outcome)>,
     },
 }
 
@@ -54,6 +52,7 @@ pub struct EffectsArgs<S, D> {
 pub struct EffectsState<S, D> {
     args: EffectsArgs<S, D>,
     in_flight: HashSet<PendingDeliveryId>,
+    delivery_outcomes_waiting_for_database_write: Vec<(PendingDelivery, Outcome)>,
     pass_scheduled: bool,
 }
 
@@ -81,6 +80,7 @@ impl<S: PendingDeliveryStore, D: Handoff> Actor for EffectsActor<S, D> {
         Ok(EffectsState {
             args,
             in_flight: HashSet::new(),
+            delivery_outcomes_waiting_for_database_write: Vec::new(),
             pass_scheduled: true,
         })
     }
@@ -94,12 +94,7 @@ impl<S: PendingDeliveryStore, D: Handoff> Actor for EffectsActor<S, D> {
         match msg {
             // The pass is sent to the back of the mailbox, behind every queued wake. A burst of
             // notifying writers is folded into one claim this way.
-            EffectsMsg::Wake => {
-                if !st.pass_scheduled {
-                    st.pass_scheduled = true;
-                    let _ = myself.send_message(EffectsMsg::Pass);
-                }
-            }
+            EffectsMsg::Wake => schedule_pass(&myself, st),
             EffectsMsg::Pass => {
                 st.pass_scheduled = false;
                 pass(&myself, st).await;
@@ -108,12 +103,15 @@ impl<S: PendingDeliveryStore, D: Handoff> Actor for EffectsActor<S, D> {
                 pass(&myself, st).await;
                 myself.send_after(st.args.tick, || EffectsMsg::Tick);
             }
-            EffectsMsg::Done { row, outcome } => {
-                st.in_flight.remove(&row.id);
-                if let Err(e) = st.args.store.mark(&row, &outcome).await {
-                    warn!(error = %e, delivery = %row.id, "failed to record a delivery outcome");
+            EffectsMsg::Done {
+                finished_rows_with_outcomes,
+            } => {
+                for (row, _) in &finished_rows_with_outcomes {
+                    st.in_flight.remove(&row.id);
                 }
-                pass(&myself, st).await;
+                st.delivery_outcomes_waiting_for_database_write
+                    .extend(finished_rows_with_outcomes);
+                schedule_pass(&myself, st);
             }
         }
 
@@ -121,17 +119,30 @@ impl<S: PendingDeliveryStore, D: Handoff> Actor for EffectsActor<S, D> {
     }
 }
 
+fn schedule_pass<S, D>(myself: &ActorRef<EffectsMsg>, st: &mut EffectsState<S, D>) {
+    if !st.pass_scheduled {
+        st.pass_scheduled = true;
+        let _ = myself.send_message(EffectsMsg::Pass);
+    }
+}
+
+/// A pass can first write all outcomes from jobs that completed since the previous pass in one statement. The pass can claim new rows after that. Outcomes from jobs that finished together go into one write.
 async fn pass<S: PendingDeliveryStore, D: Handoff>(
     myself: &ActorRef<EffectsMsg>,
     st: &mut EffectsState<S, D>,
 ) {
+    let settled = std::mem::take(&mut st.delivery_outcomes_waiting_for_database_write);
+    if let Err(e) = st.args.store.mark(&settled).await {
+        warn!(error = %e, rows = settled.len(), "Failed to record the delivery outcome.");
+    }
+
     loop {
         let free = st.args.capacity.saturating_sub(st.in_flight.len());
         if free == 0 {
             break;
         }
 
-        let rows = match st.args.store.claim_due(free).await {
+        let mut rows = match st.args.store.claim_due(free).await {
             Ok(rows) => rows,
             Err(e) => {
                 record(&st.args.health, Err(&e));
@@ -141,9 +152,9 @@ async fn pass<S: PendingDeliveryStore, D: Handoff>(
         };
 
         let claimed = rows.len();
-        for row in rows {
-            st.in_flight.insert(row.id);
-            st.args.hand_off.hand_off(row, myself.clone());
+        rows.retain(|row| st.in_flight.insert(row.id));
+        if !rows.is_empty() {
+            st.args.hand_off.hand_off(rows, myself.clone());
         }
 
         if claimed < free {
@@ -177,7 +188,7 @@ mod tests {
     struct Store {
         rows: Mutex<VecDeque<PendingDelivery>>,
         claims: Mutex<Vec<usize>>,
-        marks: Mutex<Vec<(PendingDeliveryId, Outcome)>>,
+        marks: Mutex<Vec<Vec<(PendingDeliveryId, Outcome)>>>,
     }
 
     impl Store {
@@ -188,6 +199,14 @@ mod tests {
                 marks: Mutex::new(Vec::new()),
             })
         }
+
+        fn outcomes(&self) -> Vec<Vec<Outcome>> {
+            self.marks
+                .lock()
+                .iter()
+                .map(|set| set.iter().map(|(_, outcome)| outcome.clone()).collect())
+                .collect()
+        }
     }
 
     impl PendingDeliveryStore for Store {
@@ -197,8 +216,15 @@ mod tests {
             Ok((0..limit).filter_map(|_| rows.pop_front()).collect())
         }
 
-        async fn mark(&self, row: &PendingDelivery, outcome: &Outcome) -> anyhow::Result<()> {
-            self.marks.lock().push((row.id, outcome.clone()));
+        async fn mark(&self, settled: &[(PendingDelivery, Outcome)]) -> anyhow::Result<()> {
+            if !settled.is_empty() {
+                self.marks.lock().push(
+                    settled
+                        .iter()
+                        .map(|(row, outcome)| (row.id, outcome.clone()))
+                        .collect(),
+                );
+            }
             Ok(())
         }
     }
@@ -207,8 +233,10 @@ mod tests {
     struct Held(Mutex<Vec<(PendingDelivery, ActorRef<EffectsMsg>)>>);
 
     impl Handoff for Held {
-        fn hand_off(&self, row: PendingDelivery, reply: ActorRef<EffectsMsg>) {
-            self.0.lock().push((row, reply));
+        fn hand_off(&self, rows: Vec<PendingDelivery>, reply: ActorRef<EffectsMsg>) {
+            self.0
+                .lock()
+                .extend(rows.into_iter().map(|row| (row, reply.clone())));
         }
     }
 
@@ -245,8 +273,17 @@ mod tests {
         actor
     }
 
+    fn finish(held: &Held, outcome: Outcome) {
+        let (row, reply) = held.0.lock().remove(0);
+        reply
+            .cast(EffectsMsg::Done {
+                finished_rows_with_outcomes: vec![(row, outcome)],
+            })
+            .unwrap();
+    }
+
     #[tokio::test]
-    async fn in_flight_never_exceeds_the_worker_count() {
+    async fn in_flight_never_exceeds_the_capacity() {
         let store = Store::with((0..20).map(row));
         let held = Arc::new(Held::default());
         let actor = spawn(Arc::clone(&store), Arc::clone(&held), 3).await;
@@ -258,21 +295,16 @@ mod tests {
         assert_eq!(held.0.lock().len(), 3);
         assert_eq!(*store.claims.lock(), vec![3], "two wakes, one claim");
 
-        let (done, reply) = held.0.lock().remove(0);
-        reply
-            .cast(EffectsMsg::Done {
-                row: done,
-                outcome: Outcome::Delivered,
-            })
-            .unwrap();
+        finish(&held, Outcome::Delivered);
         settle().await;
 
-        assert_eq!(held.0.lock().len(), 3, "one slot freed, one row claimed");
+        assert_eq!(
+            held.0.lock().len(),
+            3,
+            "One slot freed up. The actor claimed one row."
+        );
         assert_eq!(*store.claims.lock(), vec![3, 1]);
-        assert!(matches!(
-            store.marks.lock().as_slice(),
-            [(_, Outcome::Delivered)]
-        ));
+        assert_eq!(store.outcomes(), vec![vec![Outcome::Delivered]]);
 
         actor.stop_and_wait(None, None).await.unwrap();
     }
@@ -319,6 +351,58 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_burst_of_finished_jobs_is_marked_in_one_write() {
+        let store = Store::with((0..4).map(row));
+        let held = Arc::new(Held::default());
+        let actor = spawn(Arc::clone(&store), Arc::clone(&held), 4).await;
+        settle().await;
+
+        let finished: Vec<_> = held.0.lock().drain(..).collect();
+        let reply = finished[0].1.clone();
+        for (row, _) in finished {
+            reply
+                .cast(EffectsMsg::Done {
+                    finished_rows_with_outcomes: vec![(row, Outcome::Delivered)],
+                })
+                .unwrap();
+        }
+        settle().await;
+
+        assert_eq!(
+            store.outcomes(),
+            vec![vec![Outcome::Delivered; 4]],
+            "Four completed jobs, one write."
+        );
+
+        actor.stop_and_wait(None, None).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn a_pending_delivery_still_being_worked_on_is_not_handed_to_a_second_worker_job_after_its_lease_expires()
+     {
+        let first = row(1);
+        let store = Store::with([first.clone()]);
+        let held = Arc::new(Held::default());
+        let actor = spawn(Arc::clone(&store), Arc::clone(&held), 4).await;
+        settle().await;
+
+        store.rows.lock().push_back(first.clone());
+        actor.cast(EffectsMsg::Wake).unwrap();
+        settle().await;
+
+        assert_eq!(
+            held.0
+                .lock()
+                .iter()
+                .map(|(row, _)| row.id)
+                .collect::<Vec<_>>(),
+            vec![first.id]
+        );
+
+        actor.stop_and_wait(None, None).await.unwrap();
+    }
+
+    #[tokio::test]
     async fn a_failed_delivery_is_marked_and_its_slot_freed() {
         let store = Store::with([row(1)]);
         let held = Arc::new(Held::default());
@@ -327,19 +411,10 @@ mod tests {
         actor.cast(EffectsMsg::Wake).unwrap();
         settle().await;
 
-        let (failed, reply) = held.0.lock().remove(0);
-        reply
-            .cast(EffectsMsg::Done {
-                row: failed,
-                outcome: Outcome::Retry("502".into()),
-            })
-            .unwrap();
+        finish(&held, Outcome::Retry("502".into()));
         settle().await;
 
-        assert!(matches!(
-            store.marks.lock().as_slice(),
-            [(_, Outcome::Retry(e))] if e.as_str() == "502"
-        ));
+        assert_eq!(store.outcomes(), vec![vec![Outcome::Retry("502".into())]]);
 
         actor.stop_and_wait(None, None).await.unwrap();
     }

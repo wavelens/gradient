@@ -46,26 +46,28 @@ crate::sql! {
          RETURNING o.id, o.kind, o.key, o.payload, o.attempts, o.revision",
         params = [Int(8), Int(CLAIM_LEASE_SECS)];
 
-    PENDING_DELIVERY_MARK_DELIVERED = "UPDATE pending_delivery \
-         SET delivered_at = CASE WHEN revision = $2 THEN (now() AT TIME ZONE 'UTC') END, \
-             next_attempt_at = CASE WHEN revision = $2 THEN next_attempt_at ELSE (now() AT TIME ZONE 'UTC') END \
-         WHERE id = $1 AND delivered_at IS NULL AND failed_at IS NULL",
-        params = [NewUuid, Int(0)];
+    PENDING_DELIVERY_UPSERT_MANY_UNSETTLED = "INSERT INTO pending_delivery (id, kind, key, payload, created_at, next_attempt_at) \
+         SELECT r.id, $2::smallint, r.key, r.payload::jsonb, (now() AT TIME ZONE 'UTC'), (now() AT TIME ZONE 'UTC') \
+         FROM unnest($1::uuid[], $3::text[], $4::text[]) AS r(id, key, payload) \
+         ON CONFLICT (kind, key) WHERE delivered_at IS NULL AND failed_at IS NULL \
+         DO UPDATE SET revision = pending_delivery.revision + 1, payload = EXCLUDED.payload, attempts = 0",
+        params = [NewUuids(64), Int(8), Texts("pending-delivery-gate-probe", 64), Texts("{}", 64)];
 
-    /// The attempt count, the dead-letter decision and the next attempt are moving together.
-    /// A read of `attempts` followed by a write would lose a concurrent retry of the same row.
-    PENDING_DELIVERY_MARK_RETRY = "UPDATE pending_delivery SET attempts = attempts + 1, last_error = $2, \
-         failed_at = CASE WHEN attempts + 1 >= $3 THEN (now() AT TIME ZONE 'UTC') ELSE NULL END, \
-         next_attempt_at = CASE WHEN revision = $5 THEN (now() AT TIME ZONE 'UTC') + make_interval(secs => $4::int) \
-             ELSE (now() AT TIME ZONE 'UTC') END \
-         WHERE id = $1 AND delivered_at IS NULL AND failed_at IS NULL",
-        params = [NewUuid, Text("probe"), Int(MAX_ATTEMPTS as i64), Int(30), Int(0)];
-
-    PENDING_DELIVERY_RECORD_FAILED_ATTEMPT_AND_MARK_FAILED_IF_REVISION_UNCHANGED_OR_ATTEMPT_CAP_REACHED_ELSE_MAKE_DUE = "UPDATE pending_delivery SET attempts = attempts + 1, last_error = $2, \
-         failed_at = CASE WHEN revision = $3 OR attempts + 1 >= $4 THEN (now() AT TIME ZONE 'UTC') END, \
-         next_attempt_at = (now() AT TIME ZONE 'UTC') \
-         WHERE id = $1 AND delivered_at IS NULL AND failed_at IS NULL",
-        params = [NewUuid, Text("probe"), Int(0), Int(MAX_ATTEMPTS as i64)];
+    /// Attempt count, dead-letter check and next attempt happen in one statement. Any separate write after the read of `attempts` can drop concurrent retries on the same row.
+    RECORD_CLAIMED_PENDING_DELIVERY_OUTCOMES = "UPDATE pending_delivery p SET \
+             attempts = CASE WHEN r.outcome = 'delivered' THEN p.attempts ELSE p.attempts + 1 END, \
+             last_error = CASE WHEN r.outcome = 'delivered' THEN p.last_error ELSE r.error END, \
+             delivered_at = CASE WHEN r.outcome = 'delivered' AND p.revision = r.revision THEN (now() AT TIME ZONE 'UTC') END, \
+             failed_at = CASE WHEN r.outcome <> 'delivered' \
+                 AND (p.attempts + 1 >= $6 OR (r.outcome = 'failed' AND p.revision = r.revision)) \
+                 THEN (now() AT TIME ZONE 'UTC') END, \
+             next_attempt_at = CASE \
+                 WHEN p.revision <> r.revision OR r.outcome = 'failed' THEN (now() AT TIME ZONE 'UTC') \
+                 WHEN r.outcome = 'retry' THEN (now() AT TIME ZONE 'UTC') + make_interval(secs => r.retry_after_secs) \
+                 ELSE p.next_attempt_at END \
+         FROM unnest($1::uuid[], $2::int[], $3::text[], $4::text[], $5::int[]) AS r(id, revision, outcome, error, retry_after_secs) \
+         WHERE p.id = r.id AND p.delivered_at IS NULL AND p.failed_at IS NULL",
+        params = [NewUuids(64), Ints(0, 64), Texts("retry", 64), Texts("probe", 64), Ints(30, 64), Int(MAX_ATTEMPTS as i64)];
 
     PENDING_DELIVERY_PENDING_COUNTS = "SELECT count(*) FILTER (WHERE delivered_at IS NULL AND failed_at IS NULL) AS pending, \
          count(*) FILTER (WHERE failed_at IS NOT NULL) AS failed FROM pending_delivery",
@@ -149,7 +151,6 @@ pub async fn enqueue_after<C: ConnectionTrait>(
     Ok(())
 }
 
-/// Keys are sorted to give overlapping concurrent batches the same lock order.
 pub async fn enqueue_many<C: ConnectionTrait>(
     db: &C,
     kind: PendingDeliveryKind,
@@ -163,22 +164,56 @@ pub async fn enqueue_many<C: ConnectionTrait>(
     rows.sort_by(|a, b| a.0.cmp(&b.0));
     rows.dedup_by(|a, b| a.0 == b.0);
 
+    db.execute_raw(
+        PENDING_DELIVERY_ENQUEUE_MANY.bind(build_pending_delivery_insert_bind_values(kind, rows)),
+    )
+    .await?;
+
+    Ok(())
+}
+
+/// Repeated keys use the last payload. Keys go in sorted order, so overlapping concurrent batches lock rows in the same order.
+pub async fn enqueue_or_increment_revision_many<C: ConnectionTrait>(
+    db: &C,
+    kind: PendingDeliveryKind,
+    rows: Vec<(String, serde_json::Value)>,
+) -> Result<(), DbErr> {
+    if rows.is_empty() {
+        return Ok(());
+    }
+
+    let mut rows = rows;
+    rows.reverse();
+    rows.sort_by(|a, b| a.0.cmp(&b.0));
+    rows.dedup_by(|a, b| a.0 == b.0);
+
+    db.execute_raw(
+        PENDING_DELIVERY_UPSERT_MANY_UNSETTLED
+            .bind(build_pending_delivery_insert_bind_values(kind, rows)),
+    )
+    .await?;
+
+    Ok(())
+}
+
+fn build_pending_delivery_insert_bind_values(
+    kind: PendingDeliveryKind,
+    rows: Vec<(String, serde_json::Value)>,
+) -> [Value; 4] {
     let ids: Vec<uuid::Uuid> = rows
         .iter()
         .map(|_| PendingDeliveryId::now_v7().into_inner())
         .collect();
-    let keys: Vec<String> = rows.iter().map(|(key, _)| key.clone()).collect();
-    let payloads: Vec<String> = rows.iter().map(|(_, p)| p.to_string()).collect();
-
-    db.execute_raw(PENDING_DELIVERY_ENQUEUE_MANY.bind([
+    let (keys, payloads): (Vec<String>, Vec<String>) = rows
+        .into_iter()
+        .map(|(key, payload)| (key, payload.to_string()))
+        .unzip();
+    [
         ids.into(),
         Value::SmallInt(Some(i16::from(kind))),
         keys.into(),
         payloads.into(),
-    ]))
-    .await?;
-
-    Ok(())
+    ]
 }
 
 pub async fn claim_due<C: ConnectionTrait>(
@@ -214,40 +249,44 @@ pub async fn claim_due<C: ConnectionTrait>(
 
 pub async fn mark<C: ConnectionTrait>(
     db: &C,
-    row: &PendingDelivery,
-    outcome: &Outcome,
+    settled: &[(PendingDelivery, Outcome)],
 ) -> Result<(), DbErr> {
-    let stmt = match outcome {
-        Outcome::Delivered => PENDING_DELIVERY_MARK_DELIVERED.bind([
-            Value::Uuid(Some(row.id.into_inner())),
-            Value::Int(Some(row.revision)),
-        ]),
-        Outcome::Retry(error) => retry(row, error, backoff(row.attempts)),
-        Outcome::RetryAfterDelay(error, delay) => {
-            retry(row, error, backoff(row.attempts).max(*delay))
-        }
-        Outcome::PermanentFailure(error) => {
-            PENDING_DELIVERY_RECORD_FAILED_ATTEMPT_AND_MARK_FAILED_IF_REVISION_UNCHANGED_OR_ATTEMPT_CAP_REACHED_ELSE_MAKE_DUE.bind([
-                Value::Uuid(Some(row.id.into_inner())),
-                Value::String(Some(truncate_delivery_error_message(error))),
-                Value::Int(Some(row.revision)),
-                Value::Int(Some(MAX_ATTEMPTS)),
-            ])
-        }
-    };
-    db.execute_raw(stmt).await?;
+    if settled.is_empty() {
+        return Ok(());
+    }
+
+    let mut ids = Vec::with_capacity(settled.len());
+    let mut revisions = Vec::with_capacity(settled.len());
+    let mut outcomes = Vec::with_capacity(settled.len());
+    let mut errors = Vec::with_capacity(settled.len());
+    let mut retry_after_secs = Vec::with_capacity(settled.len());
+    for (row, outcome) in settled {
+        let (name, error, delay) = match outcome {
+            Outcome::Delivered => ("delivered", "", Duration::ZERO),
+            Outcome::Retry(error) => ("retry", error.as_str(), backoff(row.attempts)),
+            Outcome::RetryAfterDelay(error, delay) => {
+                ("retry", error.as_str(), backoff(row.attempts).max(*delay))
+            }
+            Outcome::PermanentFailure(error) => ("failed", error.as_str(), Duration::ZERO),
+        };
+        ids.push(row.id.into_inner());
+        revisions.push(row.revision);
+        outcomes.push(name.to_owned());
+        errors.push(truncate_delivery_error_message(error));
+        retry_after_secs.push(i32::try_from(delay.as_secs()).unwrap_or(i32::MAX));
+    }
+
+    db.execute_raw(RECORD_CLAIMED_PENDING_DELIVERY_OUTCOMES.bind([
+        ids.into(),
+        revisions.into(),
+        outcomes.into(),
+        errors.into(),
+        retry_after_secs.into(),
+        Value::Int(Some(MAX_ATTEMPTS)),
+    ]))
+    .await?;
 
     Ok(())
-}
-
-fn retry(row: &PendingDelivery, error: &str, delay: Duration) -> sea_orm::Statement {
-    PENDING_DELIVERY_MARK_RETRY.bind([
-        Value::Uuid(Some(row.id.into_inner())),
-        Value::String(Some(truncate_delivery_error_message(error))),
-        Value::Int(Some(MAX_ATTEMPTS)),
-        Value::BigInt(Some(delay.as_secs() as i64)),
-        Value::Int(Some(row.revision)),
-    ])
 }
 
 fn truncate_delivery_error_message(error: &str) -> String {
@@ -352,15 +391,14 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn mark_retry_schedules_and_dead_letters_at_the_cap() {
+    async fn mark_records_a_whole_set_of_outcomes_in_one_statement() {
         let db = mock_db()
             .append_exec_results([MockExecResult {
                 last_insert_id: 0,
-                rows_affected: 1,
+                rows_affected: 4,
             }])
             .into_connection();
-
-        let row = PendingDelivery {
+        let row = || PendingDelivery {
             id: PendingDeliveryId::now_v7(),
             kind: PendingDeliveryKind::ActionDelivery,
             key: "k".into(),
@@ -368,35 +406,141 @@ mod tests {
             attempts: 0,
             revision: 0,
         };
-        mark(&db, &row, &Outcome::Retry("502".into()))
-            .await
-            .unwrap();
+
+        mark(
+            &db,
+            &[
+                (row(), Outcome::Delivered),
+                (row(), Outcome::Retry("502".into())),
+                (
+                    row(),
+                    Outcome::RetryAfterDelay("429".into(), Duration::from_secs(1200)),
+                ),
+                (row(), Outcome::PermanentFailure("422".into())),
+            ],
+        )
+        .await
+        .unwrap();
 
         let log = db.into_transaction_log();
+        assert_eq!(log.len(), 1, "Three results, one SQL statement");
         let sql = norm(&log[0].statements()[0].sql);
-        assert!(sql.contains("attempts = attempts + 1"), "{sql}");
         assert!(
-            sql.ends_with("WHERE id = $1 AND delivered_at IS NULL AND failed_at IS NULL"),
-            "a late retry leaves a settled row alone: {sql}"
+            sql.ends_with("WHERE p.id = r.id AND p.delivered_at IS NULL AND p.failed_at IS NULL"),
+            "Late results leave rows that are already finalized unchanged. {sql}"
         );
         assert!(
-            sql.contains(
-                "failed_at = CASE WHEN attempts + 1 >= $3 THEN (now() AT TIME ZONE 'UTC') ELSE NULL END"
-            ),
-            "{sql}"
-        );
-        assert!(
-            sql.contains(
-                "next_attempt_at = CASE WHEN revision = $5 THEN (now() AT TIME ZONE 'UTC') + make_interval(secs => $4::int)"
-            ),
+            sql.contains("FROM unnest($1::uuid[], $2::int[], $3::text[], $4::text[], $5::int[])"),
             "{sql}"
         );
         let values = log[0].statements()[0].values.clone().unwrap().0;
         assert_eq!(
-            values[3],
-            Value::BigInt(Some(30)),
-            "the first retry waits one backoff step"
+            values[2],
+            Value::from(
+                ["delivered", "retry", "retry", "failed"]
+                    .map(str::to_owned)
+                    .to_vec()
+            )
         );
+        assert_eq!(
+            values[4],
+            Value::from(vec![0i32, 30, 1200, 0]),
+            "The first retry can wait one backoff step. A rate-limited row can wait for its own delay."
+        );
+    }
+
+    #[tokio::test]
+    async fn mark_of_a_mixed_set_settles_retries_and_dead_letters_each_row() {
+        let db = TestDatabase::create().await;
+        let conn = db.connection();
+        for key in ["a", "b", "c"] {
+            enqueue(
+                &conn,
+                PendingDeliveryKind::ActionDelivery,
+                key.into(),
+                serde_json::json!({}),
+            )
+            .await
+            .expect("the delivery enters the queue");
+        }
+        let claimed = claim_due_rows_or_panic(&conn).await;
+        let by_key = |key: &str| {
+            claimed
+                .iter()
+                .find(|r| r.key == key)
+                .expect("every row is claimed")
+                .clone()
+        };
+
+        mark(
+            &conn,
+            &[
+                (by_key("a"), Outcome::Delivered),
+                (by_key("b"), Outcome::Retry("502".into())),
+                (by_key("c"), Outcome::PermanentFailure("422".into())),
+            ],
+        )
+        .await
+        .expect("mark() recorded the set");
+
+        let mut rows = db.rows::<pending_delivery::Entity>().await;
+        rows.sort_by(|x, y| x.key.cmp(&y.key));
+        assert_eq!(
+            rows.iter()
+                .map(|r| (
+                    r.key.as_str(),
+                    r.delivered_at.is_some(),
+                    r.failed_at.is_some(),
+                    r.attempts,
+                    r.last_error.as_deref()
+                ))
+                .collect::<Vec<_>>(),
+            vec![
+                ("a", true, false, 0, None),
+                ("b", false, false, 1, Some("502")),
+                ("c", false, true, 1, Some("422")),
+            ],
+            "Finalize delivered rows, schedule retries and dead-letter permanent failures in one statement."
+        );
+        assert!(
+            claim_due_rows_or_panic(&conn).await.is_empty(),
+            "Retried rows wait for backoff. The remaining two rows finished."
+        );
+        db.finish().await;
+    }
+
+    #[tokio::test]
+    async fn enqueue_or_increment_revision_many_keeps_the_last_payload_of_a_repeated_key() {
+        let db = TestDatabase::create().await;
+        let conn = db.connection();
+        enqueue_commit_status_post_with_event_name(&conn, "queued").await;
+
+        enqueue_or_increment_revision_many(
+            &conn,
+            PendingDeliveryKind::CommitStatusCheckDelivery,
+            vec![
+                (
+                    TEST_BUILD_PENDING_DELIVERY_KEY.into(),
+                    serde_json::json!({ "event": "started" }),
+                ),
+                (
+                    TEST_BUILD_PENDING_DELIVERY_KEY.into(),
+                    serde_json::json!({ "event": "completed" }),
+                ),
+            ],
+        )
+        .await
+        .expect("the deliveries enter the queue");
+
+        let rows = db.rows::<pending_delivery::Entity>().await;
+        assert_eq!(
+            rows.iter()
+                .map(|r| (r.revision, r.payload.clone()))
+                .collect::<Vec<_>>(),
+            vec![(1, serde_json::json!({ "event": "completed" }))],
+            "Duplicate keys keep the last payload and increment the revision once."
+        );
+        db.finish().await;
     }
 
     const TEST_BUILD_PENDING_DELIVERY_KEY: &str = "task:build:7";
@@ -444,7 +588,7 @@ mod tests {
         assert_eq!(claimed[0].revision, 0);
 
         enqueue_commit_status_post_with_event_name(&conn, "started").await;
-        mark(&conn, &claimed[0], &Outcome::Delivered)
+        mark(&conn, &[(claimed[0].clone(), Outcome::Delivered)])
             .await
             .expect("mark() recorded the delivery");
 
@@ -471,9 +615,12 @@ mod tests {
         let claimed = claim_due_rows_or_panic(&conn).await;
 
         enqueue_commit_status_post_with_event_name(&conn, "started").await;
-        mark(&conn, &claimed[0], &Outcome::PermanentFailure("422".into()))
-            .await
-            .expect("mark() recorded a permanent failure");
+        mark(
+            &conn,
+            &[(claimed[0].clone(), Outcome::PermanentFailure("422".into()))],
+        )
+        .await
+        .expect("mark() recorded a permanent failure");
 
         let rows = db.rows::<pending_delivery::Entity>().await;
         assert_eq!(
@@ -503,14 +650,17 @@ mod tests {
         let claimed = claim_due_rows_or_panic(&conn).await;
         enqueue_commit_status_post_with_event_name(&conn, "started").await;
         for _ in 0..MAX_ATTEMPTS - 1 {
-            mark(&conn, &claimed[0], &Outcome::Retry("502".into()))
+            mark(&conn, &[(claimed[0].clone(), Outcome::Retry("502".into()))])
                 .await
                 .expect("Retries before the limit leave that row unsettled.");
         }
 
-        mark(&conn, &claimed[0], &Outcome::PermanentFailure("401".into()))
-            .await
-            .expect("mark() recorded a permanent failure");
+        mark(
+            &conn,
+            &[(claimed[0].clone(), Outcome::PermanentFailure("401".into()))],
+        )
+        .await
+        .expect("mark() recorded a permanent failure");
 
         let rows = db.rows::<pending_delivery::Entity>().await;
         assert_eq!(
@@ -533,7 +683,7 @@ mod tests {
         enqueue_commit_status_post_with_event_name(&conn, "queued").await;
         let claimed = claim_due_rows_or_panic(&conn).await;
         for _ in 0..MAX_ATTEMPTS - 1 {
-            mark(&conn, &claimed[0], &Outcome::Retry("502".into()))
+            mark(&conn, &[(claimed[0].clone(), Outcome::Retry("502".into()))])
                 .await
                 .expect("Retries before the limit leave that row unsettled.");
         }
@@ -544,7 +694,7 @@ mod tests {
             attempts: 0,
             ..claimed[0].clone()
         };
-        mark(&conn, &newer, &Outcome::Retry("502".into()))
+        mark(&conn, &[(newer.clone(), Outcome::Retry("502".into()))])
             .await
             .expect("Expected `mark()` to record the retry");
 
@@ -565,7 +715,7 @@ mod tests {
         let claimed = claim_due_rows_or_panic(&conn).await;
 
         enqueue_commit_status_post_with_event_name(&conn, "started").await;
-        mark(&conn, &claimed[0], &Outcome::Retry("502".into()))
+        mark(&conn, &[(claimed[0].clone(), Outcome::Retry("502".into()))])
             .await
             .expect("Expected `mark()` to record the retry");
 
@@ -585,7 +735,7 @@ mod tests {
         enqueue_commit_status_post_with_event_name(&conn, "queued").await;
         let claimed = claim_due_rows_or_panic(&conn).await;
 
-        mark(&conn, &claimed[0], &Outcome::Delivered)
+        mark(&conn, &[(claimed[0].clone(), Outcome::Delivered)])
             .await
             .expect("mark() recorded the delivery");
 

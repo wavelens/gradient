@@ -18,7 +18,10 @@ use ractor::factory::{FactoryMessage, Job, JobOptions, Worker, WorkerId};
 use ractor::{ActorProcessingErr, ActorRef};
 
 use crate::actor::{EffectsMsg, Handoff, PendingDeliveryStore};
-use crate::consume::consume;
+use crate::consume::{
+    ConsumedDeliveryWork, consume_delivery_job_with_row_outcomes,
+    split_claimed_rows_into_delivery_jobs,
+};
 
 pub struct EffectsCtx {
     ci: CiContext,
@@ -43,7 +46,7 @@ impl EffectsCtx {
     }
 }
 
-pub type DeliverJob = (PendingDelivery, ActorRef<EffectsMsg>);
+pub type DeliverJob = (ConsumedDeliveryWork, ActorRef<EffectsMsg>);
 
 pub struct DbStore {
     db: WorkerDb,
@@ -60,8 +63,8 @@ impl PendingDeliveryStore for DbStore {
         Ok(gradient_db::deliveries::pending::claim_due(&self.db, limit).await?)
     }
 
-    async fn mark(&self, row: &PendingDelivery, outcome: &Outcome) -> anyhow::Result<()> {
-        Ok(gradient_db::deliveries::pending::mark(&self.db, row, outcome).await?)
+    async fn mark(&self, settled: &[(PendingDelivery, Outcome)]) -> anyhow::Result<()> {
+        Ok(gradient_db::deliveries::pending::mark(&self.db, settled).await?)
     }
 }
 
@@ -90,13 +93,16 @@ impl Worker for Deliverer {
         _factory: &ActorRef<FactoryMessage<Self::Key, Self::Message>>,
         Job {
             key,
-            msg: (row, reply),
+            msg: (job, reply),
             ..
         }: Job<Self::Key, Self::Message>,
         _state: &mut Self::State,
     ) -> Result<Self::Key, ActorProcessingErr> {
-        let outcome = consume(&self.ctx, &row).await;
-        let _ = reply.cast(EffectsMsg::Done { row, outcome });
+        let finished_rows_with_outcomes =
+            consume_delivery_job_with_row_outcomes(&self.ctx, job).await;
+        let _ = reply.cast(EffectsMsg::Done {
+            finished_rows_with_outcomes,
+        });
 
         Ok(key)
     }
@@ -107,12 +113,14 @@ pub struct FactoryHandoff {
 }
 
 impl Handoff for FactoryHandoff {
-    fn hand_off(&self, row: PendingDelivery, reply: ActorRef<EffectsMsg>) {
-        let _ = self.factory.cast(FactoryMessage::Dispatch(Job {
-            key: row.id,
-            msg: (row, reply),
-            options: JobOptions::default(),
-            accepted: None,
-        }));
+    fn hand_off(&self, rows: Vec<PendingDelivery>, reply: ActorRef<EffectsMsg>) {
+        for job in split_claimed_rows_into_delivery_jobs(rows) {
+            let _ = self.factory.cast(FactoryMessage::Dispatch(Job {
+                key: job.first_pending_delivery_id(),
+                msg: (job, reply.clone()),
+                options: JobOptions::default(),
+                accepted: None,
+            }));
+        }
     }
 }

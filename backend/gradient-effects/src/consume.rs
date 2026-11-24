@@ -20,24 +20,120 @@ use gradient_ci::task_commit_status_posting::{
     task_should_post_commit_statuses,
 };
 use gradient_db::deliveries::pending::{
-    Outcome, PendingDelivery, PendingDeliveryKind, enqueue, enqueue_or_increment_revision,
+    Outcome, PendingDelivery, PendingDeliveryKind, enqueue_many, enqueue_or_increment_revision,
+    enqueue_or_increment_revision_many,
 };
 use gradient_db::deliveries::trigger_fire::TriggerFire;
 use gradient_db::eval_cache::DecodedCompactionJob;
 use gradient_entity::evaluation::EvaluationStatus;
-use gradient_types::events::{Envelope, Event, evaluation};
-use gradient_types::ids::{BuildAttemptId, TaskActionId, WebhookId};
+use gradient_types::events::{Envelope, Event, EventOwner, evaluation};
+use gradient_types::ids::{BuildAttemptId, PendingDeliveryId, TaskActionId, WebhookId};
 use gradient_types::*;
 use gradient_util::outbound_http_status_error::OutboundHttpNonSuccessStatusError;
-use sea_orm::{ConnectionTrait, EntityTrait, TransactionTrait};
+use sea_orm::{ConnectionTrait, DatabaseTransaction, EntityTrait, TransactionTrait};
 use serde_json::Value as JsonValue;
+use std::collections::HashMap;
+use std::collections::hash_map::Entry;
 use tracing::warn;
 
 use crate::deliver::EffectsCtx;
 
-pub async fn consume(ctx: &EffectsCtx, row: &PendingDelivery) -> Outcome {
-    let result = match row.kind {
-        PendingDeliveryKind::Event => expand_event(ctx, row).await,
+#[derive(Debug, PartialEq)]
+pub enum ConsumedDeliveryWork {
+    SinglePendingDelivery(PendingDelivery),
+    DatabaseOnlyEventExpansionBatch(Vec<PendingDelivery>),
+}
+
+impl ConsumedDeliveryWork {
+    pub fn first_pending_delivery_id(&self) -> PendingDeliveryId {
+        match self {
+            Self::SinglePendingDelivery(row) => row.id,
+            Self::DatabaseOnlyEventExpansionBatch(rows) => rows[0].id,
+        }
+    }
+}
+
+pub fn split_claimed_rows_into_delivery_jobs(
+    rows: Vec<PendingDelivery>,
+) -> Vec<ConsumedDeliveryWork> {
+    let (mut batch, singles): (Vec<_>, Vec<_>) = rows.into_iter().partition(is_database_only_event);
+    let batch = match batch.len() {
+        0 => None,
+        1 => batch.pop().map(ConsumedDeliveryWork::SinglePendingDelivery),
+        _ => Some(ConsumedDeliveryWork::DatabaseOnlyEventExpansionBatch(batch)),
+    };
+    singles
+        .into_iter()
+        .map(ConsumedDeliveryWork::SinglePendingDelivery)
+        .chain(batch)
+        .collect()
+}
+
+fn is_database_only_event(row: &PendingDelivery) -> bool {
+    row.kind == PendingDeliveryKind::Event
+        && decode_event_from_delivery_payload(row)
+            .is_ok_and(|event| !matches!(event, Event::EvaluationReported(_)))
+}
+
+pub async fn consume_delivery_job_with_row_outcomes(
+    ctx: &EffectsCtx,
+    job: ConsumedDeliveryWork,
+) -> Vec<(PendingDelivery, Outcome)> {
+    match job {
+        ConsumedDeliveryWork::SinglePendingDelivery(row) => {
+            vec![consume_pending_delivery_row_and_pair_with_outcome(ctx, row).await]
+        }
+        ConsumedDeliveryWork::DatabaseOnlyEventExpansionBatch(rows) => {
+            expand_event_rows_with_delivery_outcomes(ctx, rows).await
+        }
+    }
+}
+
+async fn expand_event_rows_with_delivery_outcomes(
+    ctx: &EffectsCtx,
+    rows: Vec<PendingDelivery>,
+) -> Vec<(PendingDelivery, Outcome)> {
+    let error = match enrich_events_plan_enqueue_and_run_reactions(ctx, &rows).await {
+        Ok(()) => {
+            return rows
+                .into_iter()
+                .map(|row| (row, Outcome::Delivered))
+                .collect();
+        }
+        Err(e) => e,
+    };
+    warn!(
+        error = %format!("{error:#}"),
+        rows = rows.len(),
+        "Event set expansion failed. Consume each event one by one so only failed events retry."
+    );
+    let mut finished = Vec::with_capacity(rows.len());
+    for row in rows {
+        finished.push(consume_pending_delivery_row_and_pair_with_outcome(ctx, row).await);
+    }
+    finished
+}
+
+async fn consume_pending_delivery_row_and_pair_with_outcome(
+    ctx: &EffectsCtx,
+    row: PendingDelivery,
+) -> (PendingDelivery, Outcome) {
+    let outcome = match consume(ctx, &row).await {
+        Ok(()) => Outcome::Delivered,
+        Err(e) => failed_delivery_error_to_outcome(&e),
+    };
+    (row, outcome)
+}
+
+fn decode_event_from_delivery_payload(row: &PendingDelivery) -> Result<Event> {
+    serde_json::from_value(row.payload.clone()).context("decode a stored event")
+}
+
+async fn consume(ctx: &EffectsCtx, row: &PendingDelivery) -> Result<()> {
+    match row.kind {
+        PendingDeliveryKind::Event => {
+            enrich_events_plan_enqueue_and_run_reactions(ctx, std::slice::from_ref(row)).await
+        }
         PendingDeliveryKind::LogFinalize => finalize(ctx, row).await,
         PendingDeliveryKind::ActionDelivery => deliver_action(ctx, row).await,
         PendingDeliveryKind::WebhookDelivery => deliver_webhook(ctx, row).await,
@@ -47,11 +143,6 @@ pub async fn consume(ctx: &EffectsCtx, row: &PendingDelivery) -> Outcome {
             requeue_legacy_task_event_commit_status_post_as_check(ctx, row).await
         }
         PendingDeliveryKind::CommitStatusCheckDelivery => post_commit_status(ctx, row).await,
-    };
-
-    match result {
-        Ok(()) => Outcome::Delivered,
-        Err(e) => failed_delivery_error_to_outcome(&e),
     }
 }
 
@@ -102,20 +193,6 @@ fn uuid_field(row: &PendingDelivery, name: &str) -> Result<uuid::Uuid> {
         .ok_or_else(|| anyhow!("pending delivery payload {name} is not a uuid"))
 }
 
-async fn expand_event(ctx: &EffectsCtx, row: &PendingDelivery) -> Result<()> {
-    let event: Event =
-        serde_json::from_value(row.payload.clone()).context("decode a stored event")?;
-    let Some(event) = crate::enrich::enrich(&ctx.db(), event).await? else {
-        return Ok(());
-    };
-    let envelope = Envelope::now(event);
-    fan_out(ctx, &envelope, &row.key).await?;
-    if let Event::EvaluationReported(reported) = &envelope.event {
-        react_on_terminal(ctx, reported).await;
-    }
-    Ok(())
-}
-
 pub(crate) fn action_delivery_payload(action: TaskActionId, envelope: &Envelope) -> JsonValue {
     serde_json::json!({
         "action": action,
@@ -164,60 +241,159 @@ fn plan_deliveries(
     to_actions.chain(to_hooks).chain(to_commit_status).collect()
 }
 
-/// The whole expansion is one transaction. Either every owed delivery is queued or none is. A
-/// retried expansion cannot repeat an external call this way.
-async fn fan_out(ctx: &EffectsCtx, envelope: &Envelope, parent: &str) -> Result<()> {
-    let ci = ctx.ci();
-    let owner = envelope.event.owner();
-    let name = envelope.event.name();
+#[derive(Default)]
+struct EventSubscriberCache {
+    cached_active_task_actions_by_task_id: HashMap<TaskId, Vec<MTaskAction>>,
+    event_owners_with_webhooks: Vec<(EventOwner, Vec<MWebhook>)>,
+    task_id_to_reports_commit_status: HashMap<TaskId, bool>,
+}
 
-    let actions = match owner.task {
-        Some(task) => {
-            let all = active_actions_for_task(&ci, task)
-                .await
-                .context("load the task's actions")?;
-            matching_actions(all, &name, &envelope.event.content())
-        }
-        None => Vec::new(),
-    };
-    let hooks: Vec<MWebhook> = gradient_ci::webhooks::candidates(&ci.db.worker_db, &owner)
-        .await
-        .context("load the event's webhooks")?
-        .into_iter()
-        .filter(|h| gradient_ci::webhooks::routes_to(h, &owner, &name, envelope.event.personal()))
+impl EventSubscriberCache {
+    async fn compute_event_deliveries_using_subscriber_cache(
+        &mut self,
+        ci: &CiContext,
+        envelope: &Envelope,
+        parent: &str,
+    ) -> Result<Vec<(PendingDeliveryKind, String, JsonValue)>> {
+        let owner = envelope.event.owner();
+        let name = envelope.event.name();
+        let content = envelope.event.content();
+
+        let actions = match owner.task {
+            Some(task) => {
+                let all = match self.cached_active_task_actions_by_task_id.entry(task) {
+                    Entry::Occupied(cached) => cached.into_mut(),
+                    Entry::Vacant(slot) => slot.insert(
+                        active_actions_for_task(ci, task)
+                            .await
+                            .context("load the task's actions")?,
+                    ),
+                };
+                matching_actions(all.clone(), &name, &content)
+            }
+            None => Vec::new(),
+        };
+
+        let candidates = match self
+            .event_owners_with_webhooks
+            .iter()
+            .find(|(cached, _)| *cached == owner)
+        {
+            Some((_, hooks)) => hooks,
+            None => {
+                let hooks = gradient_ci::webhooks::candidates(&ci.db.worker_db, &owner)
+                    .await
+                    .context("load the event's webhooks")?;
+                self.event_owners_with_webhooks.push((owner, hooks));
+                &self.event_owners_with_webhooks[self.event_owners_with_webhooks.len() - 1].1
+            }
+        };
+        let hooks: Vec<MWebhook> = candidates
+            .iter()
+            .filter(|h| {
+                gradient_ci::webhooks::routes_to(h, &owner, &name, envelope.event.personal())
+            })
+            .cloned()
+            .collect();
+
+        let commit_status = match owner.task {
+            Some(task) if check_context_kind_for_event(&name).is_some() => {
+                let reports = match self.task_id_to_reports_commit_status.entry(task) {
+                    Entry::Occupied(cached) => *cached.get(),
+                    Entry::Vacant(slot) => *slot.insert(
+                        load_task_git_host_connection(ci, task)
+                            .await
+                            .context("load the task's git host connection")?
+                            .is_some_and(|(task, allowed)| {
+                                task_should_post_commit_statuses(&task, allowed.connection())
+                            }),
+                    ),
+                };
+                match reports {
+                    true => commit_status_check_updated_by_event_name_and_content(&name, &content)?
+                        .map(|check| (task, check)),
+                    false => None,
+                }
+            }
+            _ => None,
+        };
+
+        Ok(plan_deliveries(
+            envelope,
+            &actions,
+            &hooks,
+            commit_status.as_ref(),
+            parent,
+        ))
+    }
+}
+
+async fn enrich_events_plan_enqueue_and_run_reactions(
+    ctx: &EffectsCtx,
+    rows: &[PendingDelivery],
+) -> Result<()> {
+    let events = rows
+        .iter()
+        .map(decode_event_from_delivery_payload)
+        .collect::<Result<Vec<_>>>()?;
+    let db = ctx.db();
+    let enriched =
+        crate::enrich::fill_event_fields_in_batch(&db.worker_db, &db.store_path_mapping, events)
+            .await?;
+    let envelopes: Vec<(&str, Envelope)> = rows
+        .iter()
+        .zip(enriched)
+        .filter_map(|(row, event)| Some((row.key.as_str(), Envelope::now(event?))))
         .collect();
 
-    let commit_status = match owner.task {
-        Some(task) if check_context_kind_for_event(&name).is_some() => {
-            load_task_commit_status_check_for_event_name_and_content(
-                &ci,
-                task,
-                &name,
-                &envelope.event.content(),
-            )
-            .await?
-        }
-        _ => None,
-    };
+    let ci = ctx.ci();
+    let mut subscribers = EventSubscriberCache::default();
+    let mut plan = Vec::new();
+    for (parent, envelope) in &envelopes {
+        plan.extend(
+            subscribers
+                .compute_event_deliveries_using_subscriber_cache(&ci, envelope, parent)
+                .await?,
+        );
+    }
+    insert_planned_deliveries_into_pending_delivery(&ci, plan).await?;
 
-    let plan = plan_deliveries(envelope, &actions, &hooks, commit_status.as_ref(), parent);
+    for (_, envelope) in &envelopes {
+        if let Event::EvaluationReported(reported) = &envelope.event {
+            react_on_terminal(ctx, reported).await;
+        }
+    }
+    Ok(())
+}
+
+/// The whole expansion is one transaction. Either every owed delivery is queued or none is. A
+/// retried expansion cannot repeat an external call this way.
+async fn insert_planned_deliveries_into_pending_delivery(
+    ci: &CiContext,
+    plan: Vec<(PendingDeliveryKind, String, JsonValue)>,
+) -> Result<()> {
     if plan.is_empty() {
         return Ok(());
     }
+    let mut by_kind: Vec<(PendingDeliveryKind, Vec<(String, JsonValue)>)> = Vec::new();
+    for (kind, key, payload) in plan {
+        match by_kind.iter_mut().find(|(k, _)| *k == kind) {
+            Some((_, rows)) => rows.push((key, payload)),
+            None => by_kind.push((kind, vec![(key, payload)])),
+        }
+    }
+
     let txn = ci
         .db
         .worker_db
         .begin()
         .await
         .context("begin the delivery expansion")?;
-    for (kind, key, payload) in plan {
-        match kind {
-            PendingDeliveryKind::CommitStatusCheckDelivery => {
-                enqueue_or_increment_revision(&txn, kind, key, payload).await
-            }
-            _ => enqueue(&txn, kind, key, payload).await,
-        }
-        .context("enqueue a delivery")?;
+    if let Err(e) = insert_planned_delivery_rows_by_kind(&txn, by_kind).await {
+        txn.rollback()
+            .await
+            .context("roll back the delivery expansion")?;
+        return Err(e);
     }
     txn.commit()
         .await
@@ -226,23 +402,20 @@ async fn fan_out(ctx: &EffectsCtx, envelope: &Envelope, parent: &str) -> Result<
     Ok(())
 }
 
-async fn load_task_commit_status_check_for_event_name_and_content(
-    ci: &CiContext,
-    task: TaskId,
-    event: &str,
-    content: &JsonValue,
-) -> Result<Option<(TaskId, CommitStatusCheckWithIds)>> {
-    let Some((task, _)) = load_task_git_host_connection(ci, task)
-        .await
-        .context("load the task's git host connection")?
-        .filter(|(task, allowed)| task_should_post_commit_statuses(task, allowed.connection()))
-    else {
-        return Ok(None);
-    };
-    Ok(
-        commit_status_check_updated_by_event_name_and_content(event, content)?
-            .map(|check| (task.id, check)),
-    )
+async fn insert_planned_delivery_rows_by_kind(
+    txn: &DatabaseTransaction,
+    by_kind: Vec<(PendingDeliveryKind, Vec<(String, JsonValue)>)>,
+) -> Result<()> {
+    for (kind, rows) in by_kind {
+        match kind {
+            PendingDeliveryKind::CommitStatusCheckDelivery => {
+                enqueue_or_increment_revision_many(txn, kind, rows).await
+            }
+            _ => enqueue_many(txn, kind, rows).await,
+        }
+        .context("enqueue a delivery")?;
+    }
+    Ok(())
 }
 
 fn commit_status_check_updated_by_event_name_and_content(
@@ -517,6 +690,132 @@ mod tests {
             .expect("a compaction with a project runs");
         assert_eq!(compaction.store.project, project);
         assert_eq!(compaction.store.fingerprint.as_str(), FINGERPRINT);
+    }
+
+    fn event_row(event: impl Into<Event>) -> PendingDelivery {
+        PendingDelivery {
+            kind: PendingDeliveryKind::Event,
+            key: uuid::Uuid::now_v7().to_string(),
+            ..row(serde_json::to_value(event.into()).unwrap())
+        }
+    }
+
+    fn audited(metadata: JsonValue) -> gradient_types::events::audit::Audited {
+        gradient_types::events::audit::Audited {
+            action: gradient_types::events::audit::Action::ProjectCreate,
+            user: None,
+            owner: EventOwner::default(),
+            metadata: Some(metadata),
+        }
+    }
+
+    #[test]
+    fn split_claimed_rows_into_delivery_jobs_puts_database_only_event_rows_in_one_job_and_each_other_row_in_its_own_job()
+     {
+        let (first, second) = (
+            event_row(audited(serde_json::json!({}))),
+            event_row(audited(serde_json::json!({}))),
+        );
+        let evaluation_report = event_row(evaluation::Reported::default());
+        let undecodable = PendingDelivery {
+            kind: PendingDeliveryKind::Event,
+            ..row(serde_json::json!({"NoSuchEvent": {}}))
+        };
+        let action = row(serde_json::json!({}));
+
+        assert_eq!(
+            split_claimed_rows_into_delivery_jobs(vec![
+                first.clone(),
+                evaluation_report.clone(),
+                undecodable.clone(),
+                second.clone(),
+                action.clone(),
+            ]),
+            vec![
+                ConsumedDeliveryWork::SinglePendingDelivery(evaluation_report),
+                ConsumedDeliveryWork::SinglePendingDelivery(undecodable),
+                ConsumedDeliveryWork::SinglePendingDelivery(action),
+                ConsumedDeliveryWork::DatabaseOnlyEventExpansionBatch(vec![first, second]),
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn event_with_nul_payload_retried_alone_while_healthy_events_get_one_delivery() {
+        use gradient_entity::pending_delivery;
+        use gradient_entity::webhook::WebhookScope;
+        use sea_orm::{ActiveModelTrait, IntoActiveModel};
+
+        let db = gradient_fixtures::database::TestDatabase::create().await;
+        let user = gradient_fixtures::rows::user()
+            .into_active_model()
+            .insert(&db.connection())
+            .await
+            .expect("the user is stored");
+        MWebhook {
+            id: WebhookId::now_v7(),
+            scope: WebhookScope::Instance,
+            name: "all".into(),
+            url: "https://example.com/hook".into(),
+            events: serde_json::json!([]),
+            active: true,
+            created_by: user.id,
+            ..Default::default()
+        }
+        .into_active_model()
+        .insert(&db.connection())
+        .await
+        .expect("the webhook is stored");
+        let state = gradient_test_support::state::TestState::new()
+            .worker_db(db.connection())
+            .build();
+        let ctx = EffectsCtx::new(
+            state.ci(),
+            std::sync::Arc::new(gradient_scheduler::Scheduler::new(std::sync::Arc::clone(
+                &state,
+            ))),
+        );
+        let healthy = [
+            event_row(audited(serde_json::json!({"note": "first"}))),
+            event_row(audited(serde_json::json!({"note": "second"}))),
+        ];
+        let poisoned = event_row(audited(serde_json::json!({"note": "\u{0}"})));
+
+        let outcomes = consume_delivery_job_with_row_outcomes(
+            &ctx,
+            ConsumedDeliveryWork::DatabaseOnlyEventExpansionBatch(vec![
+                healthy[0].clone(),
+                poisoned.clone(),
+                healthy[1].clone(),
+            ]),
+        )
+        .await;
+
+        let outcome_of = |wanted: &PendingDelivery| {
+            outcomes
+                .iter()
+                .find(|(row, _)| row.id == wanted.id)
+                .map(|(_, outcome)| outcome.clone())
+                .expect("every row has an outcome")
+        };
+        assert_eq!(outcomes.len(), 3);
+        assert_eq!(outcome_of(&healthy[0]), Outcome::Delivered);
+        assert_eq!(outcome_of(&healthy[1]), Outcome::Delivered);
+        assert!(matches!(outcome_of(&poisoned), Outcome::Retry(_)));
+        let mut webhook_delivery_parents: Vec<String> = db
+            .rows::<pending_delivery::Entity>()
+            .await
+            .into_iter()
+            .filter(|row| row.kind == PendingDeliveryKind::WebhookDelivery)
+            .map(|row| row.key.rsplit(':').next().unwrap_or_default().to_owned())
+            .collect();
+        webhook_delivery_parents.sort();
+        let mut healthy_keys: Vec<String> = healthy.iter().map(|row| row.key.clone()).collect();
+        healthy_keys.sort();
+        assert_eq!(webhook_delivery_parents, healthy_keys);
+
+        drop((ctx, state));
+        db.finish().await;
     }
 
     #[tokio::test]

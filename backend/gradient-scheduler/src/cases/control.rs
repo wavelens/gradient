@@ -229,16 +229,15 @@ impl SchedulerCase {
     pub async fn deliver_trigger_fires(&self) -> usize {
         let db = &self.scheduler.db.worker_db;
         let rows = self.claim_due_trigger_fires().await;
-        let mut fired = 0;
-        for row in &rows {
+        let fired = rows.len();
+        for row in rows {
             let outcome = match self.fire_payload(&row.payload).await {
                 Ok(()) => Outcome::Delivered,
                 Err(e) => Outcome::Retry(format!("{e:#}")),
             };
-            pending::mark(db, row, &outcome)
+            pending::mark(db, &[(row, outcome)])
                 .await
                 .expect("the delivery is marked");
-            fired += 1;
         }
         self.settled().await;
         fired
