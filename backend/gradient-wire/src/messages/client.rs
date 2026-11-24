@@ -8,6 +8,7 @@ use bytes::Bytes;
 use gradient_secret::SecretString;
 
 use crate::codec::Proto;
+use crate::exec::ExecMetrics;
 use crate::types::{
     BuildFailureKind, BuildMetrics, BuildProgressPhase, ClusterAddress, EvalMessageLevel,
     EvalProgress, EvalShardSpec, ExecInventory, FinishedShard, GitSshHostKeyObservation,
@@ -280,6 +281,12 @@ pub enum ClientMessage {
         bits: Bytes,
         is_final: bool,
     },
+
+    #[proto(68)]
+    ExecMetrics {
+        job_id: String,
+        metrics: ExecMetrics,
+    },
 }
 
 impl ClientMessage {
@@ -304,7 +311,8 @@ impl ClientMessage {
             | ClientMessage::EvalSourceReady { job_id, .. }
             | ClientMessage::EvalShardsPlanned { job_id, .. }
             | ClientMessage::EvalShardRequest { job_id, .. }
-            | ClientMessage::JobPhase { job_id, .. } => Some(job_id),
+            | ClientMessage::JobPhase { job_id, .. }
+            | ClientMessage::ExecMetrics { job_id, .. } => Some(job_id),
             ClientMessage::VmState { job_id, .. } => job_id.as_deref(),
             _ => None,
         }
@@ -354,6 +362,7 @@ impl ClientMessage {
             ClientMessage::WorkerLocalStoreBloomFilterChunk { .. } => {
                 "WorkerLocalStoreBloomFilterChunk"
             }
+            ClientMessage::ExecMetrics { .. } => "ExecMetrics",
         }
     }
 
