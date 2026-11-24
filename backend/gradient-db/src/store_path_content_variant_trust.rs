@@ -73,18 +73,18 @@ crate::sql_fn! {
         params = [ProjectId, CachedPathHashes(64)],
         tier = Bulk,
         budget = crate::sql::Budget::bulk().buffers(800_000)
-            .because("One push can need the reference closure of every pushed path. \
-                      Each path in that closure needs about 20 buffers to pick one trusted variant. \
-                      64 pushed paths with overlapping closures measured 540k buffers on the amplified end-to-end dump.");
+            .because("A first push can follow the reference closure of every pushed path and read about 20 buffers per path to pick one trusted variant. \
+                      Later pushes stop at rows with references_are_claimed set. \
+                      64 pushed paths with overlapping reference closures read 540k buffers on the amplified end-to-end dump before the stop at rows with references_are_claimed set.");
 }
 
 fn unsigned_placeholders_insert(seeds: &str, filter: &str) -> String {
     format!(
-        "WITH paths_needing_unsigned_placeholder AS MATERIALIZED ({claimable}), \
+        "WITH cached_path_cache_pairs_needing_signature_row_or_reference_claim AS MATERIALIZED ({claimable}), \
          mark_existing_cached_path_signatures_references_claimed AS ( \
              UPDATE cached_path_signature updated_cached_path_signature \
              SET references_are_claimed = true \
-             FROM paths_needing_unsigned_placeholder claimable \
+             FROM cached_path_cache_pairs_needing_signature_row_or_reference_claim claimable \
              WHERE updated_cached_path_signature.cached_path = claimable.cached_path \
                AND updated_cached_path_signature.cache = claimable.cache \
                AND NOT updated_cached_path_signature.references_are_claimed \
@@ -92,7 +92,7 @@ fn unsigned_placeholders_insert(seeds: &str, filter: &str) -> String {
          INSERT INTO cached_path_signature (id, cached_path, cache, fetch_count, created_at, references_are_claimed) \
          SELECT uuidv7(), claimable.cached_path, claimable.cache, 0, (now() AT TIME ZONE 'UTC'), \
                 claimable.all_referenced_paths_are_stored \
-         FROM paths_needing_unsigned_placeholder claimable WHERE {filter} \
+         FROM cached_path_cache_pairs_needing_signature_row_or_reference_claim claimable WHERE {filter} \
          ON CONFLICT DO NOTHING",
         claimable =
             build_recursive_sql_for_content_variant_to_sign_with_reference_closure_per_cache_and_store_path_hash(
@@ -2238,21 +2238,53 @@ ORDER BY selected_content_variant_for_signing.cache, selected_content_variant_fo
         sql: String,
         values: Vec<Value>,
     ) -> Vec<String> {
+        run_sql_statement_and_return_statement_rows_and_cached_path_signature_text_rows_in_rolled_back_transaction(
+            db, sql, values,
+        )
+        .await
+        .0
+    }
+
+    async fn run_sql_statement_and_return_statement_rows_and_cached_path_signature_text_rows_in_rolled_back_transaction(
+        db: &TestDatabase,
+        sql: String,
+        values: Vec<Value>,
+    ) -> (Vec<String>, Vec<String>) {
         use sea_orm::TransactionTrait;
         let connection = db.connection();
         let transaction = connection.begin().await.expect("Start a test transaction.");
-        let rows = RowTextQueryResult::find_by_statement(
-            SQL_SELECT_STORED_CONTENT_VARIANTS_WITH_REFERENCE_CLOSURE_FOR_PROJECT_CACHE_SIGNING
-                .bind_built(sql, values),
+        let statement_rows =
+            query_single_text_column_values_sorted_in_transaction(&transaction, sql, values).await;
+        let cached_path_signature_rows = query_single_text_column_values_sorted_in_transaction(
+            &transaction,
+            "SELECT concat_ws('|', cache, cached_path, store_path_hash, \
+             signature IS NULL, references_are_claimed) AS row FROM cached_path_signature"
+                .to_owned(),
+            Vec::new(),
         )
-        .all(&transaction)
-        .await
-        .expect("Run the statement against the test database.");
+        .await;
         transaction
             .rollback()
             .await
             .expect("Roll back the test transaction.");
-        let mut rows: Vec<String> = rows.into_iter().map(|row| row.row).collect();
+        (statement_rows, cached_path_signature_rows)
+    }
+
+    async fn query_single_text_column_values_sorted_in_transaction(
+        transaction: &sea_orm::DatabaseTransaction,
+        sql: String,
+        values: Vec<Value>,
+    ) -> Vec<String> {
+        let mut rows: Vec<String> = RowTextQueryResult::find_by_statement(
+            SQL_SELECT_STORED_CONTENT_VARIANTS_WITH_REFERENCE_CLOSURE_FOR_PROJECT_CACHE_SIGNING
+                .bind_built(sql, values),
+        )
+        .all(transaction)
+        .await
+        .expect("Run the statement against the test database.")
+        .into_iter()
+        .map(|row| row.row)
+        .collect();
         rows.sort();
         rows
     }
@@ -2293,7 +2325,7 @@ ORDER BY selected_content_variant_for_signing.cache, selected_content_variant_fo
                 )
             };
         let second_cache_id_for_output_signing_with_private_key = CacheId::now_v7();
-        let state_label_and_setup_sql_pairs = [
+        let state_label_and_setup_sql_pairs: [(&str, bool, String, &[&str]); 7] = [
             (
                 "dependency output signed with references claimed, its reference unsigned",
                 false,
@@ -2303,6 +2335,7 @@ ORDER BY selected_content_variant_for_signing.cache, selected_content_variant_fo
                     "'signature'",
                     true,
                 ),
+                &[],
             ),
             (
                 "Dependency outputs carry signatures. The `references_are_claimed` column is false.",
@@ -2313,6 +2346,7 @@ ORDER BY selected_content_variant_for_signing.cache, selected_content_variant_fo
                     "'signature'",
                     false,
                 ),
+                &[],
             ),
             (
                 "Output of a dependency that has unsigned placeholder rows",
@@ -2323,6 +2357,7 @@ ORDER BY selected_content_variant_for_signing.cache, selected_content_variant_fo
                     "NULL",
                     false,
                 ),
+                &[],
             ),
             (
                 "Another variant of the dependency output is in the cache. The claimed references provide a signature for that variant.",
@@ -2337,6 +2372,7 @@ ORDER BY selected_content_variant_for_signing.cache, selected_content_variant_fo
                         true,
                     ),
                 ),
+                &[],
             ),
             (
                 "A reference chain where intermediate paths are signed and claim references, with no signature on the final path.",
@@ -2359,6 +2395,36 @@ ORDER BY selected_content_variant_for_signing.cache, selected_content_variant_fo
                         true,
                     ),
                 ),
+                &[],
+            ),
+            (
+                "The dependency output and its reference both have unsigned rows with `references_are_claimed`. The reference target is a third path. `references_are_claimed` is absent from the unsigned row of the third path.",
+                false,
+                format!(
+                    "INSERT INTO cached_path (id, hash, nar_object_storage_key, package, file_hash, nar_hash, nar_size, created_at) \
+                     VALUES (uuidv7(), '{THIRD_REFERENCED_STORED_PATH_HASH}', 'third', 'third', 'sha256:third', 'sha256:third', 5, now()); \
+                     UPDATE cached_path SET \"references\" = '/nix/store/{THIRD_REFERENCED_STORED_PATH_HASH}-third' \
+                     WHERE hash = '{DEPENDENCY_OUTPUT_REFERENCE_STORE_PATH_HASH}'; {}{}{}",
+                    make_cached_path_signature_insert_sql_for_stored_copy(
+                        THIRD_REFERENCED_STORED_PATH_HASH,
+                        "third",
+                        "NULL",
+                        false,
+                    ),
+                    make_cached_path_signature_insert_sql_for_stored_copy(
+                        DEPENDENCY_OUTPUT_REFERENCE_STORE_PATH_HASH,
+                        "reference",
+                        "NULL",
+                        true,
+                    ),
+                    make_cached_path_signature_insert_sql_for_stored_copy(
+                        DEPENDENCY_OUTPUT_STORE_PATH_HASH,
+                        "dependency",
+                        "NULL",
+                        true,
+                    ),
+                ),
+                &[THIRD_REFERENCED_STORED_PATH_HASH],
             ),
             (
                 "Two signing caches: only the second cache can sign the dependency output with references claimed. No row for it in the first cache",
@@ -2368,6 +2434,7 @@ ORDER BY selected_content_variant_for_signing.cache, selected_content_variant_fo
                      SELECT uuidv7(), cp.id, '{second_cache_id_for_output_signing_with_private_key}', 0, now(), 'signature', true \
                      FROM cached_path cp WHERE cp.hash = '{DEPENDENCY_OUTPUT_STORE_PATH_HASH}' AND cp.package = 'dependency';"
                 ),
+                &[],
             ),
         ];
         let project_build_job_output_hashes_insert_sql_seed = "SELECT DISTINCT dout.hash, t.project \
@@ -2383,6 +2450,7 @@ ORDER BY selected_content_variant_for_signing.cache, selected_content_variant_fo
             fixture_state_label,
             fixture_links_waiting_project_to_second_read_write_signing_cache,
             sql_building_one_fixture_state,
+            store_path_hashes_never_reached,
         ) in state_label_and_setup_sql_pairs
         {
             let fixture =
@@ -2496,29 +2564,55 @@ ORDER BY selected_content_variant_for_signing.cache, selected_content_variant_fo
                 )
             }));
             let mut old_statement_row_count = 0;
+            let mut cached_path_signature_rows_claimed_only_by_old_full_walk_count = 0;
             for (old, new, values) in three_compared_statement_text_and_binding_replacements {
-                let old_statement_returned_rows_as_text =
-                    run_query_returning_text_column_in_rolled_back_transaction(
+                let (old_statement_returned_rows_as_text, old_cached_path_signature_rows) =
+                    run_sql_statement_and_return_statement_rows_and_cached_path_signature_text_rows_in_rolled_back_transaction(
                         &fixture.db,
                         old,
                         values.clone(),
                     )
                     .await;
-                assert_eq!(
-                    old_statement_returned_rows_as_text,
-                    run_query_returning_text_column_in_rolled_back_transaction(
+                let (new_statement_returned_rows_as_text, new_cached_path_signature_rows) =
+                    run_sql_statement_and_return_statement_rows_and_cached_path_signature_text_rows_in_rolled_back_transaction(
                         &fixture.db,
                         new,
-                        values
+                        values,
                     )
-                    .await,
+                    .await;
+                assert_eq!(
+                    old_statement_returned_rows_as_text, new_statement_returned_rows_as_text,
                     "The old statement and the new statement insert or return the same row in state {fixture_state_label}"
+                );
+                let expected_cached_path_signature_rows_with_references_unclaimed_for_unreached_hashes: Vec<String> =
+                    old_cached_path_signature_rows
+                        .into_iter()
+                        .map(|row| {
+                            match row.strip_suffix("|t") {
+                                Some(unclaimed)
+                                    if store_path_hashes_never_reached
+                                        .iter()
+                                        .any(|hash| row.contains(&format!("|{hash}|"))) =>
+                                {
+                                    cached_path_signature_rows_claimed_only_by_old_full_walk_count += 1;
+                                    format!("{unclaimed}|f")
+                                }
+                                _ => row,
+                            }
+                        })
+                        .collect();
+                assert_eq!(
+                    expected_cached_path_signature_rows_with_references_unclaimed_for_unreached_hashes,
+                    new_cached_path_signature_rows,
+                    "After the old statement and the new statement in state {fixture_state_label}, the cached_path_signature rows match. One exception: rows that never appear in the new walk keep references_are_claimed false."
                 );
                 old_statement_row_count += old_statement_returned_rows_as_text.len();
             }
             assert!(
-                old_statement_row_count > 0,
-                "Old statement produced at least one row for state: {fixture_state_label}."
+                old_statement_row_count
+                    + cached_path_signature_rows_claimed_only_by_old_full_walk_count
+                    > 0,
+                "State {fixture_state_label} must contain a row from the old statement, or a row that only the old statement can mark with references_are_claimed."
             );
             fixture.db.finish().await;
         }
@@ -2588,20 +2682,22 @@ ORDER BY selected_content_variant_for_signing.cache, selected_content_variant_fo
         let plan: serde_json::Value = fixture
             .db
             .connection()
-            .query_one_raw(INSERT_PLACEHOLDERS_FOR_PROJECT_STORE_HASHES.bind_built(
-                format!(
-                    "EXPLAIN (ANALYZE, FORMAT JSON) {}",
-                    INSERT_PLACEHOLDERS_FOR_PROJECT_STORE_HASHES.text()
+            .query_one_raw(
+                INSERT_PLACEHOLDERS_FOR_PROJECT_STORE_HASHES.bind_built(
+                    format!(
+                        "EXPLAIN (ANALYZE, FORMAT JSON) {}",
+                        INSERT_PLACEHOLDERS_FOR_PROJECT_STORE_HASHES.text()
+                    ),
+                    [
+                        Value::Uuid(Some(fixture.project.into_inner())),
+                        hashes
+                            .iter()
+                            .map(|hash| (*hash).to_owned())
+                            .collect::<Vec<String>>()
+                            .into(),
+                    ],
                 ),
-                [
-                    Value::Uuid(Some(fixture.project.into_inner())),
-                    hashes
-                        .iter()
-                        .map(|hash| (*hash).to_owned())
-                        .collect::<Vec<String>>()
-                        .into(),
-                ],
-            ))
+            )
             .await
             .expect("Postgres can run EXPLAIN on the placeholder insert for a push.")
             .expect("EXPLAIN can return one row.")
@@ -2614,8 +2710,9 @@ ORDER BY selected_content_variant_for_signing.cache, selected_content_variant_fo
             .len();
         (
             after - before,
-            find_cte_claim_node_actual_rows_times_loops(&plan)
-                .expect("The claim CTE is part of the execution plan for the push placeholder insert."),
+            find_cte_claim_node_actual_rows_times_loops(&plan).expect(
+                "The claim CTE is part of the execution plan for the push placeholder insert.",
+            ),
         )
     }
 
@@ -2636,6 +2733,14 @@ ORDER BY selected_content_variant_for_signing.cache, selected_content_variant_fo
                     .map(|(hash, claimed)| (hash.to_owned(), claimed == "t"))
             })
             .collect()
+    }
+
+    async fn snapshot_all_cached_path_signature_rows(db: &TestDatabase) -> Vec<String> {
+        db.texts(
+            "SELECT concat_ws('|', id, cache, cached_path, encode(signature, 'hex'), \
+             references_are_claimed, fetch_count, created_at) FROM cached_path_signature ORDER BY 1",
+        )
+        .await
     }
 
     #[tokio::test]
@@ -2669,23 +2774,26 @@ ORDER BY selected_content_variant_for_signing.cache, selected_content_variant_fo
             .await;
         let flags =
             read_sorted_cached_path_signature_store_path_reference_claims_for_cache(&fixture).await;
+        let rows_after_first_push = snapshot_all_cached_path_signature_rows(&fixture.db).await;
         let second =
             explain_push_placeholder_insert_row_and_claim_cte_counts_for_project_store_path_hashes(
                 &fixture, &root,
             )
             .await;
+        let rows_after_second_push = snapshot_all_cached_path_signature_rows(&fixture.db).await;
         fixture.db.finish().await;
         assert_eq!(
-            (first_inserted, flags, second),
+            (first_inserted, flags, second, rows_after_second_push),
             (
                 30,
                 closure_store_path_hashes
                     .iter()
                     .map(|hash| (hash.clone(), true))
                     .collect::<Vec<_>>(),
-                (0, 0.0)
+                (0, 0.0),
+                rows_after_first_push
             ),
-            "The first push of a closure root inserted one unsigned placeholder row per path and set references_are_claimed on each row. An identical second push inserted nothing. The reference walk produced no rows either."
+            "The first push of the closure root inserted one unsigned placeholder row per path. Each row had references_are_claimed set. The identical second push inserted nothing and changed no row. Its reference walk generated no rows."
         );
     }
 
@@ -2790,7 +2898,13 @@ ORDER BY selected_content_variant_for_signing.cache, selected_content_variant_fo
             .await;
         fixture.db.finish().await;
         assert_eq!(
-            (first_inserted, first_walked > 0.0, flags, second, signatures),
+            (
+                first_inserted,
+                first_walked > 0.0,
+                flags,
+                second,
+                signatures
+            ),
             (
                 1,
                 true,
