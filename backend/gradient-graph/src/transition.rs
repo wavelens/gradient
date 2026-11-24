@@ -17,6 +17,7 @@ use gradient_db::{
         update_evaluation_status_with_error,
     },
 };
+use gradient_entity::StorePathMapper;
 use gradient_entity::build::BuildStatus;
 use gradient_entity::build_attempt::{AttemptFailureReason, AttemptOutcome};
 use gradient_entity::evaluation::EvaluationStatus;
@@ -517,6 +518,43 @@ async fn get_project_of_evaluation(
         .map(|task| task.project))
 }
 
+async fn project_path_mapper_for_evaluation(
+    ctx: &DbContext,
+    evaluation: EvaluationId,
+) -> Result<Option<StorePathMapper>> {
+    let Some(project) = get_project_of_evaluation(ctx, evaluation).await? else {
+        return Ok(None);
+    };
+    Ok(Some(ctx.project_mapper(project).await?))
+}
+
+async fn load_store_path_mapper_for_evaluation(
+    ctx: &DbContext,
+    evaluation: EvaluationId,
+) -> Option<StorePathMapper> {
+    match project_path_mapper_for_evaluation(ctx, evaluation).await {
+        Ok(mapper) => mapper,
+        Err(e) => {
+            warn!(%evaluation, error = %e, "skipped evaluation warning because mapping the store path to the original path failed.");
+            None
+        }
+    }
+}
+
+fn map_stored_store_path_to_original_store_path(
+    mapper: &StorePathMapper,
+    evaluation: EvaluationId,
+    stored_path: &str,
+) -> Option<String> {
+    match mapper.outbound_text(stored_path) {
+        Ok(original) => Some(original),
+        Err(e) => {
+            warn!(%evaluation, stored_path, error = %e, "skipped evaluation warning because mapping the store path to the original path failed.");
+            None
+        }
+    }
+}
+
 fn purged_recently(rows: &[MEvalCacheStore], now: chrono::NaiveDateTime) -> bool {
     rows.iter()
         .filter_map(|row| row.purged_at)
@@ -705,9 +743,17 @@ async fn report_missing_artefacts(
         .context("fetch active evaluations for missing artefacts")?;
 
     for evaluation in &active {
+        let Some(mapper) = load_store_path_mapper_for_evaluation(ctx, evaluation.id).await else {
+            continue;
+        };
         for product in missing {
+            let Some(path) =
+                map_stored_store_path_to_original_store_path(&mapper, evaluation.id, &product.path)
+            else {
+                continue;
+            };
             EvaluationWarning::ArtefactMissing {
-                path: &product.path,
+                path: &path,
                 file_type: &product.file_type,
                 subtype: &product.subtype,
             }
@@ -1271,6 +1317,15 @@ async fn exhaust_substitution(
         .await?;
         let store_path = drv.store_path();
         for job in jobs.values().flatten() {
+            let Some(mapper) = load_store_path_mapper_for_evaluation(ctx, job.evaluation).await
+            else {
+                continue;
+            };
+            let Some(store_path) =
+                map_stored_store_path_to_original_store_path(&mapper, job.evaluation, &store_path)
+            else {
+                continue;
+            };
             EvaluationWarning::SubstitutionExhausted {
                 store_path: &store_path,
                 misses,
