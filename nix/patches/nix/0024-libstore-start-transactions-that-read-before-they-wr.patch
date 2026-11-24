@@ -1,0 +1,108 @@
+From 575b0941c0ddadd13442db260fb27450608d59f8 Mon Sep 17 00:00:00 2001
+From: Dennis Wuitz <dennish@wuitz.de>
+Date: Tue, 24 Nov 2026 14:53:57 +0100
+Subject: [PATCH] libstore: start transactions that read before they write
+ immediately
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Transactions read before write in registerValidPaths, invalidatePathChecked, addSignatures and createCache in the binary cache. SQLite cannot upgrade a read lock to a write lock in a deferred transaction while other connections hold write locks. SQLite can return SQLITE_BUSY immediately without a call to the busy handler. handleSQLiteBusy can take a random 0–99 ms sleep before a retry of the whole transaction. Multiple clients that add .drv files concurrently spent 210 s in these sleeps during a 146-second evaluation. These transactions now start with BEGIN IMMEDIATE. The busy timeout can wait for the write lock. The same evaluation took 74 s after the change. Read-only transactions and schema migrations under the global lock stay in deferred mode.
+---
+ src/libstore/include/nix/store/sqlite.hh | 11 ++++++++++-
+ src/libstore/local-store.cc              |  6 +++---
+ src/libstore/nar-info-disk-cache.cc      |  2 +-
+ src/libstore/sqlite.cc                   |  5 +++--
+ 4 files changed, 17 insertions(+), 7 deletions(-)
+
+diff --git a/src/libstore/include/nix/store/sqlite.hh b/src/libstore/include/nix/store/sqlite.hh
+index d11515b..7ce21c5 100644
+--- a/src/libstore/include/nix/store/sqlite.hh
++++ b/src/libstore/include/nix/store/sqlite.hh
+@@ -150,6 +150,14 @@ struct SQLiteStmt
+     }
+ };
+ 
++/**
++ * How transactions get the database write lock. A deferred transaction with a read then a write cannot promote to a
++ * write lock during a write by another connection. SQLite can return SQLITE_BUSY immediately in that case, without a
++ * call to the busy handler. retrySQLite can sleep for a random 0–99 ms before a retry of the whole transaction.
++ * Transactions in BeginImmediate mode get the write lock at start, so the busy timeout can wait for the lock instead.
++ */
++enum struct SQLiteTransactionStartMode { DeferredReadOnly, BeginImmediate };
++
+ /**
+  * RAII helper that ensures transactions are aborted unless explicitly
+  * committed.
+@@ -159,7 +167,8 @@ struct SQLiteTxn
+     bool active = false;
+     sqlite3 * db;
+ 
+-    SQLiteTxn(sqlite3 * db);
++    SQLiteTxn(
++        sqlite3 * db, SQLiteTransactionStartMode transaction_start_mode = SQLiteTransactionStartMode::DeferredReadOnly);
+ 
+     void commit();
+ 
+diff --git a/src/libstore/local-store.cc b/src/libstore/local-store.cc
+index e1cf8dd..19addde 100644
+--- a/src/libstore/local-store.cc
++++ b/src/libstore/local-store.cc
+@@ -968,7 +968,7 @@ void LocalStore::registerValidPaths(const ValidPathInfos & infos)
+     return retrySQLite<void>([&]() {
+         auto state(_state->lock());
+ 
+-        SQLiteTxn txn(state->db);
++        SQLiteTxn txn(state->db, SQLiteTransactionStartMode::BeginImmediate);
+         StorePathSet paths;
+ 
+         for (auto & [_, i] : infos) {
+@@ -1359,7 +1359,7 @@ void LocalStore::invalidatePathChecked(const StorePath & path)
+     retrySQLite<void>([&]() {
+         auto state(_state->lock());
+ 
+-        SQLiteTxn txn(state->db);
++        SQLiteTxn txn(state->db, SQLiteTransactionStartMode::BeginImmediate);
+ 
+         if (isValidPath_(*state, path)) {
+             StorePathSet referrers;
+@@ -1585,7 +1585,7 @@ void LocalStore::addSignatures(const StorePath & storePath, const std::set<Signa
+     retrySQLite<void>([&]() {
+         auto state(_state->lock());
+ 
+-        SQLiteTxn txn(state->db);
++        SQLiteTxn txn(state->db, SQLiteTransactionStartMode::BeginImmediate);
+ 
+         auto info = std::const_pointer_cast<ValidPathInfo>(queryPathInfoInternal(*state, storePath));
+ 
+diff --git a/src/libstore/nar-info-disk-cache.cc b/src/libstore/nar-info-disk-cache.cc
+index 6554bd7..8e5acaa 100644
+--- a/src/libstore/nar-info-disk-cache.cc
++++ b/src/libstore/nar-info-disk-cache.cc
+@@ -213,7 +213,7 @@ public:
+     {
+         return retrySQLite<int>([&]() {
+             auto state(_state.lock());
+-            SQLiteTxn txn(state->db);
++            SQLiteTxn txn(state->db, SQLiteTransactionStartMode::BeginImmediate);
+ 
+             // To avoid the race, we have to check if maybe someone hasn't yet created
+             // the cache for this URI in the meantime.
+diff --git a/src/libstore/sqlite.cc b/src/libstore/sqlite.cc
+index 5bd3a49..cbfba07 100644
+--- a/src/libstore/sqlite.cc
++++ b/src/libstore/sqlite.cc
+@@ -255,10 +255,11 @@ bool SQLiteStmt::Use::isNull(int col)
+     return sqlite3_column_type(stmt, col) == SQLITE_NULL;
+ }
+ 
+-SQLiteTxn::SQLiteTxn(sqlite3 * db)
++SQLiteTxn::SQLiteTxn(sqlite3 * db, SQLiteTransactionStartMode transaction_start_mode)
+ {
+     this->db = db;
+-    if (sqlite3_exec(db, "begin;", 0, 0, 0) != SQLITE_OK)
++    auto begin = transaction_start_mode == SQLiteTransactionStartMode::BeginImmediate ? "begin immediate;" : "begin;";
++    if (sqlite3_exec(db, begin, 0, 0, 0) != SQLITE_OK)
+         SQLiteError::throw_(db, "starting transaction");
+     active = true;
+ }

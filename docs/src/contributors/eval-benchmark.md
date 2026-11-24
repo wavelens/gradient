@@ -144,12 +144,13 @@ Set `services.gradient.log.traceDir` and `services.gradient.worker.log.traceDir`
 
 | Process | Spans |
 |---|---|
-| `server` | `assign_queued_evals`, `send_assign_job_for_available_requested_job_kind`, `on_request_job`, `request_and_claim_assignment`, `claim_dispatch`, `send_credentials`, `assign_job`, `job_event` (`kind`, `queue_wait_us`), `handle_eval_result`, `record`, `flush`, `record_one`, `commit_one`, `transact_once`, `apply_batch` plus one span per batch step, the `advance_can_start` steps (`lock_seed_shared_builds`, `became_fetchable`, `seed_blocking_deps`, `promote`, `unpromote_ungated`, `emit_transition_effects`, `move_batch_need`), `after_commit`, `known_derivations`, `eval_stream_completed`, `on_upload_request`, `on_upload_admitted` (`already_stored`, `open_transfer`), `on_upload_chunk`, `on_upload_finished`, `upload_commit` (`place_upload`, `upload_graph_commit`) |
+| `server` | `assign_queued_evals`, `send_assign_job_for_available_requested_job_kind`, `on_request_job`, `request_and_claim_assignment`, `claim_dispatch`, `send_credentials`, `assign_job`, `job_event` (`kind`, `queue_wait_us`), `shard_take_answered_immediately`, `handle_eval_result`, `record`, `flush`, `record_one`, `commit_one`, `transact_once`, `apply_batch` plus one span per batch step, the `advance_can_start` steps (`lock_seed_shared_builds`, `became_fetchable`, `seed_blocking_deps`, `promote`, `unpromote_ungated`, `emit_transition_effects`, `move_batch_need`), `after_commit`, `known_derivations`, `eval_stream_completed`, `on_upload_request`, `on_upload_admitted` (`already_stored`, `open_transfer`), `on_upload_chunk`, `on_upload_finished`, `upload_commit` (`place_upload`, `upload_graph_commit`) |
 | `worker` | `job`, `fetch_repository` (`clone_and_checkout`, `run_input_update`, `fetch_inputs`, `missing_paths`), `evaluate_flake`, `evaluate_derivations`, `wave`, `parse_drv_wave`, `query_known_derivations`, `report_eval_result` |
 | `eval` | `open`, `lock_flake`, `discover`, `plan_shards`, `resolve` (`attr`) |
 
 - Subtract `flush` from `record` to get the time a batch spent waiting in the graph writer's mailbox.
 - `job_event.queue_wait_us` measures how long a report waited behind earlier reports from the same worker.
+- All responses to shard requests use `shard_take_answered_immediately` outside the lane for job events. A `job_event` span with `kind = finished_shard_report` can apply to the `Done` mark of shards that the worker reported.
 
 ## Clock Alignment
 

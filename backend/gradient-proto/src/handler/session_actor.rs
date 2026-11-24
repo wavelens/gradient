@@ -187,7 +187,6 @@ impl Actor for SessionActor {
             &peer_id,
             SchedulerJobEvents {
                 scheduler: Arc::clone(&scheduler),
-                writer: writer.clone(),
                 peer_id: peer_id.clone(),
             },
         );

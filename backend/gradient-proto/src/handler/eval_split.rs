@@ -5,22 +5,27 @@
  */
 
 use gradient_scheduler::Scheduler;
-use gradient_scheduler::eval_split::reply::{RETRY_AFTER_MS, ShardRequest};
+use gradient_scheduler::eval_split::reply::RETRY_AFTER_MS;
 use gradient_types::StorePathMapper;
 use gradient_wire::messages::ServerMessage;
 use gradient_wire::types::{EvalShardOutcome, EvalShardSpec};
-use tracing::warn;
+use tracing::{Instrument as _, debug_span, warn};
 
 use super::socket::{ProtoWriter, send_server_msg};
 use super::store_paths::{outbound_message, project_mapper};
 
-pub(super) async fn handle_eval_shard_request(
+pub(super) async fn answer_split_member_eval_shard_request(
     scheduler: &Scheduler,
     writer: &ProtoWriter,
     job_id: String,
-    request: ShardRequest,
+    have_source: bool,
+    held: Vec<String>,
 ) {
-    let outcome = match scheduler.eval_shard_request(&job_id, request).await {
+    let outcome = scheduler
+        .eval_shard_request(&job_id, have_source, &held)
+        .instrument(debug_span!("shard_take_answered_immediately", %job_id))
+        .await;
+    let outcome = match outcome {
         Ok(outcome) => outcome,
         Err(e) => {
             warn!(%job_id, error = %e, "eval shard request failed; asking the member to retry");
