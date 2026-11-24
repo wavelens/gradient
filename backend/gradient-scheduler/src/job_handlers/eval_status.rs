@@ -225,6 +225,18 @@ impl Scheduler {
         };
 
         let project = job.project_id;
+        let mapper = match self.db.project_mapper(project).await {
+            Ok(mapper) => mapper,
+            Err(error) => {
+                warn!(%project, %error, "The scheduler can't map the store path for a project. The evaluation can't finish.");
+                self.mark_evaluation_failed_with_message(
+                    job.evaluation_id,
+                    "Evaluation can't continue because the server can't map this project's store paths.",
+                )
+                .await;
+                return Ok(());
+            }
+        };
         let verified = futures::stream::iter(derivations)
             .map(|reported| self.load_trusted_evaluation_batch_derivation(project, reported))
             .buffered(MAX_CONCURRENT_VERIFIED_DERIVATION_FILE_READS)
@@ -235,9 +247,9 @@ impl Scheduler {
             Err(drv_path) => {
                 self.mark_evaluation_failed_with_message(
                     job.evaluation_id,
-                    &format!(
+                    &mapper.rewrite_stored_store_paths_in_text_to_outbound(&format!(
                         "derivation file {drv_path} was not uploaded or does not match its path"
-                    ),
+                    )),
                 )
                 .await;
                 return Ok(());
@@ -251,8 +263,11 @@ impl Scheduler {
         ) {
             Ok(reported) => reported,
             Err(error) => {
-                self.mark_evaluation_failed_with_message(job.evaluation_id, &format!("{error:#}"))
-                    .await;
+                self.mark_evaluation_failed_with_message(
+                    job.evaluation_id,
+                    &mapper.rewrite_stored_store_paths_in_text_to_outbound(&format!("{error:#}")),
+                )
+                .await;
                 return Ok(());
             }
         };
@@ -271,7 +286,9 @@ impl Scheduler {
                 warn!(%project, error = %error, "The closure check failed for the derivation files that were reported.");
                 self.mark_evaluation_failed_with_message(
                     job.evaluation_id,
-                    &format!("The server rejected the derivation file that was reported: {error:#}"),
+                    &mapper.rewrite_stored_store_paths_in_text_to_outbound(&format!(
+                        "The server rejected the derivation file that was reported: {error:#}"
+                    )),
                 )
                 .await;
                 return Ok(());
@@ -332,9 +349,8 @@ impl Scheduler {
         reported: DiscoveredDerivation,
     ) -> Result<EvaluationBatchDerivation, String> {
         let drv_path = reported.drv_path;
-        let base = StorePath::parse_stored(&drv_path)
-            .map(|path| path.base())
-            .map_err(|_| drv_path.clone())?;
+        let stored_path = StorePath::parse_stored(&drv_path).map_err(|_| drv_path.clone())?;
+        let base = stored_path.base();
         let record = match load_verified_trusted_derivation_record(
             &self.db.worker_db,
             &self.db.storage.nar_storage,
@@ -345,10 +361,10 @@ impl Scheduler {
         .await
         {
             Ok(Some(record)) => record,
-            Ok(None) => return Err(base),
+            Ok(None) => return Err(stored_path.full()),
             Err(error) => {
                 warn!(%project, drv_path = %base, error = %error, "Failed to read the derivation file from storage or validate it");
-                return Err(base);
+                return Err(stored_path.full());
             }
         };
 

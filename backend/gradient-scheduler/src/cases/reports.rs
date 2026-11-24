@@ -2887,7 +2887,8 @@ async fn assert_derivation_file_not_uploaded_and_no_derivation_row_exists(
         EvaluationStatus::Failed,
         "after 1: evaluation.status"
     );
-    let expected = format!("derivation file {refused} was not uploaded or does not match its path");
+    let expected =
+        format!("derivation file /nix/store/{refused} was not uploaded or does not match its path");
     assert!(
         case.messages(evaluation)
             .await

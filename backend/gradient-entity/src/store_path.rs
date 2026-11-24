@@ -12,7 +12,7 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 pub const STORE_DIR: &str = "/nix/store";
 
 pub const NIX32_ALPHABET: &str = "0123456789abcdfghijklmnpqrsvwxyz";
-const STORE_HASH_LENGTH: usize = 32;
+pub(crate) const STORE_HASH_LENGTH: usize = 32;
 const STORE_PATH_NAME_MAX_LENGTH: usize = 211;
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
