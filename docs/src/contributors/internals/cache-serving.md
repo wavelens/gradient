@@ -37,7 +37,11 @@ sequenceDiagram
     - Projects need a path once any of their jobs run on the path's derivation. Commits to a cache with subscription `sign_outputs` off write that row without a signature.
     - Each NAR commit can sign into the caches of the upload (`sign_into_caches` in `gradient-graph/src/nar.rs`).
     - Projects with a job on a committed path then receive its signature in their caches (`gradient-graph/src/claims.rs`).
-    - Claims also cover the store paths that the claimed path references. Rows where `references_are_claimed` is set end the walk over references. Values in that column record existing rows for all referenced paths in the same cache.
+    - Claims also extend to store paths that claimed paths reference. A row with `references_are_claimed` set can mark every path in its direct references as present in the same cache.
+    - An unsigned row under an unsigned row with the flag can still reach the signer. Signature claims stop the reference walk at a signed row with `references_are_claimed`.
+    - Placeholder inserts at push time (`INSERT_PLACEHOLDERS_FOR_PROJECT_STORE_HASHES`) and the signature backfill stop the walk at any row with `references_are_claimed`. These inserts need only the row to exist. A later sweep can put a signature on that row.
+    - Placeholder inserts set `references_are_claimed` on the new row and on every row in the walk when all referenced paths have rows. Repeat pushes of the same closure then need no walk.
+    - The flag can apply only to direct references. A row deeper in the closure can stay missing until pushes or claims include that path itself.
     - Recorded batches sign the already cached outputs of their jobs into their project's caches. Builds finished earlier for another project qualify too.
     - The sign sweep (`sign_missing_signatures` in `gradient-cache/src/signatures.rs`) fills rows inserted with a later subscription.
     - Subscriptions that start signing record the request time in `project_cache`. The backfill process for signatures (`signature-backfill` in `gradient-cache/src/signature_backfill_pass.rs`) can write unsigned rows for earlier project outputs. This process can then start the signature sweep. Those rows get their signatures from the sweep.

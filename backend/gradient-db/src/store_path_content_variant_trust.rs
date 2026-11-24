@@ -80,12 +80,27 @@ crate::sql_fn! {
 
 fn unsigned_placeholders_insert(seeds: &str, filter: &str) -> String {
     format!(
-        "INSERT INTO cached_path_signature (id, cached_path, cache, fetch_count, created_at) \
-         SELECT uuidv7(), claimable.cached_path, claimable.cache, 0, (now() AT TIME ZONE 'UTC') \
-         FROM ({claimable}) claimable WHERE {filter} \
+        "WITH paths_needing_unsigned_placeholder AS MATERIALIZED ({claimable}), \
+         mark_existing_cached_path_signatures_references_claimed AS ( \
+             UPDATE cached_path_signature updated_cached_path_signature \
+             SET references_are_claimed = true \
+             FROM paths_needing_unsigned_placeholder claimable \
+             WHERE updated_cached_path_signature.cached_path = claimable.cached_path \
+               AND updated_cached_path_signature.cache = claimable.cache \
+               AND NOT updated_cached_path_signature.references_are_claimed \
+               AND claimable.all_referenced_paths_are_stored AND {filter}) \
+         INSERT INTO cached_path_signature (id, cached_path, cache, fetch_count, created_at, references_are_claimed) \
+         SELECT uuidv7(), claimable.cached_path, claimable.cache, 0, (now() AT TIME ZONE 'UTC'), \
+                claimable.all_referenced_paths_are_stored \
+         FROM paths_needing_unsigned_placeholder claimable WHERE {filter} \
          ON CONFLICT DO NOTHING",
         claimable =
-            build_sql_for_content_variants_needing_signature_from_store_hash_project_seeds(seeds),
+            build_recursive_sql_for_content_variant_to_sign_with_reference_closure_per_cache_and_store_path_hash(
+                seeds,
+                &signing_subscription("claim_subscription"),
+                candidate_content_variant_is_in_target_cache_or_trusted_by_project,
+                cached_path_signature_references_are_claimed_condition,
+            ),
     )
 }
 
@@ -695,6 +710,7 @@ ORDER BY signable.cache, signable.hash
                 "claim_subscription"
             ),
             sql_prefix_for_project_readable_store_path_content_variant_with_nar_hash_and_nar_size,
+            cached_path_signature_is_signed_and_references_are_claimed,
         ),
     ),
         params = [DerivationIds(64)],
@@ -756,13 +772,23 @@ pub fn build_sql_for_content_variants_needing_signature_from_store_hash_project_
         seeds,
         &signing_subscription("claim_subscription"),
         candidate_content_variant_is_in_target_cache_or_trusted_by_project,
+        cached_path_signature_is_signed_and_references_are_claimed,
     )
+}
+
+fn cached_path_signature_is_signed_and_references_are_claimed(alias: &str) -> String {
+    format!("{alias}.signature IS NOT NULL AND {alias}.references_are_claimed")
+}
+
+fn cached_path_signature_references_are_claimed_condition(alias: &str) -> String {
+    format!("{alias}.references_are_claimed")
 }
 
 fn build_recursive_sql_for_content_variant_to_sign_with_reference_closure_per_cache_and_store_path_hash(
     seeds: &str,
     target_subscription: &str,
     eligible: fn(&str, &str) -> String,
+    reference_walk_stop_condition_from_alias: fn(&str) -> String,
 ) -> String {
     format!(
         r#"
@@ -773,11 +799,10 @@ claim_target AS (
     JOIN project_cache claim_subscription ON claim_subscription.project = claim_seed.project
     WHERE {target_subscription}
       AND NOT EXISTS (
-          SELECT 1 FROM cached_path_signature target_cache_cached_path_signature_with_signature_and_references_claimed
-          WHERE target_cache_cached_path_signature_with_signature_and_references_claimed.cache = claim_subscription.cache
-            AND target_cache_cached_path_signature_with_signature_and_references_claimed.store_path_hash = claim_seed.hash
-            AND target_cache_cached_path_signature_with_signature_and_references_claimed.signature IS NOT NULL
-            AND target_cache_cached_path_signature_with_signature_and_references_claimed.references_are_claimed)
+          SELECT 1 FROM cached_path_signature target_cache_cached_path_signature_ending_walk_at_seed_store_path_hash
+          WHERE target_cache_cached_path_signature_ending_walk_at_seed_store_path_hash.cache = claim_subscription.cache
+            AND target_cache_cached_path_signature_ending_walk_at_seed_store_path_hash.store_path_hash = claim_seed.hash
+            AND {seed_stop})
 ),
 claim(cached_path, project, cache) AS (
     SELECT chosen.id, claim_target.project, claim_target.cache
@@ -795,7 +820,7 @@ claim(cached_path, project, cache) AS (
           AND NOT EXISTS (
               SELECT 1 FROM cached_path_signature s
               WHERE s.cached_path = claimed.id AND s.cache = claim.cache
-                AND s.signature IS NOT NULL AND s.references_are_claimed)
+                AND {row_stop})
     ) reference
     CROSS JOIN LATERAL ({reference_choice}) chosen
 ),
@@ -807,7 +832,7 @@ selected_content_variant_for_signing AS MATERIALIZED (
     FROM claim
     JOIN cached_path cp ON cp.id = claim.cached_path
     LEFT JOIN cached_path_signature s ON s.cached_path = cp.id AND s.cache = claim.cache
-    WHERE NOT coalesce(s.signature IS NOT NULL AND s.references_are_claimed, false)
+    WHERE NOT coalesce({row_stop}, false)
     ORDER BY claim.cache, cp.hash, {rank}
 ),
 store_paths_to_claim(cache, hash) AS MATERIALIZED (
@@ -855,6 +880,10 @@ ORDER BY selected_content_variant_for_signing.cache, selected_content_variant_fo
             eligible,
         ),
         rank = variant_rank("cp", "claim.cache"),
+        seed_stop = reference_walk_stop_condition_from_alias(
+            "target_cache_cached_path_signature_ending_walk_at_seed_store_path_hash"
+        ),
+        row_stop = reference_walk_stop_condition_from_alias("s"),
     )
 }
 
@@ -2223,15 +2252,15 @@ ORDER BY selected_content_variant_for_signing.cache, selected_content_variant_fo
             .rollback()
             .await
             .expect("Roll back the test transaction.");
-        rows.into_iter().map(|row| row.row).collect()
+        let mut rows: Vec<String> = rows.into_iter().map(|row| row.row).collect();
+        rows.sort();
+        rows
     }
 
     fn wrap_insert_statement_to_return_cached_path_signature_row_text(insert: &str) -> String {
         format!(
-            "WITH inserted AS ({insert} RETURNING cache, cached_path, store_path_hash, \
-             signature IS NULL AS unsigned, references_are_claimed) \
-             SELECT concat_ws('|', cache, cached_path, store_path_hash, unsigned, references_are_claimed) AS row \
-             FROM inserted ORDER BY 1"
+            "{insert} RETURNING concat_ws('|', cache, cached_path, store_path_hash, \
+             signature IS NULL, references_are_claimed) AS row"
         )
     }
 
@@ -2414,7 +2443,12 @@ ORDER BY selected_content_variant_for_signing.cache, selected_content_variant_fo
                     wrap_insert_statement_to_return_cached_path_signature_row_text(
                         &replace_new_fragment_with_old_fragment_once(
                             &insert,
-                            &build_sql_for_content_variants_needing_signature_from_store_hash_project_seeds(&seeds),
+                            &build_recursive_sql_for_content_variant_to_sign_with_reference_closure_per_cache_and_store_path_hash(
+                                &seeds,
+                                &signing_subscription("claim_subscription"),
+                                candidate_content_variant_is_in_target_cache_or_trusted_by_project,
+                                cached_path_signature_references_are_claimed_condition,
+                            ),
                             &build_recursive_sql_before_skipping_already_signed_and_claimed_pairs(
                                 &seeds,
                                 &signing_subscription("claim_subscription"),
@@ -2448,6 +2482,7 @@ ORDER BY selected_content_variant_for_signing.cache, selected_content_variant_fo
                                 &seeds,
                                 &target_subscription,
                                 sql_prefix_for_project_readable_store_path_content_variant_with_nar_hash_and_nar_size,
+                                cached_path_signature_is_signed_and_references_are_claimed,
                             ),
                             &build_recursive_sql_before_skipping_already_signed_and_claimed_pairs(
                                 &seeds,
@@ -2487,6 +2522,332 @@ ORDER BY selected_content_variant_for_signing.cache, selected_content_variant_fo
             );
             fixture.db.finish().await;
         }
+    }
+
+    struct TestDatabaseWithProjectIdAndCacheId {
+        db: TestDatabase,
+        project: ProjectId,
+        cache: CacheId,
+    }
+
+    async fn build_database_with_project_signing_cache_and_cached_paths(
+        paths: &[(String, Vec<String>)],
+    ) -> TestDatabaseWithProjectIdAndCacheId {
+        let cache = CacheId::now_v7();
+        let mut builder = shape()
+            .evaluation(EvaluationId::now_v7())
+            .into_cache(cache)
+            .keyed("signing-key");
+        for (hash, references) in paths {
+            let references: Vec<(&str, &str)> = references
+                .iter()
+                .map(|reference| (reference.as_str(), "path"))
+                .collect();
+            builder = builder.cached_path(hash, "path").references(&references);
+        }
+        let db = builder.into_database().await;
+        let project = db
+            .rows::<gradient_entity::project_cache::Entity>()
+            .await
+            .into_iter()
+            .find(|subscription| subscription.cache == cache)
+            .map(|subscription| subscription.project)
+            .expect("Use this fixture to link a project to a signing cache.");
+        TestDatabaseWithProjectIdAndCacheId { db, project, cache }
+    }
+
+    fn find_cte_claim_node_actual_rows_times_loops(node: &serde_json::Value) -> Option<f64> {
+        if node.get("Subplan Name").and_then(serde_json::Value::as_str) == Some("CTE claim") {
+            let number = |key: &str| {
+                node.get(key)
+                    .and_then(serde_json::Value::as_f64)
+                    .unwrap_or_default()
+            };
+            return Some(number("Actual Rows") * number("Actual Loops"));
+        }
+        match node {
+            serde_json::Value::Array(items) => items
+                .iter()
+                .find_map(find_cte_claim_node_actual_rows_times_loops),
+            serde_json::Value::Object(fields) => fields
+                .values()
+                .find_map(find_cte_claim_node_actual_rows_times_loops),
+            _ => None,
+        }
+    }
+
+    async fn explain_push_placeholder_insert_row_and_claim_cte_counts_for_project_store_path_hashes(
+        fixture: &TestDatabaseWithProjectIdAndCacheId,
+        hashes: &[&str],
+    ) -> (usize, f64) {
+        let before = fixture
+            .db
+            .rows::<gradient_entity::cached_path_signature::Entity>()
+            .await
+            .len();
+        let plan: serde_json::Value = fixture
+            .db
+            .connection()
+            .query_one_raw(INSERT_PLACEHOLDERS_FOR_PROJECT_STORE_HASHES.bind_built(
+                format!(
+                    "EXPLAIN (ANALYZE, FORMAT JSON) {}",
+                    INSERT_PLACEHOLDERS_FOR_PROJECT_STORE_HASHES.text()
+                ),
+                [
+                    Value::Uuid(Some(fixture.project.into_inner())),
+                    hashes
+                        .iter()
+                        .map(|hash| (*hash).to_owned())
+                        .collect::<Vec<String>>()
+                        .into(),
+                ],
+            ))
+            .await
+            .expect("Postgres can run EXPLAIN on the placeholder insert for a push.")
+            .expect("EXPLAIN can return one row.")
+            .try_get("", "QUERY PLAN")
+            .expect("The plan is JSON.");
+        let after = fixture
+            .db
+            .rows::<gradient_entity::cached_path_signature::Entity>()
+            .await
+            .len();
+        (
+            after - before,
+            find_cte_claim_node_actual_rows_times_loops(&plan)
+                .expect("The claim CTE is part of the execution plan for the push placeholder insert."),
+        )
+    }
+
+    async fn read_sorted_cached_path_signature_store_path_reference_claims_for_cache(
+        fixture: &TestDatabaseWithProjectIdAndCacheId,
+    ) -> Vec<(String, bool)> {
+        fixture
+            .db
+            .texts(&format!(
+                "SELECT concat_ws('|', store_path_hash, references_are_claimed) \
+                 FROM cached_path_signature WHERE cache = '{}' ORDER BY 1",
+                fixture.cache
+            ))
+            .await
+            .into_iter()
+            .filter_map(|row| {
+                row.split_once('|')
+                    .map(|(hash, claimed)| (hash.to_owned(), claimed == "t"))
+            })
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn push_cached_thirty_path_closure_inserts_placeholders_on_first_call_only_and_second_call_claim_walk_returns_no_rows()
+     {
+        let closure_store_path_hashes: Vec<String> =
+            (0..30).map(|index| format!("{index:0>32}")).collect();
+        let fixture = build_database_with_project_signing_cache_and_cached_paths(
+            &closure_store_path_hashes
+                .iter()
+                .enumerate()
+                .map(|(index, hash)| {
+                    (
+                        hash.clone(),
+                        closure_store_path_hashes
+                            .iter()
+                            .skip(index + 1)
+                            .take(2)
+                            .cloned()
+                            .collect(),
+                    )
+                })
+                .collect::<Vec<_>>(),
+        )
+        .await;
+        let root = [closure_store_path_hashes[0].as_str()];
+        let (first_inserted, _) =
+            explain_push_placeholder_insert_row_and_claim_cte_counts_for_project_store_path_hashes(
+                &fixture, &root,
+            )
+            .await;
+        let flags =
+            read_sorted_cached_path_signature_store_path_reference_claims_for_cache(&fixture).await;
+        let second =
+            explain_push_placeholder_insert_row_and_claim_cte_counts_for_project_store_path_hashes(
+                &fixture, &root,
+            )
+            .await;
+        fixture.db.finish().await;
+        assert_eq!(
+            (first_inserted, flags, second),
+            (
+                30,
+                closure_store_path_hashes
+                    .iter()
+                    .map(|hash| (hash.clone(), true))
+                    .collect::<Vec<_>>(),
+                (0, 0.0)
+            ),
+            "The first push of a closure root inserted one unsigned placeholder row per path and set references_are_claimed on each row. An identical second push inserted nothing. The reference walk produced no rows either."
+        );
+    }
+
+    #[tokio::test]
+    async fn push_path_with_unstored_reference_does_not_set_references_are_claimed_and_next_push_after_storing_reference_sets_it()
+     {
+        let [path, reference, hidden] = ["a", "b", "c"].map(|c| c.repeat(32));
+        let fixture = build_database_with_project_signing_cache_and_cached_paths(&[
+            (path.clone(), vec![reference.clone()]),
+            (reference.clone(), vec![]),
+        ])
+        .await;
+        fixture
+            .db
+            .execute(&format!(
+                "UPDATE cached_path SET hash = '{hidden}' WHERE hash = '{reference}'"
+            ))
+            .await;
+        let (inserted_while_reference_unstored, _) =
+            explain_push_placeholder_insert_row_and_claim_cte_counts_for_project_store_path_hashes(
+                &fixture,
+                &[&path],
+            )
+            .await;
+        let flags_while_reference_unstored =
+            read_sorted_cached_path_signature_store_path_reference_claims_for_cache(&fixture).await;
+        fixture
+            .db
+            .execute(&format!(
+                "UPDATE cached_path SET hash = '{reference}' WHERE hash = '{hidden}'"
+            ))
+            .await;
+        explain_push_placeholder_insert_row_and_claim_cte_counts_for_project_store_path_hashes(
+            &fixture,
+            &[&reference],
+        )
+        .await;
+        let flags_after_reference_push =
+            read_sorted_cached_path_signature_store_path_reference_claims_for_cache(&fixture).await;
+        explain_push_placeholder_insert_row_and_claim_cte_counts_for_project_store_path_hashes(
+            &fixture,
+            &[&path],
+        )
+        .await;
+        let flags_after_second_path_push =
+            read_sorted_cached_path_signature_store_path_reference_claims_for_cache(&fixture).await;
+        fixture.db.finish().await;
+        assert_eq!(
+            (
+                inserted_while_reference_unstored,
+                flags_while_reference_unstored,
+                flags_after_reference_push,
+                flags_after_second_path_push
+            ),
+            (
+                1,
+                vec![(path.clone(), false)],
+                vec![(path.clone(), false), (reference.clone(), true)],
+                vec![(path, true), (reference, true)]
+            ),
+            "`references_are_claimed` can stay false on a path with references that are not stored. A push of that reference can add one row for it after storage of that reference. A later push of that path can set `references_are_claimed`."
+        );
+    }
+
+    #[tokio::test]
+    async fn signed_row_with_unclaimed_references_is_walked_once_by_push_placeholder_insert_then_flagged_and_not_walked_again()
+     {
+        let [path, reference] = ["d", "e"].map(|c| c.repeat(32));
+        let fixture = build_database_with_project_signing_cache_and_cached_paths(&[
+            (path.clone(), vec![reference.clone()]),
+            (reference.clone(), vec![]),
+        ])
+        .await;
+        fixture
+            .db
+            .execute(&format!(
+                "INSERT INTO cached_path_signature (id, cached_path, cache, fetch_count, created_at, signature) \
+                 SELECT uuidv7(), cp.id, '{}', 0, now(), decode('01', 'hex') \
+                 FROM cached_path cp WHERE cp.hash = '{path}'",
+                fixture.cache
+            ))
+            .await;
+        let (first_inserted, first_walked) =
+            explain_push_placeholder_insert_row_and_claim_cte_counts_for_project_store_path_hashes(
+                &fixture,
+                &[&path],
+            )
+            .await;
+        let flags =
+            read_sorted_cached_path_signature_store_path_reference_claims_for_cache(&fixture).await;
+        let second =
+            explain_push_placeholder_insert_row_and_claim_cte_counts_for_project_store_path_hashes(
+                &fixture,
+                &[&path],
+            )
+            .await;
+        let signatures = fixture
+            .db
+            .texts(&format!(
+                "SELECT encode(signature, 'hex') FROM cached_path_signature WHERE store_path_hash = '{path}'"
+            ))
+            .await;
+        fixture.db.finish().await;
+        assert_eq!(
+            (first_inserted, first_walked > 0.0, flags, second, signatures),
+            (
+                1,
+                true,
+                vec![(path, true), (reference, true)],
+                (0, 0.0),
+                vec!["01".to_owned()]
+            ),
+            "NAR commits leave a signed row where references_are_claimed is false. The next push can walk that row once, insert its references, flag both rows and keep the signature. Later pushes walk nothing."
+        );
+    }
+
+    #[tokio::test]
+    async fn signing_claim_query_does_not_stop_at_unsigned_flagged_row() {
+        let [top, middle, bottom] = ["j", "k", "m"].map(|c| c.repeat(32));
+        let fixture = build_database_with_project_signing_cache_and_cached_paths(&[
+            (top.clone(), vec![middle.clone()]),
+            (middle.clone(), vec![bottom.clone()]),
+            (bottom.clone(), vec![]),
+        ])
+        .await;
+        explain_push_placeholder_insert_row_and_claim_cte_counts_for_project_store_path_hashes(
+            &fixture,
+            &[&top],
+        )
+        .await;
+        let flags =
+            read_sorted_cached_path_signature_store_path_reference_claims_for_cache(&fixture).await;
+        let signing_rows = fixture
+            .db
+            .texts(&format!(
+                "SELECT concat_ws('|', claimable.hash, claimable.cached_path_has_signature) \
+                 FROM ({claimable}) claimable ORDER BY 1",
+                claimable = build_sql_for_content_variants_needing_signature_from_store_hash_project_seeds(
+                    &format!(
+                        "SELECT DISTINCT pushed.hash, '{}'::uuid FROM unnest(ARRAY['{top}']) pushed(hash)",
+                        fixture.project
+                    )
+                ),
+            ))
+            .await;
+        fixture.db.finish().await;
+        assert_eq!(
+            (flags, signing_rows),
+            (
+                vec![
+                    (top.clone(), true),
+                    (middle.clone(), true),
+                    (bottom.clone(), true)
+                ],
+                vec![
+                    format!("{top}|f"),
+                    format!("{middle}|f"),
+                    format!("{bottom}|f")
+                ]
+            ),
+            "Placeholder inserts on push set a flag on the unsigned chain. Calls to the signing walk still return all three unsigned rows at or below the first row with the flag, including that row."
+        );
     }
 
     #[tokio::test]
