@@ -800,6 +800,30 @@ pub fn exec_tables() -> &'static [TableSpec] {
             ]
         ),
         spec!(
+            "exec_job_metric",
+            "CREATE TABLE exec_job_metric (exec_job TEXT, attempt TEXT, sequence INTEGER, received_at TEXT, window_ms INTEGER, cpu_avg REAL, cpu_max REAL, ram_avg_bytes INTEGER, ram_max_bytes INTEGER, ram_total_bytes INTEGER, disk_max_bytes INTEGER, disk_total_bytes INTEGER)",
+            concat!(
+                "SELECT m.exec_job::text, m.attempt::text, m.sequence::text, m.received_at::text, m.window_ms::text, m.cpu_avg::text, m.cpu_max::text, m.ram_avg_bytes::text, m.ram_max_bytes::text, m.ram_total_bytes::text, m.disk_max_bytes::text, m.disk_total_bytes::text FROM exec_job_metric m WHERE m.exec_job IN (",
+                own_exec_jobs!(),
+                ")"
+            ),
+            "the evaluation's exec jobs",
+            [
+                "exec_job",
+                "attempt",
+                "sequence",
+                "received_at",
+                "window_ms",
+                "cpu_avg",
+                "cpu_max",
+                "ram_avg_bytes",
+                "ram_max_bytes",
+                "ram_total_bytes",
+                "disk_max_bytes",
+                "disk_total_bytes"
+            ]
+        ),
+        spec!(
             "exec_job_continuation",
             "CREATE TABLE exec_job_continuation (exec_job TEXT, evaluation TEXT, attributes TEXT, status INTEGER, message TEXT, created_at TEXT, updated_at TEXT)",
             concat!(

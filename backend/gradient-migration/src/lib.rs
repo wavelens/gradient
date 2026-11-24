@@ -116,6 +116,7 @@ mod m20270104_000000_add_nullable_base_branch_to_fork_pull_request_approval;
 mod m20270105_000000_add_cached_path_kind_index_to_store_path_content_producer_concurrently;
 mod m20270106_000000_add_nullable_backfill_requested_time_to_project_cache_mark_signing_subscriptions_owed_and_set_trigger_on_sign_outputs;
 mod m20270107_000000_drop_not_valid_base_url_check_constraint_for_gitea_forgejo_and_gitlab_connections;
+mod m20270108_000000_exec_job_metric;
 mod sql_on_one_connection;
 
 pub struct UpgradeFloor {
@@ -268,6 +269,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20270105_000000_add_cached_path_kind_index_to_store_path_content_producer_concurrently::Migration),
             Box::new(m20270106_000000_add_nullable_backfill_requested_time_to_project_cache_mark_signing_subscriptions_owed_and_set_trigger_on_sign_outputs::Migration),
             Box::new(m20270107_000000_drop_not_valid_base_url_check_constraint_for_gitea_forgejo_and_gitlab_connections::Migration),
+            Box::new(m20270108_000000_exec_job_metric::Migration),
         ]
     }
 }
