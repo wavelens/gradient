@@ -27,9 +27,9 @@ index d11515b..7ce21c5 100644
 + * How transactions get the database write lock. A deferred transaction with a read then a write cannot promote to a
 + * write lock during a write by another connection. SQLite can return SQLITE_BUSY immediately in that case, without a
 + * call to the busy handler. retrySQLite can sleep for a random 0–99 ms before a retry of the whole transaction.
-+ * Transactions in BeginImmediate mode get the write lock at start, so the busy timeout can wait for the lock instead.
++ * Transactions in Immediate mode get the write lock at start, so the busy timeout can wait for the lock instead.
 + */
-+enum struct SQLiteTransactionStartMode { DeferredReadOnly, BeginImmediate };
++enum struct SQLiteTransactionStartMode { Deferred, Immediate };
 +
  /**
   * RAII helper that ensures transactions are aborted unless explicitly
@@ -40,7 +40,7 @@ index d11515b..7ce21c5 100644
  
 -    SQLiteTxn(sqlite3 * db);
 +    SQLiteTxn(
-+        sqlite3 * db, SQLiteTransactionStartMode transaction_start_mode = SQLiteTransactionStartMode::DeferredReadOnly);
++        sqlite3 * db, SQLiteTransactionStartMode startMode = SQLiteTransactionStartMode::Deferred);
  
      void commit();
  
@@ -53,7 +53,7 @@ index e1cf8dd..19addde 100644
          auto state(_state->lock());
  
 -        SQLiteTxn txn(state->db);
-+        SQLiteTxn txn(state->db, SQLiteTransactionStartMode::BeginImmediate);
++        SQLiteTxn txn(state->db, SQLiteTransactionStartMode::Immediate);
          StorePathSet paths;
  
          for (auto & [_, i] : infos) {
@@ -62,7 +62,7 @@ index e1cf8dd..19addde 100644
          auto state(_state->lock());
  
 -        SQLiteTxn txn(state->db);
-+        SQLiteTxn txn(state->db, SQLiteTransactionStartMode::BeginImmediate);
++        SQLiteTxn txn(state->db, SQLiteTransactionStartMode::Immediate);
  
          if (isValidPath_(*state, path)) {
              StorePathSet referrers;
@@ -71,7 +71,7 @@ index e1cf8dd..19addde 100644
          auto state(_state->lock());
  
 -        SQLiteTxn txn(state->db);
-+        SQLiteTxn txn(state->db, SQLiteTransactionStartMode::BeginImmediate);
++        SQLiteTxn txn(state->db, SQLiteTransactionStartMode::Immediate);
  
          auto info = std::const_pointer_cast<ValidPathInfo>(queryPathInfoInternal(*state, storePath));
  
@@ -84,7 +84,7 @@ index 6554bd7..8e5acaa 100644
          return retrySQLite<int>([&]() {
              auto state(_state.lock());
 -            SQLiteTxn txn(state->db);
-+            SQLiteTxn txn(state->db, SQLiteTransactionStartMode::BeginImmediate);
++            SQLiteTxn txn(state->db, SQLiteTransactionStartMode::Immediate);
  
              // To avoid the race, we have to check if maybe someone hasn't yet created
              // the cache for this URI in the meantime.
@@ -97,11 +97,11 @@ index 5bd3a49..cbfba07 100644
  }
  
 -SQLiteTxn::SQLiteTxn(sqlite3 * db)
-+SQLiteTxn::SQLiteTxn(sqlite3 * db, SQLiteTransactionStartMode transaction_start_mode)
++SQLiteTxn::SQLiteTxn(sqlite3 * db, SQLiteTransactionStartMode startMode)
  {
      this->db = db;
 -    if (sqlite3_exec(db, "begin;", 0, 0, 0) != SQLITE_OK)
-+    auto begin = transaction_start_mode == SQLiteTransactionStartMode::BeginImmediate ? "begin immediate;" : "begin;";
++    auto begin = startMode == SQLiteTransactionStartMode::Immediate ? "begin immediate;" : "begin;";
 +    if (sqlite3_exec(db, begin, 0, 0, 0) != SQLITE_OK)
          SQLiteError::throw_(db, "starting transaction");
      active = true;

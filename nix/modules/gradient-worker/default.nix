@@ -547,9 +547,11 @@ in {
           Whether to record per-build peak memory, CPU time, disk I/O and out-of-memory kills.
           This turns on Nix's experimental `cgroups` feature and `use-cgroups` setting and
           delegates cgroup controllers to {file}`nix-daemon.service`. The daemon reports the
-          values in each build result. Peak memory, disk I/O and out-of-memory kills need
-          Gradient's Nix fork on the daemon, and {option}`nix.package` then defaults to its
-          package. Wall-clock time is always recorded.
+          values in each build result. Peak memory, disk I/O and OOM kills need Gradient's
+          Nix fork on the daemon. Set this option or enable
+          {option}`services.gradient.worker.capabilities.eval` to make the fork the default for
+          {option}`nix.package`. Concurrent evaluations on this fork register derivations without
+          SQLite busy retries. The metrics always include wall time.
         '';
       };
 
@@ -783,7 +785,7 @@ in {
     };
 
     nix = {
-      package = lib.mkIf cfg.build.metrics (lib.mkDefault pkgs.gradient-nix);
+      package = lib.mkIf (cfg.build.metrics || cfg.capabilities.eval) (lib.mkDefault pkgs.gradient-nix);
       settings = {
         trusted-users = [ "gradient-worker" ];
         use-cgroups = lib.mkIf cfg.build.metrics true;
