@@ -4,7 +4,9 @@
  */
 
 use super::admit::{admit, admit_nar};
-use super::refusal::{CacheRefusal, ensure_cache_enabled};
+use super::refusal::{
+    CacheRefusal, ensure_cache_enabled, refuse_upload_when_nar_size_exceeds_free_storage,
+};
 use crate::api_spec::{Binary, CachePath};
 use crate::audit::Audit;
 use crate::authorization::RateLimitBucketOwner;
@@ -55,7 +57,7 @@ pub struct NarUploadForm {
     operation_id = "uploadCacheNar",
     tag = "caches",
     summary = "Upload a NAR to a cache",
-    description = "Uploads a single NAR (its bytes plus narinfo metadata) to this cache.\nRequires `writeStore`. The server validates the byte length against the\ndeclared `file_size`, stores the blob, records the cached path, and\nenqueues a signature for this cache. Re-uploading an existing store path\nreuses the cached path and only adds this cache's signature.\n\nThe route's body limit is `GRADIENT_NAR_MAX_UPLOAD_SIZE` (default 512 MiB).\nThe bundled reverse proxy additionally caps each request body at 100 MiB,\nso NARs above that must use the chunked endpoints\n(`PUT .../nars/{hash}/chunk` + `POST .../nars/{hash}/finalize`).",
+    description = "Uploads a single NAR (its bytes plus narinfo metadata) to this cache.\nRequires `writeStore`. The server validates the byte length against the\ndeclared `file_size`, stores the blob, records the cached path, and\nenqueues a signature for this cache. Re-uploading an existing store path\nreuses the cached path and only adds this cache's signature.\n\nThe route's body limit is `GRADIENT_NAR_MAX_UPLOAD_SIZE` (default 512 MiB).\nThe bundled reverse proxy additionally caps each request body at 100 MiB,\nso NARs above that must use the chunked endpoints\n(`PUT .../nars/{hash}/chunk` + `POST .../nars/{hash}/finalize`).\n\nDeclared `file_size` plus 10 MiB over free storage on the cache or instance -> 409 upload rejection from the server.",
     params(CachePath),
     request_body(content = NarUploadForm, content_type = "multipart/form-data"),
     responses((status = CREATED, description = "NAR stored", body = StoredNar), WebError)
@@ -93,6 +95,13 @@ pub async fn nars_upload(
         )
         .await?;
         drop(permit);
+        refuse_upload_when_nar_size_exceeds_free_storage(
+            &state.web_db,
+            &cache,
+            state.config.cache.max_storage_gb,
+            upload.file_size,
+        )
+        .await?;
         let created = verify_admit_import_sign_and_publish_staged_nar(
             &state.db(),
             admit_nar(
@@ -398,7 +407,7 @@ fn parse_upload_path_to_store_hash(segment: &str, mapper: &StorePathMapper) -> W
     operation_id = "uploadCacheNarChunk",
     tag = "caches",
     summary = "Append a chunk of a NAR being uploaded",
-    description = "Appends one slice of a NAR to a server-side `.partial` staging file,\none per `(cache, hash)`. Used to upload NARs larger than the reverse\nproxy's per-request body limit by splitting them across several requests.\nRequires `writeStore`. `offset == 0` starts fresh (truncating any stale\npartial); otherwise the chunk is appended only when `offset` equals the\nbytes already staged. The response's `received` is authoritative: the\nclient sets its next offset to it (resending if it did not advance) and\ncalls `POST .../finalize` once `received` equals the NAR size.",
+    description = "Appends one slice of a NAR to a server-side `.partial` staging file,\none per `(cache, hash)`. Used to upload NARs larger than the reverse\nproxy's per-request body limit by splitting them across several requests.\nRequires `writeStore`. `offset == 0` starts fresh (truncating any stale\npartial); otherwise the chunk is appended only when `offset` equals the\nbytes already staged. The response's `received` is authoritative: the\nclient sets its next offset to it (resending if it did not advance) and\ncalls `POST .../finalize` once `received` equals the NAR size.\n\nThe chunk with `offset == 0` can start an upload. The API can return 409 when free storage on the cache or instance is under 10 MiB. Only the first chunk is subject to the check, so later chunks of an upload in progress can complete. Calls to `POST .../finalize` compare the declared `file_size` with free storage again.",
     params(CachePath, ("hash" = String, Path), NarChunkQuery),
     request_body(content = Binary, content_type = "application/octet-stream"),
     responses((status = OK, description = "Chunk staged", body = ChunkReceived), WebError)
@@ -410,6 +419,15 @@ pub async fn nar_chunk(
     body: Bytes,
 ) -> WebResult<impl IntoResponse> {
     let cache = ensure_cache_enabled(cache)?;
+    if offset == 0 {
+        refuse_upload_when_nar_size_exceeds_free_storage(
+            &state.web_db,
+            &cache,
+            state.config.cache.max_storage_gb,
+            0,
+        )
+        .await?;
+    }
     let store_hash = parse_upload_path_to_store_hash(
         &params.param::<String>("hash")?,
         &state.cache_mapper(cache.id),
@@ -452,7 +470,7 @@ pub async fn nar_chunk(
     operation_id = "finalizeCacheNarUpload",
     tag = "caches",
     summary = "Finalize a chunked NAR upload",
-    description = "Validates the fully staged NAR against its narinfo (the staged byte\nlength must equal `file_size`), imports it exactly like the single-shot\nupload, and drops the `.partial`. Requires `writeStore`.",
+    description = "Validates the fully staged NAR against its narinfo (the staged byte\nlength must equal `file_size`), imports it exactly like the single-shot\nupload, and drops the `.partial`. Requires `writeStore`.\n\nFinalize requests fail with 409 when the declared `file_size` plus 10 MiB go over free storage of the cache or the instance.",
     params(CachePath, ("hash" = String, Path)),
     request_body = NarinfoPart,
     responses((status = CREATED, description = "NAR stored", body = StoredNar), WebError)
@@ -476,6 +494,13 @@ pub async fn nar_finalize(
     if store_hash != upload.stored_hash {
         return Err(CacheRefusal::UrlPathStoreHashNarInfoStorePathHashMismatch.into());
     }
+    refuse_upload_when_nar_size_exceeds_free_storage(
+        &state.web_db,
+        &cache,
+        state.config.cache.max_storage_gb,
+        upload.file_size,
+    )
+    .await?;
 
     let store = upload_partial_store(&state.config)?;
     let key = format!("{}/{store_hash}", cache.id);

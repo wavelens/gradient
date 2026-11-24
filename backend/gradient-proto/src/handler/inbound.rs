@@ -2005,6 +2005,7 @@ pub(in crate::handler) mod fixture {
                 .unwrap(),
             retain_up_to: 0,
             idle_lease: Duration::from_secs(300),
+            upload_storage_by_job_id: Default::default(),
         };
         (uploads, admitted)
     }

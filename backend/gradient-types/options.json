@@ -742,7 +742,7 @@
     "flag": "cache-max-storage-gb",
     "env": "GRADIENT_CACHE_MAX_STORAGE_GB",
     "type": "u32",
-    "description": "Instance-wide limit on cached NAR storage in GB. New evaluations wait while every\nwritable cache of a project has less than 10 MiB left. Set it to `0` to disable the\nlimit. Per-cache limits still apply.",
+    "description": "Storage limit for NAR files for the whole instance (GB). An upload to any cache can fail\nwhen its size plus 10 MiB is more than the free space. New evaluations for all projects\nwait. Per-cache limits still apply. Use `0` to disable this limit.",
     "default": "0",
     "values": []
   },
