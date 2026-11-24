@@ -4,12 +4,12 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use gradient_db::WorkerDb;
 use gradient_db::store_path_content_variant_trust::{
     BackfillRowsWrittenOrSkippedForLockHeldElsewhere,
     read_subscriptions_owing_signature_backfill_after_cursor,
     write_unsigned_signature_placeholders_for_project_earlier_outputs_then_clear_owed_subscription_requested_time_in_locked_transaction_and_commit,
 };
+use gradient_db::{DbContext, WorkerDb};
 use gradient_util::supervision::{Pass, PassError};
 use std::sync::Arc;
 use std::time::Duration;
@@ -22,7 +22,7 @@ pub(crate) struct StartedSigningSubscriptionSignatureBackfillPass {
     pub(crate) db: WorkerDb,
     pub(crate) period: Duration,
     pub(crate) wake: Arc<Notify>,
-    pub(crate) run_signature_sweep_now: Arc<Notify>,
+    pub(crate) signature_sweep_publish_round_database_context: DbContext,
 }
 
 impl Pass for StartedSigningSubscriptionSignatureBackfillPass {
@@ -55,7 +55,8 @@ impl Pass for StartedSigningSubscriptionSignatureBackfillPass {
                 .await
                 {
                     Ok(BackfillRowsWrittenOrSkippedForLockHeldElsewhere::BackfillWrotePlaceholderRows(written)) if written > 0 => {
-                        self.run_signature_sweep_now.notify_one();
+                        self.signature_sweep_publish_round_database_context
+                            .queue_request_signature_sweep_to_check_all_parent_builds();
                     }
                     Ok(_) => {}
                     Err(error) => warn!(
@@ -107,7 +108,7 @@ mod tests {
             db: state.worker_db.clone(),
             period: Duration::from_secs(state.config.cache.sign_sweep_interval_secs.get()),
             wake: Arc::clone(&state.wake.run_signature_backfill_now),
-            run_signature_sweep_now: Arc::clone(&state.wake.run_signature_sweep_now),
+            signature_sweep_publish_round_database_context: state.db(),
         };
 
         pass.run().await.expect("the pass runs");
@@ -150,7 +151,7 @@ mod tests {
             db: state.worker_db.clone(),
             period: Duration::from_secs(state.config.cache.sign_sweep_interval_secs.get()),
             wake: Arc::clone(&state.wake.run_signature_backfill_now),
-            run_signature_sweep_now: Arc::clone(&state.wake.run_signature_sweep_now),
+            signature_sweep_publish_round_database_context: state.db(),
         };
         assert_eq!(
             (

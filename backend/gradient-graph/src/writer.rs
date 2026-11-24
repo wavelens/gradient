@@ -739,22 +739,35 @@ where
     let scoped = ctx.in_transaction(Arc::clone(&tx));
     let startable_set = scoped.memory.startable_set.clone();
     let probe_requests = scoped.memory.probe_requests.clone();
-    let signature_sweep_wake_request = scoped.memory.signature_sweep_wake_requested.clone();
+    let dependency_output_signing_requests =
+        scoped.memory.dependency_output_publish_requests.clone();
     let outcome = tokio::time::timeout(budget, work(scoped)).await;
     let tx =
         Arc::try_unwrap(tx).map_err(|_| anyhow!("a transaction handle escaped its message"))?;
     match outcome {
         Ok(Ok(value)) => {
-            if let Err(e) = tx.execute_unprepared("SELECT 1").await {
-                let _ = tx.rollback().await;
-                return Err(anyhow::Error::new(e).context("transaction aborted before commit"));
-            }
+            let named = match gradient_db::store_path_content_variant_trust::list_build_job_derivation_ids_created_in_current_transaction(&tx).await {
+                Ok(named) => named,
+                Err(e) => {
+                    let _ = tx.rollback().await;
+                    return Err(anyhow::Error::new(e).context("transaction aborted before commit"));
+                }
+            };
+            dependency_output_signing_requests.request(
+                &ctx.wake.run_signature_sweep_now,
+                gradient_db::DependencyOutputSigningRequest {
+                    parent_build_derivation_ids_to_check_for_dependency_outputs_to_sign: named
+                        .into_iter()
+                        .collect(),
+                    ..Default::default()
+                },
+            );
 
             tx.commit().await.context("commit")?;
             ctx.wake.delivery.notify_one();
             startable_set.publish();
             probe_requests.publish();
-            signature_sweep_wake_request.publish(&ctx.wake.run_signature_sweep_now);
+            dependency_output_signing_requests.publish(&ctx.wake.run_signature_sweep_now);
             Ok(value)
         }
         Ok(Err(e)) => {

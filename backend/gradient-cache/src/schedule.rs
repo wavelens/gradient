@@ -43,6 +43,12 @@ pub(crate) fn child_specs(state: &ServerState) -> Vec<ChildSpec> {
             last_signing_pass_handled_parent_build_derivation_id: Default::default(),
             last_signing_started_at: Default::default(),
             last_complete_sweep_finished_at: Default::default(),
+            last_full_parent_builds_publish_round_start: Default::default(),
+            dependency_output_publish_requests: state
+                .memory
+                .db
+                .dependency_output_publish_requests
+                .clone(),
             publish_start_and_scheduled_delayed_wake: SignatureSweepPublishStartAndPendingWake::new(
                 state.shutdown.clone(),
             ),
@@ -52,7 +58,7 @@ pub(crate) fn child_specs(state: &ServerState) -> Vec<ChildSpec> {
             db: state.worker_db.clone(),
             period: secs(config.cache.sign_sweep_interval_secs),
             wake: Arc::clone(&state.wake.run_signature_backfill_now),
-            run_signature_sweep_now: Arc::clone(&state.wake.run_signature_sweep_now),
+            signature_sweep_publish_round_database_context: state.db(),
         }),
         ChildSpec::pass(DebugIndex {
             db: state.worker_db.clone(),

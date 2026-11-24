@@ -55,6 +55,9 @@ pub async fn repair_build_graph(
     let db = &ctx.worker_db;
     let evaluation = scope.evaluation();
     let mut report = RepairReport::default();
+    if let RepairScope::Retry(_) = scope {
+        ctx.queue_request_signature_sweep_to_check_all_parent_builds();
+    }
 
     let thawed = crate::graph::promotion::requeue_failed_closure(db, scope).await?;
     report.thawed = thawed.len() as u64;
@@ -69,7 +72,10 @@ pub async fn repair_build_graph(
     emit_transition_effects(ctx, &cached).await?;
     let derivations: Vec<_> = cached.iter().map(|c| c.derivation).collect();
     let advanced = crate::graph::can_start::advance_fetchable(db, &derivations).await?;
-    emit_transition_effects(ctx, &advanced).await?;
+    ctx.request_parent_build_checks_for_dependency_derivations_with_fetchable_outputs(
+        advanced.marked,
+    );
+    emit_transition_effects(ctx, &advanced.changes).await?;
 
     report.dependency_failed =
         crate::graph::promotion::repair_dependency_failed(db, evaluation).await?;

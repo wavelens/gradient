@@ -81,10 +81,13 @@ pub async fn update_derivation_build_status(
     .await?;
 
     if matches!(status, BuildStatus::Completed | BuildStatus::Substituted) {
-        let changes =
+        let fetchable =
             crate::graph::can_start::advance_fetchable(&ctx.worker_db, &[updated.derivation])
                 .await?;
-        emit_transition_effects(ctx, &changes).await?;
+        ctx.request_parent_build_checks_for_dependency_derivations_with_fetchable_outputs(
+            fetchable.marked,
+        );
+        emit_transition_effects(ctx, &fetchable.changes).await?;
     }
 
     if matches!(

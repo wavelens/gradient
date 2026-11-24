@@ -155,7 +155,9 @@ pub async fn rotate_cache_signing_key(
             key_pair,
         )
         .await?;
-    state.wake.run_signature_sweep_now.notify_one();
+    state
+        .db()
+        .queue_request_signature_sweep_to_check_all_parent_builds();
 
     audit
         .write(

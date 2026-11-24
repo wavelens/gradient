@@ -49,7 +49,7 @@ pub use claims::{
     DEPENDENCY_OUTPUT_SIGNING_SELECT_STATEMENT_TIMEOUT, DependencyOutputPublishRoundResult,
     PARENT_BUILD_PAGE_READ_STATEMENT_TIMEOUT,
     PARENT_BUILD_SKIP_DURATION_AFTER_ONLY_PARENT_PAGE_PUBLISH_FAILURE,
-    SignatureRowForGraphWriterInsert,
+    SignatureRowForGraphWriterInsert, UnfinishedRequestsError,
 };
 pub use messages::*;
 pub use policy::retry_backoff_elapsed;
@@ -349,7 +349,7 @@ impl Graph {
                             PublishRoundChoiceAfterFailedPage::RetryFromSameCursorWithHalfPageSize => {
                                 if Instant::now() >= deadline {
                                     round.stopped_at_deadline_with_parent_builds_remaining = true;
-                                    ctx.wake.run_signature_sweep_now.notify_one();
+                                    ctx.queue_request_signature_sweep_to_check_all_parent_builds();
                                     return round;
                                 }
                                 continue;
@@ -370,7 +370,7 @@ impl Graph {
                 let parent_builds_may_be_left = page_was_full || segment_index + 1 < segment_count;
                 if parent_builds_may_be_left && Instant::now() >= deadline {
                     round.stopped_at_deadline_with_parent_builds_remaining = true;
-                    ctx.wake.run_signature_sweep_now.notify_one();
+                    ctx.queue_request_signature_sweep_to_check_all_parent_builds();
                     return round;
                 }
                 if !page_was_full {
@@ -379,6 +379,104 @@ impl Graph {
             }
         }
         round
+    }
+
+    pub async fn sign_and_publish_dependency_outputs_for_requested_parent_builds_and_parent_builds_of_requested_dependencies_until_read_failure(
+        &self,
+        request: gradient_db::DependencyOutputSigningRequest,
+        maximum_parent_builds_per_page: usize,
+    ) -> Result<DependencyOutputPublishRoundResult, UnfinishedRequestsError> {
+        let mut round = DependencyOutputPublishRoundResult::default();
+        #[cfg(feature = "stub")]
+        if self.stub {
+            return Ok(round);
+        }
+        let unfinished =
+            |error, parent_builds: &[DerivationId]| UnfinishedRequestsError {
+                error,
+                unfinished: gradient_db::DependencyOutputSigningRequest {
+                    parent_build_derivation_ids_to_check_for_dependency_outputs_to_sign:
+                        parent_builds.iter().copied().collect(),
+                    ..Default::default()
+                },
+            };
+        let Some(ctx) = self.ctx.get() else {
+            return Err(UnfinishedRequestsError {
+                error: anyhow::anyhow!("graph writer never started"),
+                unfinished: request,
+            });
+        };
+        let requested_parent_builds: Vec<DerivationId> = request
+            .parent_build_derivation_ids_to_check_for_dependency_outputs_to_sign
+            .iter()
+            .copied()
+            .collect();
+        let requested_dependencies: Vec<DerivationId> = request
+            .dependency_derivation_ids_with_new_outputs
+            .iter()
+            .copied()
+            .collect();
+        let parent_builds = match claims::parent_builds_with_dependency_outputs_to_publish(
+            &ctx.worker_db,
+            &requested_parent_builds,
+            &requested_dependencies,
+        )
+        .await
+        {
+            Ok(parent_builds) => parent_builds,
+            Err(error) => {
+                return Err(UnfinishedRequestsError {
+                    error,
+                    unfinished: request,
+                });
+            }
+        };
+        let mut remaining = &parent_builds[..];
+        while !remaining.is_empty() {
+            let parent_builds_per_page = self
+                .publish_failure_page_size_and_waiting_parent_builds
+                .lock()
+                .next_page_size_after_failures(maximum_parent_builds_per_page);
+            let (page, rest) = remaining.split_at(parent_builds_per_page.min(remaining.len()));
+            match self
+                .sign_parent_build_page_dependency_outputs_and_send_insert_to_graph_writer(
+                    ctx,
+                    page.to_vec(),
+                    &mut round,
+                )
+                .await
+            {
+                Ok(_) => {
+                    self.publish_failure_page_size_and_waiting_parent_builds
+                        .lock()
+                        .parent_builds_per_page = Some(
+                        parent_builds_per_page
+                            .saturating_mul(2)
+                            .min(maximum_parent_builds_per_page),
+                    );
+                    remaining = rest;
+                }
+                Err(failed_page) => {
+                    round.failed_page_count += 1;
+                    match self.log_failed_publish_page_and_decide_round_next_step(
+                        failed_page,
+                        parent_builds_per_page,
+                        &mut round,
+                    ) {
+                        PublishRoundChoiceAfterFailedPage::SetAsideParentBuildAndMovePastPage(
+                            _,
+                        ) => {
+                            remaining = rest;
+                        }
+                        PublishRoundChoiceAfterFailedPage::RetryFromSameCursorWithHalfPageSize => {}
+                        PublishRoundChoiceAfterFailedPage::StopPublishRoundWithError(error) => {
+                            return Err(unfinished(error, remaining));
+                        }
+                    }
+                }
+            }
+        }
+        Ok(round)
     }
 
     async fn read_parent_build_page_sign_dependency_outputs_and_send_insert_to_graph_writer(
@@ -401,6 +499,18 @@ impl Graph {
             published_parent_builds: Vec::new(),
             error,
         })?;
+        self.sign_parent_build_page_dependency_outputs_and_send_insert_to_graph_writer(
+            ctx, page, round,
+        )
+        .await
+    }
+
+    async fn sign_parent_build_page_dependency_outputs_and_send_insert_to_graph_writer(
+        &self,
+        ctx: &DbContext,
+        page: Vec<DerivationId>,
+        round: &mut DependencyOutputPublishRoundResult,
+    ) -> Result<Vec<DerivationId>, FailedPublishRoundPage> {
         let published_parent_builds = self
             .publish_failure_page_size_and_waiting_parent_builds
             .lock()

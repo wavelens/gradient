@@ -241,8 +241,16 @@ pub(super) async fn mark_unfetchable(
     Ok(MarkedUnfetchable { marked, unqueued })
 }
 
+#[derive(Debug, Default)]
+pub struct FetchableStatusChangesAndNewlyMarkedDerivations {
+    pub changes: Vec<TransitionChange>,
+    pub marked: Vec<DerivationId>,
+}
+
 #[tracing::instrument(level = "debug", skip_all)]
-pub async fn became_fetchable(lock: &SharedBuildLock<'_>) -> Result<Vec<TransitionChange>, DbErr> {
+pub async fn became_fetchable(
+    lock: &SharedBuildLock<'_>,
+) -> Result<FetchableStatusChangesAndNewlyMarkedDerivations, DbErr> {
     let marked = mark_fetchable(lock).await?;
     let mut changes = promote(lock.txn, &marked.startable).await?;
     if !marked.marked.is_empty() {
@@ -250,26 +258,29 @@ pub async fn became_fetchable(lock: &SharedBuildLock<'_>) -> Result<Vec<Transiti
         changes.extend(settle_need(lock.txn, &moved).await?);
     }
 
-    Ok(changes)
+    Ok(FetchableStatusChangesAndNewlyMarkedDerivations {
+        changes,
+        marked: marked.marked,
+    })
 }
 
 pub async fn advance_fetchable<C>(
     db: &C,
     derivations: &[DerivationId],
-) -> Result<Vec<TransitionChange>, DbErr>
+) -> Result<FetchableStatusChangesAndNewlyMarkedDerivations, DbErr>
 where
     C: ConnectionTrait + TransactionTrait<Transaction = DatabaseTransaction>,
 {
     if derivations.is_empty() {
-        return Ok(Vec::new());
+        return Ok(FetchableStatusChangesAndNewlyMarkedDerivations::default());
     }
 
     let txn = db.begin().await?;
     let lock = lock_shared_builds(&txn, derivations).await?;
-    let changes = became_fetchable(&lock).await?;
+    let fetchable = became_fetchable(&lock).await?;
     txn.commit().await?;
 
-    Ok(changes)
+    Ok(fetchable)
 }
 
 pub async fn lost_fetchability(lock: &SharedBuildLock<'_>) -> Result<Vec<TransitionChange>, DbErr> {
@@ -391,7 +402,7 @@ mod tests {
         let lock = lock_seed_shared_builds(&txn, &[]).await.unwrap();
 
         assert_eq!(seed_blocking_deps(&lock).await.unwrap(), 0);
-        assert!(became_fetchable(&lock).await.unwrap().is_empty());
+        assert!(became_fetchable(&lock).await.unwrap().changes.is_empty());
         assert!(lost_fetchability(&lock).await.unwrap().is_empty());
         txn.commit().await.unwrap();
 
@@ -452,9 +463,11 @@ mod tests {
         let lock = lock_shared_builds(&txn, &[flipped, untouched])
             .await
             .unwrap();
-        let changes = became_fetchable(&lock).await.unwrap();
+        let FetchableStatusChangesAndNewlyMarkedDerivations { changes, marked } =
+            became_fetchable(&lock).await.unwrap();
         txn.commit().await.unwrap();
 
+        assert_eq!(marked, vec![flipped]);
         assert_eq!(changes.len(), 1);
         assert_eq!(changes[0].derivation, d1);
         assert_eq!(
@@ -492,7 +505,7 @@ mod tests {
 
         let txn = db.begin().await.unwrap();
         let lock = lock_shared_builds(&txn, &[x]).await.unwrap();
-        let changes = became_fetchable(&lock).await.unwrap();
+        let changes = became_fetchable(&lock).await.unwrap().changes;
         txn.commit().await.unwrap();
 
         assert!(changes.is_empty());

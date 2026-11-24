@@ -800,13 +800,17 @@ impl BatchWriter<'_> {
 
         let txn = self.txn()?;
         let lock = gradient_db::graph::can_start::lock_seed_shared_builds(txn, &locked).await?;
-        let mut changes = gradient_db::graph::can_start::became_fetchable(&lock)
+        let fetchable = gradient_db::graph::can_start::became_fetchable(&lock)
             .await
             .context("advance fetchable shared builds")?;
+        self.ctx
+            .request_parent_build_checks_for_dependency_derivations_with_fetchable_outputs(
+                fetchable.marked,
+            );
+        let mut changes = fetchable.changes;
         gradient_db::graph::can_start::seed_blocking_deps(&lock)
             .await
             .context("seed blocking_deps")?;
-        self.ctx.request_signature_sweep_wake();
         changes.extend(
             gradient_db::graph::can_start::promote(txn, &locked)
                 .await
@@ -1325,6 +1329,9 @@ pub(crate) async fn apply_batch(ctx: &DbContext, batch: &RecordBatch) -> Result<
         writer.resolve_shared_builds(ids, &stored).await?;
         writer.add_system_features(&derivations, ids).await?;
         let adopted = writer.adopt_references(&resolved, &newly_walked).await?;
+        ctx.request_signature_sweep_to_check_parent_build_derivations(
+            ids.values().chain(&adopted).copied(),
+        );
         (report.entry_points, report.exec_entry_points) = match batch.task {
             Some(task) => writer.process_entry_points(task, &derivations, ids).await?,
             None => (Vec::new(), 0),
@@ -1609,9 +1616,11 @@ async fn substitute_available(
     .await?;
     if !seeded.complete.is_empty() {
         let lock = gradient_db::graph::can_start::lock_shared_builds(txn, &seeded.complete).await?;
-        let changes = gradient_db::graph::can_start::became_fetchable(&lock).await?;
-        ctx.request_signature_sweep_wake();
-        gradient_db::status::emit_transition_effects(ctx, &changes).await?;
+        let fetchable = gradient_db::graph::can_start::became_fetchable(&lock).await?;
+        ctx.request_parent_build_checks_for_dependency_derivations_with_fetchable_outputs(
+            fetchable.marked,
+        );
+        gradient_db::status::emit_transition_effects(ctx, &fetchable.changes).await?;
     }
 
     Ok(flipped.all)

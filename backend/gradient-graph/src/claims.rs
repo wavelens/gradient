@@ -242,6 +242,55 @@ pub(crate) async fn read_page_of_parent_builds_with_dependency_outputs_to_publis
     Ok(page)
 }
 
+#[derive(Debug)]
+pub struct UnfinishedRequestsError {
+    pub error: anyhow::Error,
+    pub unfinished: gradient_db::DependencyOutputSigningRequest,
+}
+
+pub(crate) async fn parent_builds_with_dependency_outputs_to_publish(
+    db: &WorkerDb,
+    requested_parent_builds: &[DerivationId],
+    requested_dependencies: &[DerivationId],
+) -> anyhow::Result<Vec<DerivationId>> {
+    let transaction = begin_read_only_transaction_and_set_statement_timeout(
+        db,
+        PARENT_BUILD_PAGE_READ_STATEMENT_TIMEOUT,
+    )
+    .await?;
+    if !gradient_db::store_path_content_variant_trust::has_project_cache_subscription_for_stored_input_signing(
+        &transaction,
+    )
+    .await?
+    {
+        return Ok(Vec::new());
+    }
+    let mut candidates =
+        gradient_db::store_path_content_variant_trust::list_parent_derivations_using_any_dependency(
+            &transaction,
+            requested_dependencies,
+        )
+        .await?;
+    candidates.extend_from_slice(requested_parent_builds);
+    candidates.sort_unstable();
+    candidates.dedup();
+    let mut parent_builds = Vec::new();
+    for chunk in candidates
+        .chunks(gradient_db::caches::demotion::MAX_PUBLISHED_PARENT_BUILDS_PER_SIGNING_PASS)
+    {
+        parent_builds.extend(
+            gradient_db::store_path_content_variant_trust::list_parent_build_derivation_ids_with_dependency_outputs_to_sign(
+                &transaction,
+                chunk,
+            )
+            .await?,
+        );
+    }
+    transaction.commit().await?;
+    parent_builds.sort_unstable();
+    Ok(parent_builds)
+}
+
 pub(crate) async fn select_and_sign_dependency_outputs_of_parent_build_page(
     ctx: &DbContext,
     parents: &[DerivationId],

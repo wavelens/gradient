@@ -101,7 +101,12 @@ pub(crate) async fn commit(
         .await?
         .pop()
         .unwrap_or_default();
-    ctx.request_signature_sweep_wake();
+    ctx.request_parent_build_checks_for_dependency_derivations_with_fetchable_outputs(
+        producers.iter().copied(),
+    );
+    if !referenced.is_empty() {
+        ctx.request_signature_sweep_to_check_parent_build_derivations(producers);
+    }
     trace!(store_path = %c.store_path, created, "cached path committed");
 
     Ok(NarCommitted {
@@ -182,7 +187,7 @@ pub(crate) async fn commit_batch(
         .map(|((c, sp), u)| (&c.producer, sp, u))
         .collect();
     let signed = sign_into_caches(ctx, &signing).await?;
-    ctx.request_signature_sweep_wake();
+    ctx.request_parent_build_checks_for_dependency_derivations_with_fetchable_outputs(recounted);
 
     Ok(upserted
         .into_iter()
@@ -270,6 +275,7 @@ async fn commit_runtime_dependencies(
         let settled =
             gradient_db::graph::can_start::update_and_settle_need(txn, &producers).await?;
         gradient_db::status::emit_transition_effects(ctx, &settled.changes).await?;
+        ctx.request_signature_sweep_to_check_parent_build_derivations(producers);
     }
 
     Ok(())
@@ -283,7 +289,11 @@ async fn advance_shared_builds(
 ) -> anyhow::Result<()> {
     let lock =
         gradient_db::graph::can_start::lock_shared_builds(txn, &union(complete, owners)).await?;
-    let mut changes = gradient_db::graph::can_start::became_fetchable(&lock).await?;
+    let fetchable = gradient_db::graph::can_start::became_fetchable(&lock).await?;
+    ctx.request_parent_build_checks_for_dependency_derivations_with_fetchable_outputs(
+        fetchable.marked,
+    );
+    let mut changes = fetchable.changes;
     changes.extend(gradient_db::graph::can_start::promote(txn, owners).await?);
     gradient_db::status::emit_transition_effects(ctx, &changes).await?;
 
@@ -805,7 +815,7 @@ pub(crate) async fn share_lock_caches_for_signing_and_read_signatures_of_unlocke
         });
     }
 
-    ctx.request_signature_sweep_wake();
+    ctx.queue_request_signature_sweep_to_check_all_parent_builds();
     let existing_signature_rows_to_leave_out_during_key_rotation = ECachedPathSignature::find()
         .select_only()
         .column(CCachedPathSignature::Cache)
