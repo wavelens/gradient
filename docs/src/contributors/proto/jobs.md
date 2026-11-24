@@ -70,7 +70,7 @@ sequenceDiagram
         W->>S: QueryKnownDerivations { drv_paths }
         S->>W: KnownDerivations { known }
     end
-    loop each 50 derivations
+    loop every 500 derivations with reported or known inputs
         W->>S: CacheQuery { Push } + uploads (.drv files, sources)
         W->>S: JobUpdate { EvalResult { derivations } }
     end
@@ -84,7 +84,7 @@ sequenceDiagram
 - Batches upload their `.drv` files and input sources before their `EvalResult` message. Builds can start during the walk.
 - Input `.drv` files travel with the batch walking the input.
 - Walk and batch uploads run side by side. Uploads of consecutive batches overlap.
-- `EvalResult` messages follow their own batch uploads, in walk order.
+- Batch uploads come before the `EvalResult` message for each batch. Batches go out when they reach 500 derivations or 1 MiB during traversal. A derivation can only join a batch, if each input derivation is in that batch, in an earlier batch of the job, or in `known`.
 - Workers query and upload each path no more than once per evaluation, apart from the input upload of the fetch step.
 - The server can store each batch in the graph and move each startable build to `Queued` right away.
 - Consecutive `EvalResult` batches of a job, already waiting in the session queue, reach the graph writer together. Limits of the merge: 5000 derivations, and no other event in between.

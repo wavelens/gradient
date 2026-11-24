@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{HashSet, VecDeque};
 use std::num::NonZeroUsize;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -12,6 +12,7 @@ use std::time::Instant;
 
 use super::dependencies::{EvalDependencySource, Imports};
 use super::eval_cache_sharing::{EVAL_CACHE_FLUSH_INTERVAL, share_eval_cache};
+use super::eval_derivation_report_batches::{DerivationRecordsWaitingForInputs, EVAL_BATCH_SIZE};
 use super::progress_report::report_thunks_during;
 use crate::nix::wildcard_walk;
 use crate::worker_pool::WorkerPoolResolver;
@@ -27,10 +28,8 @@ use gradient_sources::{
 use gradient_types::fetch_source_allowlist_and_request_validation::{
     ValidatedFlakeLock, check_flake_input_override_reference_is_remote_flake_or_single_store_path,
 };
-use gradient_wire::codec;
 use gradient_wire::messages::{
     DiscoveredDerivation, EvalAttrCost, EvalStatsReport, FlakeJob, FlakeOutputNode, FlakeSource,
-    PROTO_VERSIONS,
 };
 use gradient_wire::types::{
     EvalMessageLevel, ExecSpec, License, attr_eval_source, exec_image_attr,
@@ -215,13 +214,6 @@ pub fn required_local_source(source: &FlakeSource) -> Option<&str> {
         FlakeSource::Cached { store_path, .. } => Some(store_path.as_str()),
         FlakeSource::Repository { .. } => None,
     }
-}
-
-const EVAL_BATCH_SIZE: usize = 500;
-const EVAL_RESULT_BATCH_MAX_ENCODED_BYTE_SIZE: usize = 1024 * 1024;
-
-fn discovered_derivation_encoded_size(derivation: &DiscoveredDerivation) -> usize {
-    codec::to_bytes(derivation, *PROTO_VERSIONS.end()).map_or(0, |bytes| bytes.len())
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
@@ -578,7 +570,7 @@ pub(super) async fn walk_and_publish(
         }
         walker.completed();
         let derivations = walker
-            .finish_walk_upload_remaining_order_derivations_and_return_last_report_batch()
+            .finish_walk_upload_remaining_paths_send_all_remaining_report_batches_except_last_and_return_last()
             .await?;
         walker
             .flush(Flush {
@@ -643,8 +635,7 @@ type KnownAnswer = (Vec<String>, HashSet<String>);
 struct ClosureWalker<'a> {
     imports: Imports<'a>,
     known_queries: FuturesOrdered<BoxFuture<'a, KnownAnswer>>,
-    /// Workers send every derivation after all the input derivations that they report in the same evaluation job. The server can then check each batch of reported derivations on its own.
-    discovered_derivation_records: Vec<DiscoveredDerivation>,
+    derivation_records_waiting_for_inputs: DerivationRecordsWaitingForInputs,
     visited: HashSet<String>,
     rooted: HashSet<String>,
     pending: VecDeque<Queued>,
@@ -659,7 +650,7 @@ impl<'a> ClosureWalker<'a> {
         Self {
             imports,
             known_queries: FuturesOrdered::new(),
-            discovered_derivation_records: Vec::new(),
+            derivation_records_waiting_for_inputs: DerivationRecordsWaitingForInputs::default(),
             visited: HashSet::new(),
             rooted: HashSet::new(),
             pending: VecDeque::new(),
@@ -701,7 +692,7 @@ impl<'a> ClosureWalker<'a> {
         self.completed();
 
         let rest = self
-            .finish_walk_upload_remaining_order_derivations_and_return_last_report_batch()
+            .finish_walk_upload_remaining_paths_send_all_remaining_report_batches_except_last_and_return_last()
             .await?;
         Ok((found, rest))
     }
@@ -726,7 +717,8 @@ impl<'a> ClosureWalker<'a> {
         if let Some(answer) = self.known_queries.next().await {
             self.enqueue_unknown(answer);
         }
-        Ok(())
+        self.send_pending_paths_and_report_batches_to_publisher()
+            .await
     }
 
     fn completed(&self) {
@@ -749,15 +741,27 @@ impl<'a> ClosureWalker<'a> {
         .await
     }
 
-    async fn finish_walk_upload_remaining_order_derivations_and_return_last_report_batch(
+    async fn send_pending_paths_and_report_batches_to_publisher(&mut self) -> Result<()> {
+        for derivations in self
+            .derivation_records_waiting_for_inputs
+            .take_full_report_batches()
+        {
+            let paths = std::mem::take(&mut self.paths);
+            self.flush(Flush { paths, derivations }).await?;
+        }
+        if self.paths.len() >= EVAL_BATCH_SIZE {
+            self.send_derivation_and_source_paths_to_publisher().await?;
+        }
+        Ok(())
+    }
+
+    async fn finish_walk_upload_remaining_paths_send_all_remaining_report_batches_except_last_and_return_last(
         &mut self,
     ) -> Result<Vec<DiscoveredDerivation>> {
         self.send_derivation_and_source_paths_to_publisher().await?;
-        let mut batches = split_derivation_records_into_report_batches_by_count_and_encoded_size(
-            sort_derivations_after_their_inputs(std::mem::take(
-                &mut self.discovered_derivation_records,
-            )),
-        );
+        let mut batches = self
+            .derivation_records_waiting_for_inputs
+            .take_remaining_report_batches();
         let last_report_batch = batches.pop().unwrap_or_default();
         for derivations in batches {
             self.flush(Flush {
@@ -800,7 +804,9 @@ impl<'a> ClosureWalker<'a> {
         let produced = produced_drvs(&self.imports, &parsed_drvs).await?;
         let new_deps = self.unvisited_inputs(&parsed_drvs, &produced);
         self.ask_known(new_deps);
-        self.record_wave(wave, parsed_drvs, produced).await
+        self.record_wave(wave, parsed_drvs, produced);
+        self.send_pending_paths_and_report_batches_to_publisher()
+            .await
     }
 
     async fn parse_while_asking(
@@ -868,22 +874,26 @@ impl<'a> ClosureWalker<'a> {
                 .filter(|dep| !known.contains(dep))
                 .map(Queued::Dependency),
         );
+        self.derivation_records_waiting_for_inputs
+            .mark_derivation_paths_as_stored(known);
     }
 
-    async fn record_wave(
+    fn record_wave(
         &mut self,
         wave: Vec<Queued>,
         parsed_drvs: Vec<(gradient_derivation::Derivation, u64)>,
         produced: Vec<Vec<String>>,
-    ) -> Result<()> {
+    ) {
         for ((queued, (drv, nar_size)), produced) in wave.into_iter().zip(parsed_drvs).zip(produced)
         {
             self.paths
                 .push((queued.drv_path().to_owned(), Some(nar_size)));
             self.paths
                 .extend(drv.input_sources.iter().map(|src| (src.clone(), None)));
-            self.discovered_derivation_records
-                .push(queued.discovered(&drv, produced));
+            self.derivation_records_waiting_for_inputs
+                .add_derivation_record_or_hold_until_inputs_reported(
+                    queued.discovered(&drv, produced),
+                );
             self.walked += 1;
 
             if self.walked.is_multiple_of(500) {
@@ -895,120 +905,7 @@ impl<'a> ClosureWalker<'a> {
                 );
             }
         }
-
-        if self.paths.len() >= EVAL_BATCH_SIZE {
-            self.send_derivation_and_source_paths_to_publisher().await?;
-        }
-        Ok(())
     }
-}
-
-fn sort_derivations_after_their_inputs(
-    discovered_derivation_records: Vec<DiscoveredDerivation>,
-) -> Vec<DiscoveredDerivation> {
-    let record_positions_in_report_order = {
-        let mut derivation_path_to_held_record_positions: HashMap<&str, Vec<usize>> =
-            HashMap::new();
-        for (derivation_record_position, discovered_derivation) in
-            discovered_derivation_records.iter().enumerate()
-        {
-            derivation_path_to_held_record_positions
-                .entry(discovered_derivation.drv_path.as_str())
-                .or_default()
-                .push(derivation_record_position);
-        }
-        let mut dependent_positions_by_record_position =
-            vec![Vec::new(); discovered_derivation_records.len()];
-        let mut unplaced_input_record_counts = vec![0_usize; discovered_derivation_records.len()];
-        for (derivation_record_position, discovered_derivation) in
-            discovered_derivation_records.iter().enumerate()
-        {
-            let distinct_input_drv_paths: HashSet<&str> = discovered_derivation
-                .dependencies
-                .iter()
-                .map(String::as_str)
-                .collect();
-            for input_derivation_drv_path in distinct_input_drv_paths {
-                for &input_derivation_record_position in derivation_path_to_held_record_positions
-                    .get(input_derivation_drv_path)
-                    .into_iter()
-                    .flatten()
-                    .filter(|&&candidate_record_position| {
-                        candidate_record_position != derivation_record_position
-                    })
-                {
-                    dependent_positions_by_record_position[input_derivation_record_position]
-                        .push(derivation_record_position);
-                    unplaced_input_record_counts[derivation_record_position] += 1;
-                }
-            }
-        }
-
-        let mut ready_record_position_queue: VecDeque<usize> = unplaced_input_record_counts
-            .iter()
-            .enumerate()
-            .filter(|(_, unplaced_input_record_count)| **unplaced_input_record_count == 0)
-            .map(|(derivation_record_position, _)| derivation_record_position)
-            .collect();
-        let mut record_positions_in_report_order =
-            Vec::with_capacity(discovered_derivation_records.len());
-        while let Some(derivation_record_position) = ready_record_position_queue.pop_front() {
-            record_positions_in_report_order.push(derivation_record_position);
-            for &dependent_record_position in
-                &dependent_positions_by_record_position[derivation_record_position]
-            {
-                unplaced_input_record_counts[dependent_record_position] -= 1;
-                if unplaced_input_record_counts[dependent_record_position] == 0 {
-                    ready_record_position_queue.push_back(dependent_record_position);
-                }
-            }
-        }
-        record_positions_in_report_order
-    };
-
-    let held_derivation_record_count = discovered_derivation_records.len();
-    let mut optional_derivation_records: Vec<Option<DiscoveredDerivation>> =
-        discovered_derivation_records
-            .into_iter()
-            .map(Some)
-            .collect();
-    record_positions_in_report_order
-        .into_iter()
-        .chain(0..held_derivation_record_count)
-        .filter_map(|derivation_record_position| {
-            optional_derivation_records[derivation_record_position].take()
-        })
-        .collect()
-}
-
-fn split_derivation_records_into_report_batches_by_count_and_encoded_size(
-    discovered_derivation_records: Vec<DiscoveredDerivation>,
-) -> Vec<Vec<DiscoveredDerivation>> {
-    let mut batches = Vec::new();
-    let mut batch = Vec::new();
-    let mut current_batch_encoded_byte_count = 0;
-    for discovered_derivation in discovered_derivation_records {
-        let encoded_record_size = discovered_derivation_encoded_size(&discovered_derivation);
-        if !batch.is_empty()
-            && current_batch_encoded_byte_count + encoded_record_size
-                > EVAL_RESULT_BATCH_MAX_ENCODED_BYTE_SIZE
-        {
-            batches.push(std::mem::take(&mut batch));
-            current_batch_encoded_byte_count = 0;
-        }
-        batch.push(discovered_derivation);
-        current_batch_encoded_byte_count += encoded_record_size;
-        if batch.len() >= EVAL_BATCH_SIZE
-            || current_batch_encoded_byte_count >= EVAL_RESULT_BATCH_MAX_ENCODED_BYTE_SIZE
-        {
-            batches.push(std::mem::take(&mut batch));
-            current_batch_encoded_byte_count = 0;
-        }
-    }
-    if !batch.is_empty() {
-        batches.push(batch);
-    }
-    batches
 }
 
 async fn produced_drvs(
@@ -1365,6 +1262,9 @@ async fn report_rest(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::executor::eval_derivation_report_batches::{
+        EVAL_RESULT_BATCH_MAX_ENCODED_BYTE_SIZE, discovered_derivation_encoded_size,
+    };
     use gradient_test_support::fakes::derivation_resolver::FakeDerivationResolver;
     use gradient_test_support::prelude::*;
     use gradient_wire::types::{ImportOutcome, Realisation};
@@ -2651,6 +2551,35 @@ mod tests {
             Some(&500),
             "Number of derivations per batch: {derivation_counts_per_reported_eval_result_batch:?}"
         );
+    }
+
+    #[tokio::test]
+    async fn report_batch_reaches_server_before_large_closure_walk_ends() {
+        let wide: Vec<String> = (1..=1200).map(numbered_drv).collect();
+        let root = numbered_drv(1_000_000);
+        let mut drvs: std::collections::HashMap<String, Vec<u8>> = wide
+            .iter()
+            .map(|path| (path.clone(), drv_needing(&[])))
+            .collect();
+        drvs.insert(root.clone(), drv_needing(&wide));
+        let reporter = RecordingJobReporter::new();
+
+        walk_and_publish_fake_raw_derivations_from_entry_paths_as_attribute_names_to_recording_reporter(
+            &reporter,
+            drvs,
+            &[&root],
+        )
+        .await;
+
+        let events = reporter.events();
+        let first_report = events
+            .iter()
+            .position(|event| matches!(event, ReportedEvent::EvalResult { .. }))
+            .unwrap();
+        assert!(events[first_report..].iter().any(|event| matches!(
+            event,
+            ReportedEvent::PathsPushed { paths } if !paths.is_empty()
+        )));
     }
 
     #[tokio::test]
