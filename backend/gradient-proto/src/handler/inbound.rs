@@ -820,6 +820,7 @@ impl<'a> InboundContext<'a> {
             | ClientMessage::NarRequest { job_id, .. }
             | ClientMessage::NarRequestResume { job_id, .. }
             | ClientMessage::EvalCachePull { job_id, .. }
+            | ClientMessage::EvalSourceReady { job_id, .. }
             | ClientMessage::ImportRequest { job_id, .. }
             | ClientMessage::InputRequest { job_id, .. }
             | ClientMessage::UploadRequest { job_id, .. } => {
@@ -2601,6 +2602,35 @@ mod assignment_response_tests {
             panic!("a CacheStatus")
         };
         assert_eq!(cached[0].path, asked);
+    }
+
+    #[tokio::test]
+    async fn admit_maps_eval_source_ready_store_path_to_stored_form_with_rotated_non_identity_mapping()
+     {
+        use super::fixture::{JOB, TestSession, decode};
+        use gradient_entity::{EXAMPLE_ORIGINAL_HASH, EXAMPLE_STORED_HASH, RotatedHashMapping};
+
+        let state = TestState::new()
+            .store_path_mapping(Arc::new(RotatedHashMapping))
+            .build();
+        let (mut session, mut sent, _admitted) = TestSession::new(&state).await;
+        let (ctx, _uploads) = session.split();
+        let source_ready = |job_id: &str| ClientMessage::EvalSourceReady {
+            job_id: job_id.into(),
+            store_path: format!("/nix/store/{EXAMPLE_ORIGINAL_HASH}-source"),
+            fingerprint: "f".into(),
+        };
+
+        let (admitted, mapper) = ctx.admit(source_ready(JOB)).await.expect("admitted");
+        assert!(mapper.is_some());
+        assert!(
+            matches!(admitted, ClientMessage::EvalSourceReady { store_path, .. }
+            if store_path == format!("/nix/store/{EXAMPLE_STORED_HASH}-source"))
+        );
+
+        assert!(ctx.admit(source_ready("unknown")).await.is_none());
+        let refusal = decode(sent.try_recv().expect("a refusal"));
+        assert!(!format!("{refusal:?}").contains("/nix/store/"));
     }
 
     #[tokio::test]
