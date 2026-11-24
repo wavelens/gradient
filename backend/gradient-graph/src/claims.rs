@@ -79,7 +79,7 @@ struct Claim {
     references: Option<String>,
     cache: CacheId,
     cached_path_has_signature: bool,
-    all_referenced_paths_are_stored: bool,
+    reference_closure_established_at_cache_deletion_count: Option<i64>,
 }
 
 impl Claim {
@@ -144,7 +144,7 @@ pub struct SignatureRowForGraphWriterInsert {
     pub cached_path: CachedPathId,
     pub cache: CacheId,
     pub signature: Option<Vec<u8>>,
-    pub references_are_claimed: bool,
+    pub reference_closure_established_at_cache_deletion_count: Option<i64>,
     pub cache_public_key_at_signing: Option<String>,
 }
 
@@ -283,7 +283,8 @@ pub(crate) async fn select_and_sign_dependency_outputs_of_parent_build_page(
             cached_path: row.cached_path,
             cache: row.cache,
             signature: row.signature,
-            references_are_claimed: row.references_are_claimed,
+            reference_closure_established_at_cache_deletion_count: row
+                .reference_closure_established_at_cache_deletion_count,
             cache_public_key_at_signing,
         },
     )
@@ -311,7 +312,8 @@ pub(crate) async fn insert_signed_dependency_output_rows_in_graph_writer_transac
                         cached_path: row.cached_path,
                         cache: row.cache,
                         signature: row.signature.clone(),
-                        references_are_claimed: row.references_are_claimed,
+                        reference_closure_established_at_cache_deletion_count: row
+                            .reference_closure_established_at_cache_deletion_count,
                         created_at,
                         ..Default::default()
                     }
@@ -441,7 +443,12 @@ fn build_cache_signature_rows_for_claims_with_public_keys(
     let created_at = now();
     claims
         .iter()
-        .filter(|claim| !claim.cached_path_has_signature || claim.all_referenced_paths_are_stored)
+        .filter(|claim| {
+            !claim.cached_path_has_signature
+                || claim
+                    .reference_closure_established_at_cache_deletion_count
+                    .is_some()
+        })
         .map(|claim| {
             let signer = signers
                 .get(&claim.cache)
@@ -453,7 +460,8 @@ fn build_cache_signature_rows_for_claims_with_public_keys(
                 cache: claim.cache,
                 signature: signer
                     .map(|(key, _)| claim.signature(key, &ctx.cache_mapper(claim.cache))),
-                references_are_claimed: claim.all_referenced_paths_are_stored,
+                reference_closure_established_at_cache_deletion_count: claim
+                    .reference_closure_established_at_cache_deletion_count,
                 created_at,
                 ..Default::default()
             };

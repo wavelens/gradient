@@ -840,9 +840,10 @@ pub(crate) async fn insert_signatures(
                     Expr::cust("coalesce(cached_path_signature.signature, excluded.signature)"),
                 )
                 .value(
-                    CCachedPathSignature::ReferencesAreClaimed,
+                    CCachedPathSignature::ReferenceClosureEstablishedAtCacheDeletionCount,
                     Expr::cust(
-                        "cached_path_signature.references_are_claimed OR excluded.references_are_claimed",
+                        "greatest(cached_path_signature.reference_closure_established_at_cache_deletion_count, \
+                         excluded.reference_closure_established_at_cache_deletion_count)",
                     ),
                 )
                 .action_and_where(Expr::cust(

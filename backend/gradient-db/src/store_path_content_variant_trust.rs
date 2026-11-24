@@ -73,9 +73,9 @@ crate::sql_fn! {
         params = [ProjectId, CachedPathHashes(64)],
         tier = Bulk,
         budget = crate::sql::Budget::bulk().buffers(800_000)
-            .because("A first push can follow the reference closure of every pushed path and read about 20 buffers per path to pick one trusted variant. \
-                      Later pushes stop at rows with references_are_claimed set. \
-                      64 pushed paths with overlapping reference closures read 540k buffers on the amplified end-to-end dump before the stop at rows with references_are_claimed set.");
+            .because("The first push can walk the reference closure of each pushed path and read about 20 buffers per path to choose one trusted variant. \
+                      Later pushes stop at rows with a stored deletion count equal to the current deletion count of that cache. \
+                      The stop condition did not exist yet. 64 pushed paths with overlapping reference closures read 540k buffers in the amplified end-to-end dump.");
 }
 
 fn unsigned_placeholders_insert(seeds: &str, filter: &str) -> String {
@@ -83,15 +83,18 @@ fn unsigned_placeholders_insert(seeds: &str, filter: &str) -> String {
         "WITH cached_path_cache_pairs_needing_signature_row_or_reference_claim AS MATERIALIZED ({claimable}), \
          mark_existing_cached_path_signatures_references_claimed AS ( \
              UPDATE cached_path_signature updated_cached_path_signature \
-             SET references_are_claimed = true \
+             SET reference_closure_established_at_cache_deletion_count = greatest( \
+                 updated_cached_path_signature.reference_closure_established_at_cache_deletion_count, \
+                 claimable.reference_closure_established_at_cache_deletion_count) \
              FROM cached_path_cache_pairs_needing_signature_row_or_reference_claim claimable \
              WHERE updated_cached_path_signature.cached_path = claimable.cached_path \
                AND updated_cached_path_signature.cache = claimable.cache \
-               AND NOT updated_cached_path_signature.references_are_claimed \
-               AND claimable.all_referenced_paths_are_stored AND {filter}) \
-         INSERT INTO cached_path_signature (id, cached_path, cache, fetch_count, created_at, references_are_claimed) \
+               AND updated_cached_path_signature.reference_closure_established_at_cache_deletion_count \
+                   IS DISTINCT FROM claimable.reference_closure_established_at_cache_deletion_count \
+               AND claimable.reference_closure_established_at_cache_deletion_count IS NOT NULL AND {filter}) \
+         INSERT INTO cached_path_signature (id, cached_path, cache, fetch_count, created_at, reference_closure_established_at_cache_deletion_count) \
          SELECT uuidv7(), claimable.cached_path, claimable.cache, 0, (now() AT TIME ZONE 'UTC'), \
-                claimable.all_referenced_paths_are_stored \
+                claimable.reference_closure_established_at_cache_deletion_count \
          FROM cached_path_cache_pairs_needing_signature_row_or_reference_claim claimable WHERE {filter} \
          ON CONFLICT DO NOTHING",
         claimable =
@@ -99,7 +102,7 @@ fn unsigned_placeholders_insert(seeds: &str, filter: &str) -> String {
                 seeds,
                 &signing_subscription("claim_subscription"),
                 candidate_content_variant_is_in_target_cache_or_trusted_by_project,
-                cached_path_signature_references_are_claimed_condition,
+                cached_path_signature_stored_deletion_count_equals_cache_current_deletion_count_for_whole_reference_closure,
             ),
     )
 }
@@ -691,7 +694,9 @@ signature_rows_for_dropped_store_path_cache_pairs(cache, hash) AS MATERIALIZED (
 )
 SELECT signable.cached_path, signable.hash, signable.package, signable.nar_hash, signable.nar_size,
        signable."references", signable.cache, signable.cached_path_has_signature,
-       signable.all_referenced_paths_are_stored AND referencing.hash IS NULL AS all_referenced_paths_are_stored
+       CASE WHEN referencing.hash IS NULL
+            THEN signable.reference_closure_established_at_cache_deletion_count
+       END AS reference_closure_established_at_cache_deletion_count
 FROM signable_rows_for_blocked_dependents signable
 LEFT JOIN signature_rows_for_dropped_store_path_cache_pairs referencing
   ON referencing.cache = signable.cache AND referencing.hash = signable.hash
@@ -710,7 +715,7 @@ ORDER BY signable.cache, signable.hash
                 "claim_subscription"
             ),
             sql_prefix_for_project_readable_store_path_content_variant_with_nar_hash_and_nar_size,
-            cached_path_signature_is_signed_and_references_are_claimed,
+            cached_path_signature_has_signature_and_current_deletion_count,
         ),
     ),
         params = [DerivationIds(64)],
@@ -772,43 +777,29 @@ pub fn build_sql_for_content_variants_needing_signature_from_store_hash_project_
         seeds,
         &signing_subscription("claim_subscription"),
         candidate_content_variant_is_in_target_cache_or_trusted_by_project,
-        cached_path_signature_is_signed_and_references_are_claimed,
+        cached_path_signature_has_signature_and_current_deletion_count,
     )
 }
 
-fn cached_path_signature_is_signed_and_references_are_claimed(alias: &str) -> String {
-    format!("{alias}.signature IS NOT NULL AND {alias}.references_are_claimed")
-}
-
-fn cached_path_signature_references_are_claimed_condition(alias: &str) -> String {
-    format!("{alias}.references_are_claimed")
-}
-
-pub fn sql_text_clearing_references_are_claimed_for_cached_path_signature_rows_in_same_cache_referencing_deleted_signature_rows(
-    deleted_cached_path_signatures: &str,
+fn cached_path_signature_has_signature_and_current_deletion_count(
+    alias: &str,
+    current_deletion_count: &str,
 ) -> String {
     format!(
-        r#"UPDATE cached_path_signature cached_path_signature_row_referencing_deleted_path
-    SET references_are_claimed = false
-    WHERE cached_path_signature_row_referencing_deleted_path.id = ANY(ARRAY(
-        SELECT claimed_cached_path_referencing_deleted.id
-        FROM {deleted_cached_path_signatures} deleted
-        CROSS JOIN LATERAL (
-            SELECT cached_path_referencing_deleted_store_path.id
-            FROM cached_path cached_path_referencing_deleted_store_path
-            WHERE string_to_array(cached_path_referencing_deleted_store_path."references", ' ')
-                  && ARRAY[deleted.hash || '-' || deleted.package, '/nix/store/' || deleted.hash || '-' || deleted.package]
-            OFFSET 0) cached_path_referencing_deleted_store_path
-        CROSS JOIN LATERAL (
-            SELECT claimed_cached_path_referencing_deleted.id
-            FROM cached_path_signature claimed_cached_path_referencing_deleted
-            WHERE claimed_cached_path_referencing_deleted.cached_path = cached_path_referencing_deleted_store_path.id
-              AND claimed_cached_path_referencing_deleted.cache = deleted.cache
-              AND claimed_cached_path_referencing_deleted.references_are_claimed
-            OFFSET 0) claimed_cached_path_referencing_deleted
-        WHERE NOT EXISTS (SELECT 1 FROM {deleted_cached_path_signatures} also_deleted
-                          WHERE also_deleted.id = claimed_cached_path_referencing_deleted.id)))
-      AND cached_path_signature_row_referencing_deleted_path.references_are_claimed"#
+        "{alias}.signature IS NOT NULL AND {}",
+        cached_path_signature_stored_deletion_count_equals_cache_current_deletion_count_for_whole_reference_closure(
+            alias,
+            current_deletion_count
+        )
+    )
+}
+
+fn cached_path_signature_stored_deletion_count_equals_cache_current_deletion_count_for_whole_reference_closure(
+    alias: &str,
+    current_deletion_count: &str,
+) -> String {
+    format!(
+        "{alias}.reference_closure_established_at_cache_deletion_count = {current_deletion_count}"
     )
 }
 
@@ -816,15 +807,18 @@ fn build_recursive_sql_for_content_variant_to_sign_with_reference_closure_per_ca
     seeds: &str,
     target_subscription: &str,
     eligible: fn(&str, &str) -> String,
-    reference_walk_stop_condition_from_alias: fn(&str) -> String,
+    reference_walk_stop_condition: fn(&str, &str) -> String,
 ) -> String {
     format!(
         r#"
 WITH RECURSIVE claim_seed(hash, project) AS ({seeds}),
 claim_target AS (
-    SELECT DISTINCT claim_seed.hash, claim_seed.project, claim_subscription.cache
+    SELECT DISTINCT claim_seed.hash, claim_seed.project, claim_subscription.cache,
+           coalesce(target_cache_deletion_count.deleted_cached_path_signature_count, 0) AS target_cache_deletion_count_snapshot
     FROM claim_seed
     JOIN project_cache claim_subscription ON claim_subscription.project = claim_seed.project
+    LEFT JOIN binary_cache_deleted_path_signature_count target_cache_deletion_count
+      ON target_cache_deletion_count.cache = claim_subscription.cache
     WHERE {target_subscription}
       AND NOT EXISTS (
           SELECT 1 FROM cached_path_signature target_cache_cached_path_signature_ending_walk_at_seed_store_path_hash
@@ -832,15 +826,15 @@ claim_target AS (
             AND target_cache_cached_path_signature_ending_walk_at_seed_store_path_hash.store_path_hash = claim_seed.hash
             AND {seed_stop})
 ),
-claim(cached_path, project, cache) AS (
-    SELECT chosen.id, claim_target.project, claim_target.cache
+claim(cached_path, project, cache, target_cache_deletion_count_snapshot) AS (
+    SELECT chosen.id, claim_target.project, claim_target.cache, claim_target.target_cache_deletion_count_snapshot
     FROM claim_target
     CROSS JOIN LATERAL ({seed_choice}) chosen
     UNION
-    SELECT chosen.id, reference.project, reference.cache
+    SELECT chosen.id, reference.project, reference.cache, reference.target_cache_deletion_count_snapshot
     FROM (
         SELECT DISTINCT {STORE_PATH_HASH_FROM_REFERENCE_TOKEN_SQL_EXPRESSION} AS hash,
-               claim.project, claim.cache
+               claim.project, claim.cache, claim.target_cache_deletion_count_snapshot
         FROM claim
         JOIN cached_path claimed ON claimed.id = claim.cached_path
         CROSS JOIN LATERAL unnest(string_to_array(claimed."references", ' ')) r(token)
@@ -855,7 +849,7 @@ claim(cached_path, project, cache) AS (
 selected_content_variant_for_signing AS MATERIALIZED (
     SELECT DISTINCT ON (claim.cache, cp.hash)
            cp.id AS cached_path, cp.hash, cp.package, cp.nar_hash, cp.nar_size, cp."references",
-           claim.cache,
+           claim.cache, claim.target_cache_deletion_count_snapshot,
            coalesce(s.signature IS NOT NULL, false) AS cached_path_has_signature
     FROM claim
     JOIN cached_path cp ON cp.id = claim.cached_path
@@ -882,15 +876,26 @@ selected_content_variant_for_signing_with_unstored_reference(cache, hash) AS MAT
       AND NOT EXISTS (SELECT 1 FROM cached_path_signature referenced_signature
                       WHERE referenced_signature.cache = reference.cache
                         AND referenced_signature.store_path_hash = reference.referenced_hash)
+),
+cache_store_paths_with_unstored_path_in_reference_closure(cache, hash) AS (
+    SELECT directly_unstored.cache, directly_unstored.hash
+    FROM selected_content_variant_for_signing_with_unstored_reference directly_unstored
+    UNION
+    SELECT reference.cache, reference.hash
+    FROM references_of_selected_content_variant_for_signing reference
+    JOIN cache_store_paths_with_unstored_path_in_reference_closure unstored_below
+      ON unstored_below.cache = reference.cache AND unstored_below.hash = reference.referenced_hash
 )
 SELECT selected_content_variant_for_signing.cached_path, selected_content_variant_for_signing.hash,
        selected_content_variant_for_signing.package, selected_content_variant_for_signing.nar_hash,
        selected_content_variant_for_signing.nar_size, selected_content_variant_for_signing."references",
        selected_content_variant_for_signing.cache,
        selected_content_variant_for_signing.cached_path_has_signature,
-       unstored.hash IS NULL AS all_referenced_paths_are_stored
+       CASE WHEN unstored.hash IS NULL
+            THEN selected_content_variant_for_signing.target_cache_deletion_count_snapshot
+       END AS reference_closure_established_at_cache_deletion_count
 FROM selected_content_variant_for_signing
-LEFT JOIN selected_content_variant_for_signing_with_unstored_reference unstored
+LEFT JOIN cache_store_paths_with_unstored_path_in_reference_closure unstored
   ON unstored.cache = selected_content_variant_for_signing.cache
  AND unstored.hash = selected_content_variant_for_signing.hash
 ORDER BY selected_content_variant_for_signing.cache, selected_content_variant_for_signing.hash
@@ -908,10 +913,11 @@ ORDER BY selected_content_variant_for_signing.cache, selected_content_variant_fo
             eligible,
         ),
         rank = variant_rank("cp", "claim.cache"),
-        seed_stop = reference_walk_stop_condition_from_alias(
-            "target_cache_cached_path_signature_ending_walk_at_seed_store_path_hash"
+        seed_stop = reference_walk_stop_condition(
+            "target_cache_cached_path_signature_ending_walk_at_seed_store_path_hash",
+            "coalesce(target_cache_deletion_count.deleted_cached_path_signature_count, 0)",
         ),
-        row_stop = reference_walk_stop_condition_from_alias("s"),
+        row_stop = reference_walk_stop_condition("s", "claim.target_cache_deletion_count_snapshot"),
     )
 }
 
@@ -2136,20 +2142,23 @@ pub(crate) mod tests {
             r#"
 WITH RECURSIVE claim_seed(hash, project) AS ({seeds}),
 claim_target AS (
-    SELECT DISTINCT claim_seed.hash, claim_seed.project, claim_subscription.cache
+    SELECT DISTINCT claim_seed.hash, claim_seed.project, claim_subscription.cache,
+           coalesce(target_cache_deletion_count.deleted_cached_path_signature_count, 0) AS target_cache_deletion_count_snapshot
     FROM claim_seed
     JOIN project_cache claim_subscription ON claim_subscription.project = claim_seed.project
+    LEFT JOIN binary_cache_deleted_path_signature_count target_cache_deletion_count
+      ON target_cache_deletion_count.cache = claim_subscription.cache
     WHERE {target_subscription}
 ),
-claim(cached_path, project, cache) AS (
-    SELECT chosen.id, claim_target.project, claim_target.cache
+claim(cached_path, project, cache, target_cache_deletion_count_snapshot) AS (
+    SELECT chosen.id, claim_target.project, claim_target.cache, claim_target.target_cache_deletion_count_snapshot
     FROM claim_target
     CROSS JOIN LATERAL ({seed_choice}) chosen
     UNION
-    SELECT chosen.id, reference.project, reference.cache
+    SELECT chosen.id, reference.project, reference.cache, reference.target_cache_deletion_count_snapshot
     FROM (
         SELECT DISTINCT {STORE_PATH_HASH_FROM_REFERENCE_TOKEN_SQL_EXPRESSION} AS hash,
-               claim.project, claim.cache
+               claim.project, claim.cache, claim.target_cache_deletion_count_snapshot
         FROM claim
         JOIN cached_path claimed ON claimed.id = claim.cached_path
         CROSS JOIN LATERAL unnest(string_to_array(claimed."references", ' ')) r(token)
@@ -2157,19 +2166,21 @@ claim(cached_path, project, cache) AS (
           AND NOT EXISTS (
               SELECT 1 FROM cached_path_signature s
               WHERE s.cached_path = claimed.id AND s.cache = claim.cache
-                AND s.signature IS NOT NULL AND s.references_are_claimed)
+                AND s.signature IS NOT NULL
+                AND s.reference_closure_established_at_cache_deletion_count = claim.target_cache_deletion_count_snapshot)
     ) reference
     CROSS JOIN LATERAL ({reference_choice}) chosen
 ),
 selected_content_variant_for_signing AS MATERIALIZED (
     SELECT DISTINCT ON (claim.cache, cp.hash)
            cp.id AS cached_path, cp.hash, cp.package, cp.nar_hash, cp.nar_size, cp."references",
-           claim.cache,
+           claim.cache, claim.target_cache_deletion_count_snapshot,
            coalesce(s.signature IS NOT NULL, false) AS cached_path_has_signature
     FROM claim
     JOIN cached_path cp ON cp.id = claim.cached_path
     LEFT JOIN cached_path_signature s ON s.cached_path = cp.id AND s.cache = claim.cache
-    WHERE NOT coalesce(s.signature IS NOT NULL AND s.references_are_claimed, false)
+    WHERE NOT coalesce(s.signature IS NOT NULL
+                       AND s.reference_closure_established_at_cache_deletion_count = claim.target_cache_deletion_count_snapshot, false)
     ORDER BY claim.cache, cp.hash, {rank}
 ),
 store_paths_to_claim(cache, hash) AS MATERIALIZED (
@@ -2191,15 +2202,26 @@ selected_content_variant_for_signing_with_unstored_reference(cache, hash) AS MAT
       AND NOT EXISTS (SELECT 1 FROM cached_path_signature referenced_signature
                       WHERE referenced_signature.cache = reference.cache
                         AND referenced_signature.store_path_hash = reference.referenced_hash)
+),
+cache_store_paths_with_unstored_path_in_reference_closure(cache, hash) AS (
+    SELECT directly_unstored.cache, directly_unstored.hash
+    FROM selected_content_variant_for_signing_with_unstored_reference directly_unstored
+    UNION
+    SELECT reference.cache, reference.hash
+    FROM references_of_selected_content_variant_for_signing reference
+    JOIN cache_store_paths_with_unstored_path_in_reference_closure unstored_below
+      ON unstored_below.cache = reference.cache AND unstored_below.hash = reference.referenced_hash
 )
 SELECT selected_content_variant_for_signing.cached_path, selected_content_variant_for_signing.hash,
        selected_content_variant_for_signing.package, selected_content_variant_for_signing.nar_hash,
        selected_content_variant_for_signing.nar_size, selected_content_variant_for_signing."references",
        selected_content_variant_for_signing.cache,
        selected_content_variant_for_signing.cached_path_has_signature,
-       unstored.hash IS NULL AS all_referenced_paths_are_stored
+       CASE WHEN unstored.hash IS NULL
+            THEN selected_content_variant_for_signing.target_cache_deletion_count_snapshot
+       END AS reference_closure_established_at_cache_deletion_count
 FROM selected_content_variant_for_signing
-LEFT JOIN selected_content_variant_for_signing_with_unstored_reference unstored
+LEFT JOIN cache_store_paths_with_unstored_path_in_reference_closure unstored
   ON unstored.cache = selected_content_variant_for_signing.cache
  AND unstored.hash = selected_content_variant_for_signing.hash
 ORDER BY selected_content_variant_for_signing.cache, selected_content_variant_for_signing.hash
@@ -2286,7 +2308,7 @@ ORDER BY selected_content_variant_for_signing.cache, selected_content_variant_fo
         let cached_path_signature_rows = query_single_text_column_values_sorted_in_transaction(
             &transaction,
             "SELECT concat_ws('|', cache, cached_path, store_path_hash, \
-             signature IS NULL, references_are_claimed) AS row FROM cached_path_signature"
+             signature IS NULL, reference_closure_established_at_cache_deletion_count IS NOT NULL) AS row FROM cached_path_signature"
                 .to_owned(),
             Vec::new(),
         )
@@ -2320,14 +2342,14 @@ ORDER BY selected_content_variant_for_signing.cache, selected_content_variant_fo
     fn wrap_insert_statement_to_return_cached_path_signature_row_text(insert: &str) -> String {
         format!(
             "{insert} RETURNING concat_ws('|', cache, cached_path, store_path_hash, \
-             signature IS NULL, references_are_claimed) AS row"
+             signature IS NULL, reference_closure_established_at_cache_deletion_count IS NOT NULL) AS row"
         )
     }
 
     fn wrap_signing_select_to_return_one_text_per_row(select: &str) -> String {
         format!(
             "SELECT concat_ws('|', signed.cached_path, signed.hash, signed.cache, \
-             signed.cached_path_has_signature, signed.all_referenced_paths_are_stored) AS row \
+             signed.cached_path_has_signature, signed.reference_closure_established_at_cache_deletion_count IS NOT NULL) AS row \
              FROM ({select}) signed ORDER BY 1"
         )
     }
@@ -2346,9 +2368,10 @@ ORDER BY selected_content_variant_for_signing.cache, selected_content_variant_fo
         const THIRD_REFERENCED_STORED_PATH_HASH: &str = "88888888888888888888888888888888";
         let make_cached_path_signature_insert_sql_for_stored_copy =
             |hash: &str, package: &str, signature: &str, claimed: bool| {
+                let claimed_at_deletion_count = if claimed { "0" } else { "NULL" };
                 format!(
-                    "INSERT INTO cached_path_signature (id, cached_path, cache, fetch_count, created_at, signature, references_are_claimed) \
-                     SELECT uuidv7(), cp.id, (SELECT id FROM cache), 0, now(), {signature}, {claimed} \
+                    "INSERT INTO cached_path_signature (id, cached_path, cache, fetch_count, created_at, signature, reference_closure_established_at_cache_deletion_count) \
+                     SELECT uuidv7(), cp.id, (SELECT id FROM cache), 0, now(), {signature}, {claimed_at_deletion_count} \
                      FROM cached_path cp WHERE cp.hash = '{hash}' AND cp.package = '{package}';"
                 )
             };
@@ -2366,7 +2389,7 @@ ORDER BY selected_content_variant_for_signing.cache, selected_content_variant_fo
                 &[],
             ),
             (
-                "Dependency outputs carry signatures. The `references_are_claimed` column is false.",
+                "Dependency outputs have signatures. Their `reference_closure_established_at_cache_deletion_count` columns are NULL.",
                 false,
                 make_cached_path_signature_insert_sql_for_stored_copy(
                     DEPENDENCY_OUTPUT_STORE_PATH_HASH,
@@ -2426,7 +2449,7 @@ ORDER BY selected_content_variant_for_signing.cache, selected_content_variant_fo
                 &[],
             ),
             (
-                "The dependency output and its reference both have unsigned rows with `references_are_claimed`. The reference target is a third path. `references_are_claimed` is absent from the unsigned row of the third path.",
+                "Both the dependency output and its reference have unsigned rows with `reference_closure_established_at_cache_deletion_count` set. That reference points to a third path. The unsigned row of the third path has NULL in that column.",
                 false,
                 format!(
                     "INSERT INTO cached_path (id, hash, nar_object_storage_key, package, file_hash, nar_hash, nar_size, created_at) \
@@ -2458,8 +2481,8 @@ ORDER BY selected_content_variant_for_signing.cache, selected_content_variant_fo
                 "Two signing caches: only the second cache can sign the dependency output with references claimed. No row for it in the first cache",
                 true,
                 format!(
-                    "INSERT INTO cached_path_signature (id, cached_path, cache, fetch_count, created_at, signature, references_are_claimed) \
-                     SELECT uuidv7(), cp.id, '{second_cache_id_for_output_signing_with_private_key}', 0, now(), 'signature', true \
+                    "INSERT INTO cached_path_signature (id, cached_path, cache, fetch_count, created_at, signature, reference_closure_established_at_cache_deletion_count) \
+                     SELECT uuidv7(), cp.id, '{second_cache_id_for_output_signing_with_private_key}', 0, now(), 'signature', 0 \
                      FROM cached_path cp WHERE cp.hash = '{DEPENDENCY_OUTPUT_STORE_PATH_HASH}' AND cp.package = 'dependency';"
                 ),
                 &[],
@@ -2543,7 +2566,7 @@ ORDER BY selected_content_variant_for_signing.cache, selected_content_variant_fo
                                 &seeds,
                                 &signing_subscription("claim_subscription"),
                                 candidate_content_variant_is_in_target_cache_or_trusted_by_project,
-                                cached_path_signature_references_are_claimed_condition,
+                                cached_path_signature_stored_deletion_count_equals_cache_current_deletion_count_for_whole_reference_closure,
                             ),
                             &build_recursive_sql_before_skipping_already_signed_and_claimed_pairs(
                                 &seeds,
@@ -2578,7 +2601,7 @@ ORDER BY selected_content_variant_for_signing.cache, selected_content_variant_fo
                                 &seeds,
                                 &target_subscription,
                                 sql_prefix_for_project_readable_store_path_content_variant_with_nar_hash_and_nar_size,
-                                cached_path_signature_is_signed_and_references_are_claimed,
+                                cached_path_signature_has_signature_and_current_deletion_count,
                             ),
                             &build_recursive_sql_before_skipping_already_signed_and_claimed_pairs(
                                 &seeds,
@@ -2632,7 +2655,7 @@ ORDER BY selected_content_variant_for_signing.cache, selected_content_variant_fo
                 assert_eq!(
                     expected_cached_path_signature_rows_with_references_unclaimed_for_unreached_hashes,
                     new_cached_path_signature_rows,
-                    "After the old statement and the new statement in state {fixture_state_label}, the cached_path_signature rows match. One exception: rows that never appear in the new walk keep references_are_claimed false."
+                    "The rows of cached_path_signature match after the old statement and the new statement in state {fixture_state_label}. One exception. Rows that the new traversal never touched keep reference_closure_established_at_cache_deletion_count as NULL."
                 );
                 old_statement_row_count += old_statement_returned_rows_as_text.len();
             }
@@ -2640,7 +2663,7 @@ ORDER BY selected_content_variant_for_signing.cache, selected_content_variant_fo
                 old_statement_row_count
                     + cached_path_signature_rows_claimed_only_by_old_full_walk_count
                     > 0,
-                "State {fixture_state_label} must contain a row from the old statement, or a row that only the old statement can mark with references_are_claimed."
+                "Include rows from an old statement in state {fixture_state_label}, or rows where only an old statement can set reference_closure_established_at_cache_deletion_count."
             );
             fixture.db.finish().await;
         }
@@ -2750,7 +2773,7 @@ ORDER BY selected_content_variant_for_signing.cache, selected_content_variant_fo
         fixture
             .db
             .texts(&format!(
-                "SELECT concat_ws('|', store_path_hash, references_are_claimed) \
+                "SELECT concat_ws('|', store_path_hash, reference_closure_established_at_cache_deletion_count IS NOT NULL) \
                  FROM cached_path_signature WHERE cache = '{}' ORDER BY 1",
                 fixture.cache
             ))
@@ -2766,7 +2789,7 @@ ORDER BY selected_content_variant_for_signing.cache, selected_content_variant_fo
     async fn snapshot_all_cached_path_signature_rows(db: &TestDatabase) -> Vec<String> {
         db.texts(
             "SELECT concat_ws('|', id, cache, cached_path, encode(signature, 'hex'), \
-             references_are_claimed, fetch_count, created_at) FROM cached_path_signature ORDER BY 1",
+             reference_closure_established_at_cache_deletion_count, fetch_count, created_at) FROM cached_path_signature ORDER BY 1",
         )
         .await
     }
@@ -2821,12 +2844,12 @@ ORDER BY selected_content_variant_for_signing.cache, selected_content_variant_fo
                 (0, 0.0),
                 rows_after_first_push
             ),
-            "The first push of the closure root inserted one unsigned placeholder row per path. Each row had references_are_claimed set. The identical second push inserted nothing and changed no row. Its reference walk generated no rows."
+            "The first push of the closure root wrote one unsigned placeholder row per path. Each row had reference_closure_established_at_cache_deletion_count set. An identical second push inserted nothing. No row changed. That reference walk returned no rows."
         );
     }
 
     #[tokio::test]
-    async fn push_path_with_unstored_reference_does_not_set_references_are_claimed_and_next_push_after_storing_reference_sets_it()
+    async fn push_path_with_unstored_reference_leaves_deletion_count_null_and_next_push_after_storing_reference_sets_it()
      {
         let [path, reference, hidden] = ["a", "b", "c"].map(|c| c.repeat(32));
         let fixture = build_database_with_project_signing_cache_and_cached_paths(&[
@@ -2882,7 +2905,133 @@ ORDER BY selected_content_variant_for_signing.cache, selected_content_variant_fo
                 vec![(path.clone(), false), (reference.clone(), true)],
                 vec![(path, true), (reference, true)]
             ),
-            "`references_are_claimed` can stay false on a path with references that are not stored. A push of that reference can add one row for it after storage of that reference. A later push of that path can set `references_are_claimed`."
+            "``reference_closure_established_at_cache_deletion_count`` can stay NULL for paths that don't store the reference. Pushes of that reference write one row for it on storage of the reference. Later pushes of that path set that column."
+        );
+    }
+
+    #[tokio::test]
+    async fn pushing_path_referencing_chain_recreates_deleted_leaf_cache_claim_row() {
+        let [top, middle, leaf, new_path] = ["f", "g", "h", "i"].map(|c| c.repeat(32));
+        let fixture = build_database_with_project_signing_cache_and_cached_paths(&[
+            (top.clone(), vec![middle.clone()]),
+            (middle.clone(), vec![leaf.clone()]),
+            (leaf.clone(), vec![]),
+            (new_path.clone(), vec![top.clone()]),
+        ])
+        .await;
+        let (first_inserted, _) =
+            explain_push_placeholder_insert_row_and_claim_cte_counts_for_project_store_path_hashes(
+                &fixture,
+                &[&top],
+            )
+            .await;
+        fixture
+            .db
+            .execute(&format!(
+                "DELETE FROM cached_path_signature WHERE store_path_hash = '{leaf}'"
+            ))
+            .await;
+        let (second_inserted, _) =
+            explain_push_placeholder_insert_row_and_claim_cte_counts_for_project_store_path_hashes(
+                &fixture,
+                &[&new_path],
+            )
+            .await;
+        let flags =
+            read_sorted_cached_path_signature_store_path_reference_claims_for_cache(&fixture).await;
+        let third =
+            explain_push_placeholder_insert_row_and_claim_cte_counts_for_project_store_path_hashes(
+                &fixture,
+                &[&new_path],
+            )
+            .await;
+        fixture.db.finish().await;
+        assert_eq!(
+            (first_inserted, second_inserted, flags, third),
+            (
+                3,
+                2,
+                vec![(top, true), (middle, true), (leaf, true), (new_path, true)],
+                (0, 0.0)
+            ),
+            "The first push of A inserted rows for A, B and C. Deleting the row for C raised the cache deletion count. A push of N with a reference to A then walked A and B again and recreated the row for C. The push then set reference_closure_established_at_cache_deletion_count on all rows. The next identical push walked nothing."
+        );
+    }
+
+    #[tokio::test]
+    async fn push_with_missing_content_in_reference_chain_does_not_store_deletion_count_until_content_is_stored()
+     {
+        let [top, middle, leaf, hidden] = ["p", "q", "r", "s"].map(|c| c.repeat(32));
+        let fixture = build_database_with_project_signing_cache_and_cached_paths(&[
+            (top.clone(), vec![middle.clone()]),
+            (middle.clone(), vec![leaf.clone()]),
+            (leaf.clone(), vec![]),
+        ])
+        .await;
+        fixture
+            .db
+            .execute(&format!(
+                "UPDATE cached_path SET hash = '{hidden}' WHERE hash = '{leaf}'"
+            ))
+            .await;
+        let (inserted_while_leaf_unstored, _) =
+            explain_push_placeholder_insert_row_and_claim_cte_counts_for_project_store_path_hashes(
+                &fixture,
+                &[&top],
+            )
+            .await;
+        let flags_while_leaf_unstored =
+            read_sorted_cached_path_signature_store_path_reference_claims_for_cache(&fixture).await;
+        fixture
+            .db
+            .execute(&format!(
+                "UPDATE cached_path SET hash = '{leaf}' WHERE hash = '{hidden}'"
+            ))
+            .await;
+        explain_push_placeholder_insert_row_and_claim_cte_counts_for_project_store_path_hashes(
+            &fixture,
+            &[&leaf],
+        )
+        .await;
+        let flags_after_leaf_push =
+            read_sorted_cached_path_signature_store_path_reference_claims_for_cache(&fixture).await;
+        let (top_push_inserted, top_push_walked) =
+            explain_push_placeholder_insert_row_and_claim_cte_counts_for_project_store_path_hashes(
+                &fixture,
+                &[&top],
+            )
+            .await;
+        let flags_after_top_push =
+            read_sorted_cached_path_signature_store_path_reference_claims_for_cache(&fixture).await;
+        let repeated_top_push =
+            explain_push_placeholder_insert_row_and_claim_cte_counts_for_project_store_path_hashes(
+                &fixture,
+                &[&top],
+            )
+            .await;
+        fixture.db.finish().await;
+        assert_eq!(
+            (
+                inserted_while_leaf_unstored,
+                flags_while_leaf_unstored,
+                flags_after_leaf_push,
+                (top_push_inserted, top_push_walked > 0.0),
+                flags_after_top_push,
+                repeated_top_push
+            ),
+            (
+                2,
+                vec![(top.clone(), false), (middle.clone(), false)],
+                vec![
+                    (top.clone(), false),
+                    (middle.clone(), false),
+                    (leaf.clone(), true)
+                ],
+                (0, true),
+                vec![(top, true), (middle, true), (leaf, true)],
+                (0, 0.0)
+            ),
+            "C was not stored. A push of A inserted rows A and B. C was absent under B, so both rows kept `reference_closure_established_at_cache_deletion_count` as NULL. C was stored. A push of C set that column only for C. A later push of A walked A and B again. That push set the column on both. An identical push after that walked nothing."
         );
     }
 
@@ -2940,7 +3089,7 @@ ORDER BY selected_content_variant_for_signing.cache, selected_content_variant_fo
                 (0, 0.0),
                 vec!["01".to_owned()]
             ),
-            "NAR commits leave a signed row where references_are_claimed is false. The next push can walk that row once, insert its references, flag both rows and keep the signature. Later pushes walk nothing."
+            "NAR commits leave a signed row where `reference_closure_established_at_cache_deletion_count` is NULL. The next push can scan that row once, insert its references, set that column on both rows and keep the signature. Later pushes scan nothing."
         );
     }
 
@@ -3222,9 +3371,9 @@ ORDER BY selected_content_variant_for_signing.cache, selected_content_variant_fo
     }
 
     #[derive(Debug, PartialEq, Eq, FromQueryResult)]
-    struct StorePathHashAndAllReferencedPathsAreStoredRow {
+    struct StorePathHashAndReferenceClosureStoredAtCacheDeletionCountRow {
         hash: String,
-        all_referenced_paths_are_stored: bool,
+        reference_closure_established_at_cache_deletion_count: Option<i64>,
     }
 
     #[tokio::test]
@@ -3253,7 +3402,7 @@ ORDER BY selected_content_variant_for_signing.cache, selected_content_variant_fo
                 .into_inner(),
         ];
         let mut sorted_blocked_dependent_signing_rows =
-            StorePathHashAndAllReferencedPathsAreStoredRow::find_by_statement(
+            StorePathHashAndReferenceClosureStoredAtCacheDeletionCountRow::find_by_statement(
                 SQL_SELECT_STORED_CONTENT_VARIANTS_WITH_REFERENCE_CLOSURE_FOR_PROJECT_CACHE_SIGNING
                     .bind([parents.into()]),
             )
@@ -3272,16 +3421,16 @@ ORDER BY selected_content_variant_for_signing.cache, selected_content_variant_fo
         assert_eq!(
             sorted_blocked_dependent_signing_rows,
             vec![
-                StorePathHashAndAllReferencedPathsAreStoredRow {
+                StorePathHashAndReferenceClosureStoredAtCacheDeletionCountRow {
                     hash: DEPENDENCY_OUTPUT_STORE_PATH_HASH.to_owned(),
-                    all_referenced_paths_are_stored: true,
+                    reference_closure_established_at_cache_deletion_count: None,
                 },
-                StorePathHashAndAllReferencedPathsAreStoredRow {
+                StorePathHashAndReferenceClosureStoredAtCacheDeletionCountRow {
                     hash: DEPENDENCY_OUTPUT_REFERENCE_STORE_PATH_HASH.to_owned(),
-                    all_referenced_paths_are_stored: false,
+                    reference_closure_established_at_cache_deletion_count: None,
                 },
             ],
-            "The result returned the signed reference copy with all_referenced_paths_are_stored = false. The result left out the reference copy of the signed reference copy, because a path in that copy can never receive a signature."
+            "The result returned the dependency output and the signed reference copy. Both show reference_closure_established_at_cache_deletion_count = NULL because one path below the signed reference copy is absent from the store. The result omitted the path that the signed reference copy referred to. That path can never receive a signature."
         );
     }
 
@@ -3410,28 +3559,29 @@ ORDER BY selected_content_variant_for_signing.cache, selected_content_variant_fo
             ))
             .await;
         let parents = vec![fixture.parent.into_inner()];
-        let mut rows = StorePathHashAndAllReferencedPathsAreStoredRow::find_by_statement(
-            SQL_SELECT_STORED_CONTENT_VARIANTS_WITH_REFERENCE_CLOSURE_FOR_PROJECT_CACHE_SIGNING
-                .bind([parents.into()]),
-        )
-        .all(&fixture.db.connection())
-        .await
-        .expect("Query the variants that the server can sign.");
+        let mut rows =
+            StorePathHashAndReferenceClosureStoredAtCacheDeletionCountRow::find_by_statement(
+                SQL_SELECT_STORED_CONTENT_VARIANTS_WITH_REFERENCE_CLOSURE_FOR_PROJECT_CACHE_SIGNING
+                    .bind([parents.into()]),
+            )
+            .all(&fixture.db.connection())
+            .await
+            .expect("Query the variants that the server can sign.");
         fixture.db.finish().await;
         rows.sort_by(|a, b| a.hash.cmp(&b.hash));
         assert_eq!(
             rows,
             vec![
-                StorePathHashAndAllReferencedPathsAreStoredRow {
+                StorePathHashAndReferenceClosureStoredAtCacheDeletionCountRow {
                     hash: DEPENDENCY_OUTPUT_STORE_PATH_HASH.to_owned(),
-                    all_referenced_paths_are_stored: true,
+                    reference_closure_established_at_cache_deletion_count: None,
                 },
-                StorePathHashAndAllReferencedPathsAreStoredRow {
+                StorePathHashAndReferenceClosureStoredAtCacheDeletionCountRow {
                     hash: DEPENDENCY_OUTPUT_REFERENCE_STORE_PATH_HASH.to_owned(),
-                    all_referenced_paths_are_stored: false,
+                    reference_closure_established_at_cache_deletion_count: None,
                 },
             ],
-            "A signed reference copy came back with all_referenced_paths_are_stored = false. The result omitted the worker-built reference. That copy referred to an upload in a cache outside the read path of the waiting project."
+            "Dependency outputs and the signed reference copy returned with `reference_closure_established_at_cache_deletion_count = NULL`. The result did not include the worker-built reference. That reference pointed to an upload to a cache outside the read path of the waiting project."
         );
     }
 

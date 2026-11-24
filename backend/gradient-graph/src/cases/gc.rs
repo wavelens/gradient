@@ -725,7 +725,8 @@ async fn c13_pinned_claim_keeps_shared_path_until_unpinned_then_gc_retires_path(
 }
 
 #[tokio::test]
-async fn c14_unused_claim_deleted_clears_references_are_claimed_in_same_cache_only() {
+async fn c14_unused_claim_deleted_increments_only_its_cache_deletion_count_and_its_rows_stop_counting_as_established_while_other_cache_rows_still_count()
+ {
     let (e1, c1, c2) = (EvaluationId::now_v7(), CacheId::now_v7(), CacheId::now_v7());
     let case = Case::start(
         chain_done(e1)
@@ -755,7 +756,7 @@ async fn c14_unused_claim_deleted_clears_references_are_claimed_in_same_cache_on
             "UPDATE cached_path SET \"references\" = \
                  (SELECT hash || '-' || package FROM cached_path WHERE hash = '{O_OUT}') \
              WHERE hash = '{B_OUT}'; \
-             UPDATE cached_path_signature SET references_are_claimed = true"
+             UPDATE cached_path_signature SET reference_closure_established_at_cache_deletion_count = 0"
         ))
         .await
         .expect("B references O and every claim is marked");
@@ -768,26 +769,105 @@ async fn c14_unused_claim_deleted_clears_references_are_claimed_in_same_cache_on
         None,
         "after 1: claim(O_OUT, C1)"
     );
+    assert_eq!(
+        case.cache_deleted_path_signature_count(c1).await,
+        1,
+        "after 1: garbage collection counted one deletion in C1"
+    );
+    assert_eq!(
+        case.cache_deleted_path_signature_count(c2).await,
+        0,
+        "after 1: C2 lost no claim line, so its count is still 0"
+    );
     let case_ref = &case;
-    let marked = |hash, cache| async move {
+    let established = |hash, cache| async move {
         case_ref
             .signature(hash, cache)
             .await
             .expect("the claim survives")
-            .references_are_claimed
+            .reference_closure_established_at_cache_deletion_count
+            == Some(case_ref.cache_deleted_path_signature_count(cache).await)
     };
     assert!(
-        !marked(B_OUT, c1).await,
-        "B in C1 can reference the removed claim of O after step 1 and lose references_are_claimed."
+        !established(B_OUT, c1).await && !established(drv_hash(O), c1).await,
+        "after 1: B and O.drv in C1 no longer stop the walk. C1 lost the claim line."
     );
     assert!(
-        marked(B_OUT, c2).await,
-        "After 1: B in C2 retained references_are_claimed. The claim on O in C2 persisted."
-    );
-    assert!(
-        marked(drv_hash(O), c1).await,
-        "after 1: O.drv in C1 references no deleted claim and keeps references_are_claimed"
+        established(B_OUT, c2).await,
+        "after 1: B in C2 can still stop the scan, because C2 hasn't lost the claim line."
     );
     case.zero_drift("step 1").await;
+    case.finish().await;
+}
+
+#[tokio::test]
+async fn cached_path_signature_deletions_count_each_affected_cache_once_per_statement() {
+    let (e1, c1, c2) = (EvaluationId::now_v7(), CacheId::now_v7(), CacheId::now_v7());
+    let case = Case::start(
+        chain_done(e1)
+            .derivation(O)
+            .walked()
+            .probed()
+            .drv_cached()
+            .output(O_OUT)
+            .build_status(BuildStatus::Completed)
+            .cached_output(O)
+            .into_cache(c1)
+            .keyed(Case::key())
+            .into_cache(c2)
+            .keyed(Case::key()),
+    )
+    .await;
+    for hash in [O_OUT, B_OUT] {
+        for cache in [c1, c2] {
+            case.insert_cache_claim(hash, cache, None, None).await;
+        }
+    }
+    let counts = || async {
+        (
+            case.cache_deleted_path_signature_count(c1).await,
+            case.cache_deleted_path_signature_count(c2).await,
+        )
+    };
+
+    case.db
+        .execute(&format!(
+            "DELETE FROM cached_path_signature WHERE store_path_hash = '{O_OUT}' AND cache = '{c1}'"
+        ))
+        .await;
+    assert_eq!(
+        counts().await,
+        (1, 0),
+        "After 1: delete one claim row in C1 -> deletion count 1 for C1, 0 for C2."
+    );
+
+    case.db
+        .execute(&format!(
+            "DELETE FROM cached_path_signature WHERE store_path_hash IN ('{O_OUT}', '{B_OUT}')"
+        ))
+        .await;
+    assert_eq!(
+        counts().await,
+        (2, 1),
+        "After 2: one statement can delete 2 rows from C2 and 1 row from C1. Each count can increase by exactly 1."
+    );
+
+    case.insert_cache_claim(O_OUT, c2, None, None).await;
+    case.db
+        .execute(&format!("DELETE FROM cache WHERE id = '{c2}'"))
+        .await;
+    assert_eq!(
+        (
+            case.signature(O_OUT, c2).await,
+            case.db
+                .texts(&format!(
+                    "SELECT cache::text FROM binary_cache_deleted_path_signature_count WHERE cache = '{c2}'"
+                ))
+                .await
+                .len()
+        ),
+        (None, 0),
+        "After 3: deleting C2 cascaded to its claim row and removed the delete count row."
+    );
     case.finish().await;
 }

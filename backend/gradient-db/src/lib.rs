@@ -77,6 +77,8 @@ pub mod worker_registrations;
 pub mod yearly_instance_summary;
 
 #[cfg(test)]
+mod per_cache_deletion_count_migration_test;
+#[cfg(test)]
 pub(crate) mod test_ctx;
 
 pub use self::chunked::{IN_CHUNK_SIZE, fetch_in_chunks, for_each_chunk};
