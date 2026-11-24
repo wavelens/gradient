@@ -1243,8 +1243,8 @@ mod tests {
             fixture
                 .db
                 .execute(&format!(
-                    "INSERT INTO cached_path_signature (id, cached_path, cache, signature, fetch_count, created_at, references_are_claimed) \
-                     VALUES (uuidv7(), '{}', '{}', 'x'::bytea, 0, now(), true) ON CONFLICT DO NOTHING",
+                    "INSERT INTO cached_path_signature (id, cached_path, cache, signature, fetch_count, created_at, reference_closure_established_at_cache_deletion_count) \
+                     VALUES (uuidv7(), '{}', '{}', 'x'::bytea, 0, now(), 0) ON CONFLICT DO NOTHING",
                     row.cached_path, row.cache
                 ))
                 .await;

@@ -12,30 +12,10 @@ use gradient_db::caches::demotion::{
 };
 use gradient_types::events::cache;
 use gradient_types::*;
-use sea_orm::{ColumnTrait, ConnectionTrait, EntityTrait, PaginatorTrait, QueryFilter};
+use sea_orm::{ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter};
 use tracing::warn;
 
 use crate::messages::{DemoteReport, Demotion};
-
-fn delete_cached_path_signature_and_clear_references_are_claimed_sql() -> String {
-    format!(
-        "WITH deleted_cached_path_signatures AS ( \
-             DELETE FROM cached_path_signature s USING cached_path cp \
-             WHERE s.cached_path = cp.id AND s.cached_path = $1 AND s.cache = $2 \
-             RETURNING s.id, s.cache, cp.hash, cp.package), \
-         cleared AS ({clear}) \
-         SELECT count(*) AS deleted FROM deleted_cached_path_signatures",
-        clear = gradient_db::store_path_content_variant_trust::sql_text_clearing_references_are_claimed_for_cached_path_signature_rows_in_same_cache_referencing_deleted_signature_rows(
-            "deleted_cached_path_signatures"
-        ),
-    )
-}
-
-gradient_db::sql_fn! {
-    DELETE_CACHED_PATH_SIGNATURE_AND_CLEAR_REFERENCES_ARE_CLAIMED_SQL =
-        delete_cached_path_signature_and_clear_references_are_claimed_sql,
-        params = [CachedPathId, CacheId];
-}
 
 #[derive(Default)]
 pub(crate) struct DemotionReportAndNarObjectKeysToDelete {
@@ -122,11 +102,11 @@ async fn cache_claim(
         return Ok(DemotionReportAndNarObjectKeysToDelete::default());
     };
 
-    db.execute_raw(
-        DELETE_CACHED_PATH_SIGNATURE_AND_CLEAR_REFERENCES_ARE_CLAIMED_SQL
-            .bind([cached_path.id.into(), cache.into()]),
-    )
-    .await?;
+    ECachedPathSignature::delete_many()
+        .filter(CCachedPathSignature::CachedPath.eq(cached_path.id))
+        .filter(CCachedPathSignature::Cache.eq(cache))
+        .exec(db)
+        .await?;
 
     let remaining = ECachedPathSignature::find()
         .filter(CCachedPathSignature::CachedPath.eq(cached_path.id))

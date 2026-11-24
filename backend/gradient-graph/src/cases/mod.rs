@@ -316,10 +316,23 @@ impl Case {
             .await
             .expect("the seeded signature row")
             .into_active_model();
-        row.references_are_claimed = Set(true);
+        row.reference_closure_established_at_cache_deletion_count =
+            Set(Some(self.cache_deleted_path_signature_count(cache).await));
         row.update(&self.db.connection())
             .await
             .expect("the signature row is marked");
+    }
+
+    pub async fn cache_deleted_path_signature_count(&self, cache: CacheId) -> i64 {
+        self.db
+            .texts(&format!(
+                "SELECT coalesce((SELECT deleted_cached_path_signature_count \
+                 FROM binary_cache_deleted_path_signature_count WHERE cache = '{cache}'), 0)::text"
+            ))
+            .await
+            .first()
+            .and_then(|count| count.parse().ok())
+            .expect("the deletion count of the cache")
     }
 
     pub async fn insert_cache_claim(
