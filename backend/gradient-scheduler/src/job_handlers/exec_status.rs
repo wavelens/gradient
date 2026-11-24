@@ -173,7 +173,7 @@ impl Scheduler {
             exec_job_metrics::record(&self.db.worker_db, attempt, &metrics, gradient_types::now())
                 .await
         {
-            warn!(error = %e, %worker_id, %job_id, "Recording the usage window of an exec failed");
+            warn!(error = %e, %worker_id, %job_id, "recording a usage window for an exec job failed");
         }
     }
 

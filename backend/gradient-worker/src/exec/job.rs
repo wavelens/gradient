@@ -132,7 +132,7 @@ impl ExecReport for JobUpdater {
 
     async fn send_usage_window(&mut self, metrics: ExecMetrics) {
         if let Err(e) = self.send_exec_metrics(metrics).await {
-            debug!(error = %e, "Discarded usage window of exec job");
+            debug!(error = %e, "usage window for exec job dropped");
         }
     }
 
