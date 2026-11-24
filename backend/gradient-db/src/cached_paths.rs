@@ -9,12 +9,12 @@ use crate::store_path_content_variant_trust::{
     cache_trusts_content_producer_sql, reading_subscription,
 };
 use chrono::NaiveDateTime;
+pub use gradient_api_types::NarSummary;
 use gradient_types::*;
 use sea_orm::{
     ColumnTrait, Condition, ConnectionTrait, DbErr, EntityTrait, FromQueryResult, QueryFilter,
     Value,
 };
-use serde::Serialize;
 
 pub async fn signature_in_cache<C: ConnectionTrait>(
     db: &C,
@@ -235,19 +235,6 @@ impl NarOrder {
     }
 }
 
-#[derive(Debug, Serialize, FromQueryResult, utoipa::ToSchema)]
-pub struct NarSummary {
-    pub hash: String,
-    pub store_path: String,
-    pub package: String,
-    pub nar_size: Option<i64>,
-    pub file_size: Option<i64>,
-    pub created_at: NaiveDateTime,
-    pub last_fetched_at: Option<NaiveDateTime>,
-    pub pinned_at: Option<NaiveDateTime>,
-    pub pinned_by_username: Option<String>,
-}
-
 crate::sql! {
     PIN_CACHE_CLAIMS = "UPDATE cached_path_signature s \
          SET pinned_at = $1, pinned_by_user_id = $2 \
@@ -408,6 +395,18 @@ pub async fn page_in_cache<C: ConnectionTrait>(
     NarSummary::find_by_statement(NARS_LIST_SELECT.bind_built(select_sql, values))
         .all(db)
         .await
+}
+
+impl From<CacheTotals> for gradient_api_types::NarStats {
+    fn from(totals: CacheTotals) -> Self {
+        Self {
+            total_nars: totals.total_nars,
+            total_nar_size: totals.total_nar_size.unwrap_or(0),
+            total_file_size: totals.total_file_size.unwrap_or(0),
+            last_uploaded_at: totals.last_uploaded_at,
+            oldest_fetched_at: totals.oldest_fetched_at,
+        }
+    }
 }
 
 #[cfg(test)]

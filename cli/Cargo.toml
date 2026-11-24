@@ -26,8 +26,9 @@ unwrap_used                     = "deny"
 
 [workspace.dependencies]
 # Internal crates
-connector     = { path = "connector" }
-gradient-eval = { path = "../backend/gradient-eval" }
+connector          = { path = "connector" }
+gradient-api-types = { path = "../backend/gradient-api-types" }
+gradient-eval      = { path = "../backend/gradient-eval" }
 
 # Async / runtime
 futures = { version = "0.3" }
@@ -41,19 +42,13 @@ rustls               = { version = "0.23", default-features = false, features = 
 rustls-native-certs  = { version = "0.8" }
 
 # Serialization
-base64     = { version = "0.22" }
+base64     = { version = "0.23" }
 bytes      = { version = "1" }
 schemars   = { version = "1" }
 serde      = { version = "1.0", features = ["derive"] }
 serde_json = { version = "1.0" }
 toml       = { version = "1.0" }
 uuid       = { version = "1", features = ["serde"] }
-
-# Spec-driven type generation, build script of connector
-prettyplease = { version = "0.3" }
-syn          = { version = "3", features = ["full"] }
-typify       = { version = "0.8" }
-yaml_serde   = { version = "0.10" }
 
 # Nix store access, behind the `nix` feature
 harmonia-file-nar    = { git = "https://github.com/nix-community/harmonia.git", default-features = false }
@@ -77,7 +72,7 @@ anyhow        = { version = "1" }
 blake3        = { version = "1", default-features = false, features = ["std"] }
 etcetera      = { version = "0.11" }
 git2          = { version = "0.21" }
-password-auth = { version = "1.0", features = ["argon2"] }
+password-auth = { version = "2", features = ["argon2"] }
 rand          = { version = "0.10", features = ["std_rng"] }
 sha2          = { version = "0.11" }
 tempfile      = { version = "3" }
@@ -156,4 +151,4 @@ tempfile   = { workspace = true }
 wiremock   = { workspace = true }
 
 [patch.crates-io]
-nix-bindings = { git = "https://github.com/DerDennisOP/nix-bindings", branch = "feat/nix-2.35.3" }
+nix-bindings = { git = "https://github.com/DerDennisOP/nix-bindings", branch = "feat/nix-2.36.0" }

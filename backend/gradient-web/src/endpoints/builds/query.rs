@@ -18,31 +18,12 @@ use gradient_db::lookup::by_id;
 use gradient_db::scheduling::build_attempt::latest_attempt;
 use gradient_types::*;
 use gradient_util::latest::Latest;
-use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Instant;
 
 use super::BuildAccessContext;
-
-#[derive(Serialize, Deserialize, Debug, utoipa::ToSchema)]
-pub struct BuildWithOutputs {
-    pub id: BuildJobId,
-    pub evaluation: EvaluationId,
-    pub status: gradient_entity::build::BuildStatus,
-    pub derivation_path: String,
-    #[schema(value_type = String)]
-    pub architecture: gradient_entity::server::Architecture,
-    pub worker: Option<String>,
-    pub dispatched_job: Option<DispatchedJobId>,
-    pub output: HashMap<String, String>,
-    pub prioritized: bool,
-    pub ifd: bool,
-    pub created_at: chrono::NaiveDateTime,
-    pub updated_at: chrono::NaiveDateTime,
-    pub progress: Option<BuildProgress>,
-    pub entry_points: Vec<String>,
-}
+pub use gradient_api_types::BuildWithOutputs;
 
 fn running_progress(
     progress: &Latest<DerivationBuildId, BuildProgress>,

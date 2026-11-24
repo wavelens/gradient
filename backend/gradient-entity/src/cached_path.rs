@@ -68,3 +68,14 @@ pub fn join_sorted_deduplicated_references_with_spaces(references: &[String]) ->
     sorted.dedup();
     sorted.join(" ")
 }
+
+impl From<&Model> for gradient_api_types::ClosureNode {
+    fn from(path: &Model) -> Self {
+        Self {
+            id: path.hash.clone(),
+            name: path.package.clone(),
+            path: path.as_store_path().base(),
+            nar_size: Some(path.nar_size),
+        }
+    }
+}

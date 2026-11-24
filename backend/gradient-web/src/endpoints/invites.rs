@@ -5,10 +5,8 @@
  */
 
 use crate::audit::Audit;
-use crate::endpoints::caches::subscriptions::{
-    SubscriptionRequestItem, subscription_request_items,
-};
-use crate::endpoints::teams::requests::{TeamRequestItem, build_team_request_items_for_team_ids};
+use crate::endpoints::caches::subscriptions::subscription_request_items;
+use crate::endpoints::teams::requests::build_team_request_items_for_team_ids;
 use crate::error::{WebError, WebResult};
 use crate::extractors::JsonBody;
 use crate::helpers::{ok_json, role_names};
@@ -19,6 +17,9 @@ use crate::refusal::{Refusal, RefusalStatus};
 use crate::resource::Resource;
 use axum::extract::State;
 use axum::{Extension, Json};
+pub use gradient_api_types::{
+    InviteTokenRequest, PendingUserDecisionsResponse, TeamGrantRequestInboxEntry,
+};
 use gradient_core::ServerState;
 use gradient_db::WebDb;
 use gradient_db::lookup::by_ids;
@@ -27,7 +28,6 @@ use gradient_types::events::audit::Action;
 use gradient_types::permissions::CachePermission;
 use gradient_types::*;
 use sea_orm::TransactionTrait;
-use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -43,26 +43,6 @@ impl Refusal for InviteRefusal {
             Self::ExpiredInvitation => RefusalStatus::Gone,
         }
     }
-}
-
-#[derive(Serialize, Deserialize, Debug, utoipa::ToSchema)]
-pub struct InviteTokenRequest {
-    pub token: String,
-}
-
-#[derive(Serialize, utoipa::ToSchema)]
-pub struct PendingUserDecisionsResponse {
-    pub invites: Vec<InviteItem>,
-    pub subscription_requests: Vec<SubscriptionRequestItem>,
-    pub team_requests: Vec<TeamGrantRequestInboxEntry>,
-}
-
-#[derive(Serialize, utoipa::ToSchema)]
-pub struct TeamGrantRequestInboxEntry {
-    pub team: String,
-    pub team_display_name: String,
-    #[serde(flatten)]
-    pub request: TeamRequestItem,
 }
 
 #[utoipa::path(

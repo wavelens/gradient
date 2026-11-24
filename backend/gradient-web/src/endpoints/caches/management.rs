@@ -25,7 +25,7 @@ use anyhow::Context;
 use axum::Extension;
 use axum::Json;
 use axum::extract::State;
-use chrono::NaiveDateTime;
+pub use gradient_api_types::{CacheResponse, MakeCacheRequest, PatchCacheRequest};
 use gradient_core::ServerState;
 use gradient_db::access::CacheRoleAndPermissionMask;
 use gradient_entity::cache_upstream::CacheUpstreamKind;
@@ -37,97 +37,36 @@ use gradient_types::*;
 use sea_orm::ActiveValue::Set;
 use sea_orm::sea_query::Expr;
 use sea_orm::{ColumnTrait, Condition, TransactionTrait};
-use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
 
-#[derive(Serialize, Deserialize, Debug, utoipa::ToSchema)]
-pub struct MakeCacheRequest {
-    pub name: CacheName,
-    pub display_name: CacheDisplayName,
-    pub description: String,
-    pub priority: i32,
-    pub public: Option<bool>,
-    #[serde(default)]
-    pub local_priority: Option<i32>,
-    #[serde(default)]
-    pub max_storage_gb: Option<i64>,
-    #[serde(default)]
-    pub pull_through: Option<bool>,
-    #[serde(default)]
-    pub owner_team: Option<String>,
-}
-
-#[derive(Serialize, utoipa::ToSchema)]
-pub struct CacheResponse {
-    pub id: CacheId,
-    pub name: String,
-    pub display_name: String,
-    pub description: String,
-    pub active: bool,
-    pub priority: i32,
-    pub local_priority: Option<i32>,
-    pub max_storage_gb: i32,
-    pub pull_through: bool,
-    pub public_key: String,
-    pub public: bool,
-    pub created_by: UserId,
-    pub created_at: NaiveDateTime,
-    pub managed: bool,
-    pub owner_team: Option<TeamNameAndDisplayName>,
-    pub can_edit: bool,
-    pub permissions: Vec<CachePermission>,
-    pub role: Option<String>,
-}
-
-impl CacheResponse {
-    fn new(
-        cache: MCache,
-        owner_team: Option<TeamNameAndDisplayName>,
-        public_key: String,
-        access: Option<CacheRoleAndPermissionMask>,
-    ) -> Self {
-        let (role, permissions) =
-            access.map_or((None, 0), |access| (access.role, access.permissions));
-        Self {
-            owner_team,
-            id: cache.id,
-            name: cache.name,
-            display_name: cache.display_name,
-            description: cache.description,
-            active: cache.active,
-            priority: cache.priority,
-            local_priority: cache.local_priority,
-            max_storage_gb: cache.max_storage_gb,
-            pull_through: cache.pull_through,
-            public_key,
-            public: cache.public,
-            created_by: cache.created_by,
-            created_at: cache.created_at,
-            managed: cache.managed,
-            can_edit: cache_mask_grants(permissions, CachePermission::ManageCacheSettings),
-            permissions: cache_mask_to_vec(permissions),
-            role,
-        }
+fn build_cache_response_body_from_cache_row_owner_team_names_public_key_and_caller_role_permission_mask(
+    cache: MCache,
+    owner_team: Option<TeamNameAndDisplayName>,
+    public_key: String,
+    access: Option<CacheRoleAndPermissionMask>,
+) -> CacheResponse {
+    let (role, permissions) = access.map_or((None, 0), |access| (access.role, access.permissions));
+    CacheResponse {
+        owner_team,
+        id: cache.id,
+        name: cache.name,
+        display_name: cache.display_name,
+        description: cache.description,
+        active: cache.active,
+        priority: cache.priority,
+        local_priority: cache.local_priority,
+        max_storage_gb: cache.max_storage_gb,
+        pull_through: cache.pull_through,
+        public_key,
+        public: cache.public,
+        created_by: cache.created_by,
+        created_at: cache.created_at,
+        managed: cache.managed,
+        can_edit: cache_mask_grants(permissions, CachePermission::ManageCacheSettings),
+        permissions: cache_mask_to_vec(permissions),
+        role,
     }
-}
-
-#[derive(Serialize, Deserialize, Debug, utoipa::ToSchema)]
-#[serde(deny_unknown_fields)]
-pub struct PatchCacheRequest {
-    pub name: Option<CacheName>,
-    pub display_name: Option<String>,
-    pub description: Option<String>,
-    pub priority: Option<i32>,
-    pub local_priority: Option<i32>,
-    pub max_storage_gb: Option<i64>,
-    pub pull_through: Option<bool>,
-    /// Omitted fields leave the owner team unchanged. A team name can set the owner team. JSON null can clear the owner team.
-    #[serde(
-        default,
-        deserialize_with = "crate::helpers::deserialize_optional_field"
-    )]
-    pub owner_team: Option<Option<String>>,
 }
 
 fn validate_max_storage_gb(value: i64) -> WebResult<i32> {
@@ -161,7 +100,7 @@ pub async fn get_cache_name_available(
     Ok(ok_json(!exists))
 }
 
-type PaginatedCache = Paginated<MCache>;
+type PaginatedCache = Paginated<gradient_api_types::Cache>;
 
 #[utoipa::path(
     get,
@@ -178,7 +117,7 @@ pub async fn get(
     Extension(user): Extension<MUser>,
     Extension(MaybeApiKey(api_key)): Extension<MaybeApiKey>,
     Query(params): Query<PaginationParams>,
-) -> WebResult<Json<BaseResponse<Paginated<MCache>>>> {
+) -> WebResult<Json<BaseResponse<PaginatedCache>>> {
     let condition = match api_key {
         None => gradient_db::caches::visible_to_user(user.id),
         Some(ApiKeyContext {
@@ -196,7 +135,7 @@ pub async fn get(
     )
     .await?;
 
-    Ok(ok_json(listing))
+    Ok(ok_json(listing.map(gradient_api_types::Cache::from)))
 }
 
 fn sql_condition_for_caches_api_key_without_cache_pin_can_list(
@@ -341,14 +280,19 @@ pub async fn put(
     tag = "caches",
     summary = "List public caches",
     description = "Returns every public cache. Does not require authentication. Servers that run with `GRADIENT_PUBLIC_LISTING=false` return `404`.",
-    responses((status = OK, description = "Public cache list", body = Vec<MCache>), WebError)
+    responses((status = OK, description = "Public cache list", body = Vec<gradient_api_types::Cache>), WebError)
 )]
 pub async fn get_public_caches(
     state: State<Arc<ServerState>>,
-) -> WebResult<Json<BaseResponse<Vec<MCache>>>> {
+) -> WebResult<Json<BaseResponse<Vec<gradient_api_types::Cache>>>> {
     let caches = gradient_db::caches::all_public(&state.web_db).await?;
 
-    Ok(ok_json(caches))
+    Ok(ok_json(
+        caches
+            .into_iter()
+            .map(gradient_api_types::Cache::from)
+            .collect(),
+    ))
 }
 
 #[utoipa::path(
@@ -389,7 +333,7 @@ pub async fn get_cache(
         .into_values()
         .next();
 
-    Ok(ok_json(CacheResponse::new(
+    Ok(ok_json(build_cache_response_body_from_cache_row_owner_team_names_public_key_and_caller_role_permission_mask(
         cache, owner_team, public_key, access,
     )))
 }

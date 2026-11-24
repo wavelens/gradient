@@ -117,7 +117,7 @@ async fn create_returns_webhook_and_secret() {
                 name: "notify".into(),
                 url: "https://example.com/hook".into(),
                 events: vec!["build.*".into()],
-                active: None,
+                active: true,
             },
         )
         .await

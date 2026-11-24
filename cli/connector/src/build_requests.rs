@@ -89,7 +89,7 @@ impl BuildRequestsApi<'_> {
             .send_request_and_timeout_when_no_progress_for_idle_limit(req)
             .await?;
         let received: ChunkReceived = http::decode(res).await?;
-        Ok(received.received.unsigned_abs())
+        Ok(received.received)
     }
 
     pub async fn finalize_source(

@@ -1,4 +1,4 @@
-From 26e75e7b0859e4dd9251f4723f6529151f24b72d Mon Sep 17 00:00:00 2001
+From 7e7a8a0b946c824eae3b02e7f2de6b4f5e73abed Mon Sep 17 00:00:00 2001
 From: Dennis Wuitz <dennish@wuitz.de>
 Date: Mon, 26 Oct 2026 12:50:43 +0100
 Subject: [PATCH] libstore-c: expose nix_store_get_system_features
@@ -28,10 +28,10 @@ index 000000000..9bc892eea
 +
 +A new function `nix_store_get_system_features()` in `nix_api_store.h` can return a store's system features. A store can check `requiredSystemFeatures` against that list. The returned list can include extra features from enabled experimental features. One example is `recursive-nix`. `nix config show system-features` can list only the `system-features` setting. The command can omit those implied features.
 diff --git a/src/libstore-c/nix_api_store.cc b/src/libstore-c/nix_api_store.cc
-index 276164012..9842ccd32 100644
+index e6a7cf69d..c9efa579e 100644
 --- a/src/libstore-c/nix_api_store.cc
 +++ b/src/libstore-c/nix_api_store.cc
-@@ -131,6 +131,19 @@ nix_err nix_store_add_perm_root(
+@@ -132,6 +132,19 @@ nix_err nix_store_add_perm_root(
      NIXC_CATCH_ERRS
  }
  
@@ -80,10 +80,10 @@ index ebade943f..3c11edcfd 100644
   * @brief Create a `nix_derivation` from a JSON representation of that derivation.
   *
 diff --git a/src/libstore-tests/nix_api_store.cc b/src/libstore-tests/nix_api_store.cc
-index 663e008fc..ba626f5da 100644
+index 59f1104f7..1ee532bff 100644
 --- a/src/libstore-tests/nix_api_store.cc
 +++ b/src/libstore-tests/nix_api_store.cc
-@@ -184,6 +184,29 @@ TEST_F(nix_api_util_context, nix_store_open_dummy)
+@@ -192,6 +192,29 @@ TEST_F(nix_api_util_context, nix_store_open_dummy)
      nix_store_free(store);
  }
  
@@ -114,5 +114,5 @@ index 663e008fc..ba626f5da 100644
  {
      nix_libstore_init(ctx);
 -- 
-2.55.0
+2.56.0
 

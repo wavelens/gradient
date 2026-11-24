@@ -34,6 +34,7 @@ use axum::http::Method;
 use axum::response::Response;
 use axum::{Extension, Json};
 use chrono::NaiveDateTime;
+pub use gradient_api_types::{FlakeGraphNode, JobPhaseView};
 use gradient_core::ServerState;
 use gradient_db::WebDb;
 use gradient_db::lookup::by_id;
@@ -44,7 +45,7 @@ use gradient_db::metrics::resource_usage::{
 use gradient_db::scheduling::assignment_record::find_next_dispatched_job_id_for_job_key_after;
 use gradient_db::scheduling::cluster::clusters_of_assignments;
 use gradient_entity::dispatched_job::DispatchedJobKind;
-use gradient_entity::{build_attempt, dispatched_job, dispatched_job_phase, flake_output_node};
+use gradient_entity::{build_attempt, dispatched_job, dispatched_job_phase};
 use gradient_scheduler::Scheduler;
 use gradient_scheduler::jobs::PendingJobInfo;
 use gradient_types::events::{Envelope, Event, EventRx, names, worker};
@@ -514,28 +515,17 @@ impl From<build_attempt::Model> for AttemptSummary {
     }
 }
 
-#[derive(Serialize, Debug, utoipa::ToSchema)]
-pub struct JobPhaseView {
-    pub seq: i32,
-    pub parent_seq: Option<i32>,
-    pub phase: String,
-    pub start_ms: i64,
-    pub end_ms: i64,
-    pub paths: i32,
-    pub bytes: i64,
-}
-
-impl From<dispatched_job_phase::Model> for JobPhaseView {
-    fn from(phase: dispatched_job_phase::Model) -> Self {
-        Self {
-            seq: phase.seq,
-            parent_seq: phase.parent_seq,
-            phase: gradient_wire::types::JobPhase::name_of(phase.phase).into_owned(),
-            start_ms: phase.start_ms,
-            end_ms: phase.end_ms,
-            paths: phase.paths,
-            bytes: phase.bytes,
-        }
+fn job_phase_view_from_dispatched_job_phase_row(
+    phase: dispatched_job_phase::Model,
+) -> JobPhaseView {
+    JobPhaseView {
+        seq: phase.seq,
+        parent_seq: phase.parent_seq,
+        phase: gradient_wire::types::JobPhase::name_of(phase.phase).into_owned(),
+        start_ms: phase.start_ms,
+        end_ms: phase.end_ms,
+        paths: phase.paths,
+        bytes: phase.bytes,
     }
 }
 
@@ -547,7 +537,7 @@ pub(crate) async fn job_phases<C: ConnectionTrait>(
         gradient_db::worker_registrations::phases_of_dispatched_job(db, job)
             .await?
             .into_iter()
-            .map(JobPhaseView::from)
+            .map(job_phase_view_from_dispatched_job_phase_row)
             .collect(),
     )
 }
@@ -1682,33 +1672,6 @@ pub async fn get_expensive_evals_by_resource(
     Ok(ok_json(out))
 }
 
-#[derive(Serialize, utoipa::ToSchema)]
-pub struct FlakeGraphNode {
-    pub path: String,
-    pub parent: Option<String>,
-    pub name: String,
-    pub kind: String,
-    pub is_derivation: bool,
-    pub drv_path: Option<String>,
-}
-
-impl From<flake_output_node::Model> for FlakeGraphNode {
-    fn from(n: flake_output_node::Model) -> Self {
-        Self {
-            path: n.path,
-            parent: n.parent,
-            name: n.name,
-            kind: n.kind,
-            is_derivation: n.is_derivation,
-            drv_path: n.drv_path.map(|p| {
-                gradient_entity::StorePath::parse_stored(&p)
-                    .map(|sp| sp.base())
-                    .unwrap_or(p)
-            }),
-        }
-    }
-}
-
 #[utoipa::path(
     get,
     path = "/evals/{evaluation}/flake-graph",
@@ -1751,6 +1714,7 @@ pub async fn get_eval_flake_graph(
 mod tests {
     use super::*;
     use gradient_entity::dispatched_job::DispatchedJobKind;
+    use gradient_entity::flake_output_node;
     use gradient_pool::WorkerInfo;
     use gradient_scheduler::BoardActiveJob;
     use gradient_types::ids::ProjectId;

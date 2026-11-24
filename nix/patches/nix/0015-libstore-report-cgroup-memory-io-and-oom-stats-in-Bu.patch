@@ -1,4 +1,4 @@
-From eb08d42fad5b3b183c58588dbeb0086df9414535 Mon Sep 17 00:00:00 2001
+From 871ae763660d2c882e36c7ff63a4e235182d2db4 Mon Sep 17 00:00:00 2001
 From: Dennis Wuitz <dennish@wuitz.de>
 Date: Sun, 4 Oct 2026 11:04:27 +0200
 Subject: [PATCH] libstore: report cgroup memory, io and oom stats in
@@ -15,14 +15,12 @@ count of memory.events from the build cgroup next to cpu.stat.
  .../include/nix/store/build-result.hh         |  7 +++
  .../linux/build/linux-derivation-builder.cc   |  4 ++
  src/libutil-tests/linux/cgroup.cc             | 59 +++++++++++++++++++
- src/libutil-tests/linux/meson.build           |  3 +
- src/libutil-tests/meson.build                 |  4 ++
+ src/libutil-tests/linux/meson.build           |  5 +-
  src/libutil/linux/cgroup.cc                   | 59 ++++++++++++++-----
  src/libutil/linux/include/nix/util/cgroup.hh  |  1 +
- 12 files changed, 198 insertions(+), 16 deletions(-)
+ 11 files changed, 195 insertions(+), 17 deletions(-)
  create mode 100644 src/libstore-tests/data/build-result/out-of-memory.json
  create mode 100644 src/libutil-tests/linux/cgroup.cc
- create mode 100644 src/libutil-tests/linux/meson.build
 
 diff --git a/doc/manual/source/protocols/json/schema/build-result-v1.yaml b/doc/manual/source/protocols/json/schema/build-result-v1.yaml
 index d0d8d8a0c..696f95687 100644
@@ -76,12 +74,12 @@ index 66dc9b758..ef18f9180 100644
    },
    # Match exact variant
 diff --git a/src/libstore-tests/build-result.cc b/src/libstore-tests/build-result.cc
-index a1d8ddee6..4d9bb924a 100644
+index 9215b99e0..7aac64d84 100644
 --- a/src/libstore-tests/build-result.cc
 +++ b/src/libstore-tests/build-result.cc
-@@ -92,6 +92,24 @@ INSTANTIATE_TEST_SUITE_P(
-                 .cpuUser = std::chrono::microseconds(500s),
-                 .cpuSystem = std::chrono::microseconds(604s),
+@@ -90,6 +90,24 @@ INSTANTIATE_TEST_SUITE_P(
+                 .cpuUser = std::chrono::seconds(500),
+                 .cpuSystem = std::chrono::seconds(604),
              },
 +        },
 +        std::pair{
@@ -126,10 +124,10 @@ index 000000000..7e0ba9da0
 +  "timesBuilt": 1
 +}
 diff --git a/src/libstore/build-result.cc b/src/libstore/build-result.cc
-index c9d78e5cc..021971f84 100644
+index afe9c7844..5e823b192 100644
 --- a/src/libstore/build-result.cc
 +++ b/src/libstore/build-result.cc
-@@ -127,6 +127,15 @@ static BuildResult::Failure::Status failureStatusFromString(std::string_view str
+@@ -125,6 +125,15 @@ static BuildResult::Failure::Status failureStatusFromString(std::string_view str
      throw Error("unknown built result failure status '%s'", str);
  }
  
@@ -145,7 +143,7 @@ index c9d78e5cc..021971f84 100644
  bool BuildError::operator==(const BuildError & other) const noexcept
  {
      return status == other.status && isNonDeterministic == other.isNonDeterministic && message() == other.message();
-@@ -162,6 +171,9 @@ void adl_serializer<BuildResult>::to_json(json & res, const BuildResult & br)
+@@ -160,6 +169,9 @@ void adl_serializer<nix::BuildResult>::to_json(json & res, const nix::BuildResul
      if (br.cpuSystem.has_value()) {
          res["cpuSystem"] = br.cpuSystem->count();
      }
@@ -155,7 +153,7 @@ index c9d78e5cc..021971f84 100644
  
      // Handle success or failure variant
      std::visit(
-@@ -198,6 +210,9 @@ BuildResult adl_serializer<BuildResult>::from_json(const json & _json)
+@@ -198,6 +210,9 @@ nix::BuildResult adl_serializer<nix::BuildResult>::from_json(const json & _json)
      if (auto cpuSystem = optionalValueAt(json, "cpuSystem")) {
          br.cpuSystem = std::chrono::microseconds(getUnsigned(*cpuSystem));
      }
@@ -166,7 +164,7 @@ index c9d78e5cc..021971f84 100644
      // Determine success or failure based on success field
      bool success = getBoolean(valueAt(json, "success"));
 diff --git a/src/libstore/include/nix/store/build-result.hh b/src/libstore/include/nix/store/build-result.hh
-index 808fcc829..5be5749a2 100644
+index c68dc2f8a..26d02a743 100644
 --- a/src/libstore/include/nix/store/build-result.hh
 +++ b/src/libstore/include/nix/store/build-result.hh
 @@ -193,6 +193,13 @@ struct BuildResult
@@ -184,10 +182,10 @@ index 808fcc829..5be5749a2 100644
      std::strong_ordering operator<=>(const BuildResult &) const noexcept;
  };
 diff --git a/src/libstore/linux/build/linux-derivation-builder.cc b/src/libstore/linux/build/linux-derivation-builder.cc
-index d8376dae2..226277953 100644
+index 31b64cfdf..36d8f558a 100644
 --- a/src/libstore/linux/build/linux-derivation-builder.cc
 +++ b/src/libstore/linux/build/linux-derivation-builder.cc
-@@ -949,6 +949,10 @@ void ChrootLinuxDerivationBuilder::killSandbox(bool getStats)
+@@ -971,6 +971,10 @@ void ChrootLinuxDerivationBuilder::killSandbox(bool getStats)
          if (getStats) {
              buildResult.cpuUser = stats.cpuUser;
              buildResult.cpuSystem = stats.cpuSystem;
@@ -264,34 +262,20 @@ index 000000000..a4b165bd0
 +
 +} // namespace nix::linux
 diff --git a/src/libutil-tests/linux/meson.build b/src/libutil-tests/linux/meson.build
-new file mode 100644
-index 000000000..0a7dffba6
---- /dev/null
+index c2671b176..08ef53b8c 100644
+--- a/src/libutil-tests/linux/meson.build
 +++ b/src/libutil-tests/linux/meson.build
-@@ -0,0 +1,3 @@
+@@ -1 +1,4 @@
+-sources += files('file-system.cc')
 +sources += files(
 +  'cgroup.cc',
++  'file-system.cc',
 +)
-diff --git a/src/libutil-tests/meson.build b/src/libutil-tests/meson.build
-index 1a5b24761..d9a3b2760 100644
---- a/src/libutil-tests/meson.build
-+++ b/src/libutil-tests/meson.build
-@@ -107,6 +107,10 @@ if host_machine.system() != 'windows'
-   subdir('unix')
- endif
- 
-+if host_machine.system() == 'linux'
-+  subdir('linux')
-+endif
-+
- include_dirs = [ include_directories('.') ]
- 
- 
 diff --git a/src/libutil/linux/cgroup.cc b/src/libutil/linux/cgroup.cc
-index 9ebc3ab77..5a2fac9ea 100644
+index 008f4919b..2a97e303e 100644
 --- a/src/libutil/linux/cgroup.cc
 +++ b/src/libutil/linux/cgroup.cc
-@@ -49,30 +49,57 @@ StringMap getCgroups(const std::filesystem::path & cgroupFile)
+@@ -50,30 +50,57 @@ StringMap getCgroups(const std::filesystem::path & cgroupFile)
      return cgroups;
  }
  
@@ -366,7 +350,7 @@ index 9ebc3ab77..5a2fac9ea 100644
  }
  
 diff --git a/src/libutil/linux/include/nix/util/cgroup.hh b/src/libutil/linux/include/nix/util/cgroup.hh
-index 7b50ffe8d..ced9c770e 100644
+index 0a259e1ba..335d61051 100644
 --- a/src/libutil/linux/include/nix/util/cgroup.hh
 +++ b/src/libutil/linux/include/nix/util/cgroup.hh
 @@ -17,6 +17,7 @@ StringMap getCgroups(const std::filesystem::path & cgroupFile);
@@ -377,3 +361,6 @@ index 7b50ffe8d..ced9c770e 100644
  };
  
  /**
+-- 
+2.56.0
+

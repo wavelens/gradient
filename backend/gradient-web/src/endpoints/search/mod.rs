@@ -12,6 +12,7 @@ use crate::helpers::ok_json;
 use axum::extract::State;
 use axum::{Extension, Json};
 use classify::{Lookups, classify};
+pub use gradient_api_types::{HitKind, SearchHit};
 use gradient_core::ServerState;
 use gradient_db::dashboard::{
     CommitHitRow, NameHitRow, NameKind, NarHitRow, Viewer, readable_cache_ids, search_commits,
@@ -19,7 +20,7 @@ use gradient_db::dashboard::{
 };
 use gradient_types::*;
 use sea_orm::{ConnectionTrait, DbErr};
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use std::sync::Arc;
 
 #[derive(Debug, Deserialize, utoipa::IntoParams)]
@@ -30,52 +31,29 @@ pub struct SearchQuery {
     pub limit: Option<u64>,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, utoipa::ToSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum HitKind {
-    Project,
-    Task,
-    Cache,
-    Nar,
-    Commit,
+fn build_search_hit_from_name_hit_row(n: NameHitRow) -> SearchHit {
+    let mut hit = match n.kind {
+        NameKind::Project => project_hit(n.name, n.starred),
+        NameKind::Task {
+            project,
+            project_display_name,
+        } => task_hit(project, project_display_name, n.name, n.starred),
+        NameKind::Cache => cache_hit(n.name, n.starred),
+    };
+    hit.label = n.display_name;
+    hit
 }
 
-#[derive(Debug, PartialEq, Eq, Serialize, utoipa::ToSchema)]
-pub struct SearchHit {
-    pub kind: HitKind,
-    pub label: String,
-    pub sublabel: String,
-    pub route: String,
-    pub starred: bool,
-}
-
-impl From<NameHitRow> for SearchHit {
-    fn from(n: NameHitRow) -> Self {
-        let mut hit = match n.kind {
-            NameKind::Project => project_hit(n.name, n.starred),
-            NameKind::Task {
-                project,
-                project_display_name,
-            } => task_hit(project, project_display_name, n.name, n.starred),
-            NameKind::Cache => cache_hit(n.name, n.starred),
-        };
-        hit.label = n.display_name;
-        hit
-    }
-}
-
-impl From<CommitHitRow> for SearchHit {
-    fn from(c: CommitHitRow) -> Self {
-        Self {
-            kind: HitKind::Commit,
-            route: format!(
-                "/project/{}/task/{}?eval={}",
-                c.project, c.task, c.evaluation
-            ),
-            label: c.hash.chars().take(7).collect(),
-            sublabel: format!("{} / {}", c.project_display_name, c.task_display_name),
-            starred: false,
-        }
+fn build_search_hit_from_commit_search_row(c: CommitHitRow) -> SearchHit {
+    SearchHit {
+        kind: HitKind::Commit,
+        route: format!(
+            "/project/{}/task/{}?eval={}",
+            c.project, c.task, c.evaluation
+        ),
+        label: c.hash.chars().take(7).collect(),
+        sublabel: format!("{} / {}", c.project_display_name, c.task_display_name),
+        starred: false,
     }
 }
 
@@ -153,7 +131,7 @@ pub async fn search<C: ConnectionTrait>(
         return Ok(starred(db, viewer.user)
             .await?
             .into_iter()
-            .map(SearchHit::from)
+            .map(build_search_hit_from_name_hit_row)
             .collect());
     };
     let mut hits = Vec::new();
@@ -164,10 +142,14 @@ pub async fn search<C: ConnectionTrait>(
     }
     if let Some(range) = &lookups.commit {
         let commits = search_commits(db, &range.low, &range.high, viewer).await?;
-        hits.extend(commits.into_iter().map(SearchHit::from));
+        hits.extend(
+            commits
+                .into_iter()
+                .map(build_search_hit_from_commit_search_row),
+        );
     }
     let names = search_names(db, &text, per_kind, viewer).await?;
-    hits.extend(names.into_iter().map(SearchHit::from));
+    hits.extend(names.into_iter().map(build_search_hit_from_name_hit_row));
     Ok(hits)
 }
 

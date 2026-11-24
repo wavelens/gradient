@@ -2,14 +2,13 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use crate::api::{
-    AddMemberRequest, AddUpstreamRequest, CacheResponse, CacheStatsResponse,
+    AddMemberRequest, AddUpstreamRequest, Cache, CacheResponse, CacheRoleOwner, CacheStatsResponse,
     CacheSubscribersResponse, CacheUpstreamId, CachedPathPinStateChangeCount,
     ChangeMemberRoleRequest, ChunkReceived, CreateRoleRequest, CreatedEntityResponse,
-    GrantCacheRequest, MakeCacheRequest, MemberItem, NarDetail, NarStats, NarinfoPart,
-    PaginatedCache, PaginatedNarSummary, PatchCacheGrantRequest, PatchCacheRequest,
-    PatchRoleRequest, PatchUpstreamRequest, PendingInvitationItem, RemoveMemberRequest,
-    RevokeInvitationRequest, RoleListResponseCacheRoleOwner, RoleResponseCacheRoleOwner,
-    SubscriptionRequestItem, TeamGrantEntry, UpstreamCacheItem, UpstreamTestResponse,
+    GrantCacheRequest, MakeCacheRequest, MemberItem, NarDetail, NarStats, NarSummary, NarinfoPart,
+    Paginated, PatchCacheGrantRequest, PatchCacheRequest, PatchRoleRequest, PatchUpstreamRequest,
+    PendingInvitationItem, RemoveMemberRequest, RevokeInvitationRequest, RoleListResponse,
+    RoleResponse, SubscriptionRequestItem, TeamGrantEntry, UpstreamCacheItem, UpstreamTestResponse,
 };
 use crate::http::encode_url_component;
 use crate::{Client, ConnectorError, http};
@@ -30,10 +29,10 @@ pub struct NarListQuery {
 pub struct CachesApi<'a>(pub(crate) &'a Client);
 
 impl CachesApi<'_> {
-    pub async fn list(&self) -> Result<PaginatedCache, ConnectorError> {
+    pub async fn list(&self) -> Result<Paginated<Cache>, ConnectorError> {
         let (items, total) = self.0.fetch_all_pages_and_total_count("caches").await?;
-        Ok(PaginatedCache {
-            per_page: i64::try_from(items.len()).unwrap_or(i64::MAX),
+        Ok(Paginated {
+            per_page: u64::try_from(items.len()).unwrap_or(u64::MAX),
             page: 1,
             total,
             items,
@@ -370,7 +369,7 @@ impl CachesApi<'_> {
     pub async fn list_roles_and_available_permissions(
         &self,
         cache: &str,
-    ) -> Result<RoleListResponseCacheRoleOwner, ConnectorError> {
+    ) -> Result<RoleListResponse<CacheRoleOwner>, ConnectorError> {
         self.0
             .send_authenticated_request(
                 Method::GET,
@@ -384,7 +383,7 @@ impl CachesApi<'_> {
         &self,
         cache: &str,
         role: &str,
-    ) -> Result<RoleResponseCacheRoleOwner, ConnectorError> {
+    ) -> Result<RoleResponse<CacheRoleOwner>, ConnectorError> {
         self.0
             .send_authenticated_request(
                 Method::GET,
@@ -402,7 +401,7 @@ impl CachesApi<'_> {
         &self,
         cache: &str,
         body: CreateRoleRequest,
-    ) -> Result<RoleResponseCacheRoleOwner, ConnectorError> {
+    ) -> Result<RoleResponse<CacheRoleOwner>, ConnectorError> {
         self.0
             .send_authenticated_request(
                 Method::POST,
@@ -417,7 +416,7 @@ impl CachesApi<'_> {
         cache: &str,
         role: &str,
         body: PatchRoleRequest,
-    ) -> Result<RoleResponseCacheRoleOwner, ConnectorError> {
+    ) -> Result<RoleResponse<CacheRoleOwner>, ConnectorError> {
         self.0
             .send_authenticated_request(
                 Method::PATCH,
@@ -582,7 +581,7 @@ impl CachesApi<'_> {
         &self,
         cache: &str,
         q: NarListQuery,
-    ) -> Result<PaginatedNarSummary, ConnectorError> {
+    ) -> Result<Paginated<NarSummary>, ConnectorError> {
         let mut qs: Vec<(&str, String)> = Vec::new();
         if let Some(v) = q.hash {
             qs.push(("hash", v));
@@ -711,7 +710,7 @@ impl CachesApi<'_> {
         })
         .await?;
         let received: ChunkReceived = http::decode(resp).await?;
-        Ok(received.received.unsigned_abs())
+        Ok(received.received)
     }
 
     pub async fn nar_upload_finalize(

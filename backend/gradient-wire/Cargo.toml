@@ -17,6 +17,7 @@ workspace = true
 testing = []
 
 [dependencies]
+gradient-api-types = { workspace = true }
 gradient-util        = { workspace = true }
 gradient-derive = { workspace = true }
 gradient-secret = { workspace = true }

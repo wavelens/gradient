@@ -1,4 +1,4 @@
-From 8cb736bd7ca3a9c192ffab9fd8fb7ac2eaa7fe33 Mon Sep 17 00:00:00 2001
+From 8315afedb46d6891b5c384437bced97669955fbe Mon Sep 17 00:00:00 2001
 From: Dennis Wuitz <dennish@wuitz.de>
 Date: Mon, 5 Oct 2026 00:56:03 +0200
 Subject: [PATCH] libfetchers: check that a source copied earlier is still in
@@ -107,10 +107,10 @@ index 000000000..7c50b05dd
 +
 +} // namespace nix
 diff --git a/src/libfetchers-tests/meson.build b/src/libfetchers-tests/meson.build
-index 22cd6b378..2ae9cdd2f 100644
+index 037b1b241..75f9b430b 100644
 --- a/src/libfetchers-tests/meson.build
 +++ b/src/libfetchers-tests/meson.build
-@@ -41,6 +41,7 @@ subdir('nix-meson-build-support/common')
+@@ -53,6 +53,7 @@ subdir('nix-meson-build-support/common')
  sources = files(
    'access-tokens.cc',
    'attrs.cc',
@@ -119,10 +119,10 @@ index 22cd6b378..2ae9cdd2f 100644
    'git-utils.cc',
    'git.cc',
 diff --git a/src/libfetchers/fetch-to-store.cc b/src/libfetchers/fetch-to-store.cc
-index 085c97da7..869609a43 100644
+index 32157ec06..c6a122f2f 100644
 --- a/src/libfetchers/fetch-to-store.cc
 +++ b/src/libfetchers/fetch-to-store.cc
-@@ -11,7 +11,7 @@ struct SrcToStore
+@@ -12,7 +12,7 @@ struct SrcToStore
  {
      boost::concurrent_flat_map<
          std::tuple<SourcePath, ContentAddressMethod::Raw, std::string>,
@@ -131,7 +131,7 @@ index 085c97da7..869609a43 100644
          cache;
  };
  
-@@ -55,8 +55,24 @@ std::pair<StorePath, Hash> fetchToStore2(
+@@ -56,8 +56,24 @@ std::pair<StorePath, Hash> fetchToStore2(
  
      if (!filter) {
          auto dstPathCached = getConcurrent(settings.srcToStore->cache, srcToStoreKey);
@@ -158,7 +158,7 @@ index 085c97da7..869609a43 100644
      }
  
      std::optional<fetchers::Cache::Key> cacheKey;
-@@ -82,7 +98,8 @@ std::pair<StorePath, Hash> fetchToStore2(
+@@ -83,7 +99,8 @@ std::pair<StorePath, Hash> fetchToStore2(
                      path,
                      store.printStorePath(storePath),
                      hash.to_string(HashFormat::SRI, true));
@@ -168,7 +168,7 @@ index 085c97da7..869609a43 100644
                  return {storePath, hash};
              }
              debug("source path '%s' not in store", path);
-@@ -139,7 +156,8 @@ std::pair<StorePath, Hash> fetchToStore2(
+@@ -143,7 +160,8 @@ std::pair<StorePath, Hash> fetchToStore2(
          settings.getCache()->upsert(*cacheKey, {{"hash", hash.to_string(HashFormat::SRI, true)}});
  
      if (!filter)

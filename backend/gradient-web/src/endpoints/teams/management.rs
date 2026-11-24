@@ -12,12 +12,13 @@ use crate::authorization::{MaybeApiKey, reject_api_key_authentication};
 use crate::error::{WebError, WebResult, require_create_permission, require_superuser};
 use crate::extractors::{JsonBody, Query};
 use crate::helpers::{CreatedEntityResponse, ok_json};
-use crate::names::{TeamDisplayName, TeamName};
+use crate::names::TeamName;
 use crate::permissions::Permission;
 use crate::resource::Resource;
 use crate::scope::{AdminUnmanaged, Member, TeamScope};
 use axum::extract::State;
 use axum::{Extension, Json};
+pub use gradient_api_types::{MakeTeamRequest, PatchTeamRequest, TeamResponse, TeamSummary};
 use gradient_core::ServerState;
 use gradient_scheduler::Scheduler;
 use gradient_types::consts::{BASE_ROLE_ADMIN_ID, BASE_ROLE_VIEW_ID, BASE_ROLE_WRITE_ID};
@@ -26,75 +27,37 @@ use gradient_types::events::audit::Action;
 use gradient_types::*;
 use sea_orm::ActiveValue::Set;
 use sea_orm::TransactionTrait;
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use std::collections::HashMap;
 use std::sync::Arc;
 
-#[derive(Serialize, utoipa::ToSchema)]
-pub struct TeamSummary {
-    pub name: String,
-    pub display_name: String,
-    pub role: TeamRole,
-}
-
-impl TeamSummary {
-    fn new(team: MTeam, role: TeamRole) -> Self {
-        Self {
-            name: team.name,
-            display_name: team.display_name,
-            role,
-        }
+fn team_summary_from_team_row_and_role(team: MTeam, role: TeamRole) -> TeamSummary {
+    TeamSummary {
+        name: team.name,
+        display_name: team.display_name,
+        role,
     }
 }
 
-#[derive(Serialize, utoipa::ToSchema)]
-pub struct TeamResponse {
-    pub id: TeamId,
-    pub name: String,
-    pub display_name: String,
-    pub managed: bool,
-    pub role: Option<TeamRole>,
-    pub oidc_group: Option<String>,
-    pub scim_group: Option<String>,
-    pub new_project_users: bool,
-    pub new_project_workers: bool,
-    pub new_project_role: Option<String>,
-}
-
-impl TeamResponse {
-    fn new(team: MTeam, role: Option<TeamRole>) -> Self {
-        Self {
-            new_project_role: team
-                .new_project_role
-                .and_then(builtin_role_name)
-                .map(str::to_string),
-            id: team.id,
-            name: team.name,
-            display_name: team.display_name,
-            managed: team.managed,
-            role,
-            oidc_group: team.oidc_group,
-            scim_group: team.scim_group,
-            new_project_users: team.new_project_users,
-            new_project_workers: team.new_project_workers,
-        }
+fn team_response_from_team_row_and_caller_team_role(
+    team: MTeam,
+    role: Option<TeamRole>,
+) -> TeamResponse {
+    TeamResponse {
+        new_project_role: team
+            .new_project_role
+            .and_then(builtin_role_name)
+            .map(str::to_string),
+        id: team.id,
+        name: team.name,
+        display_name: team.display_name,
+        managed: team.managed,
+        role,
+        oidc_group: team.oidc_group,
+        scim_group: team.scim_group,
+        new_project_users: team.new_project_users,
+        new_project_workers: team.new_project_workers,
     }
-}
-
-#[derive(Deserialize, utoipa::ToSchema)]
-pub struct MakeTeamRequest {
-    pub name: TeamName,
-    pub display_name: TeamDisplayName,
-}
-
-#[derive(Deserialize, utoipa::ToSchema)]
-pub struct PatchTeamRequest {
-    pub display_name: Option<TeamDisplayName>,
-    pub new_project_users: Option<bool>,
-    pub new_project_workers: Option<bool>,
-    pub new_project_role: Option<String>,
-    pub oidc_group: Option<String>,
-    pub scim_group: Option<String>,
 }
 
 pub fn builtin_role_id(name: &str) -> Option<RoleId> {
@@ -152,7 +115,9 @@ pub async fn get_teams(
 
     let mut items: Vec<TeamSummary> = rows
         .into_iter()
-        .filter_map(|(membership, team)| team.map(|team| TeamSummary::new(team, membership.role)))
+        .filter_map(|(membership, team)| {
+            team.map(|team| team_summary_from_team_row_and_role(team, membership.role))
+        })
         .collect();
     items.sort_by(|a, b| (&a.display_name, &a.name).cmp(&(&b.display_name, &b.name)));
 
@@ -302,7 +267,9 @@ pub async fn put_team(
 pub async fn get_team(
     TeamScope { team, role, .. }: TeamScope<Member>,
 ) -> WebResult<Json<BaseResponse<TeamResponse>>> {
-    Ok(ok_json(TeamResponse::new(team, role)))
+    Ok(ok_json(team_response_from_team_row_and_caller_team_role(
+        team, role,
+    )))
 }
 
 #[utoipa::path(

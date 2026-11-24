@@ -4,11 +4,4 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use serde::{Deserialize, Serialize};
-
-#[derive(Serialize, Deserialize, Debug, Clone, utoipa::ToSchema)]
-pub struct ManifestEntry {
-    pub path: String,
-    pub hash: String,
-    pub size: i64,
-}
+pub use gradient_api_types::ManifestEntry;

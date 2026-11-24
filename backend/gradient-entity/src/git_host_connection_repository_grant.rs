@@ -5,39 +5,11 @@
  */
 
 use chrono::NaiveDateTime;
-use num_enum::{IntoPrimitive, TryFromPrimitive};
 use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
 
 use crate::ids::{GitHostConnectionId, GitHostConnectionRepositoryGrantId, ProjectId, UserId};
-
-#[repr(i16)]
-#[derive(
-    Debug,
-    Clone,
-    Copy,
-    Default,
-    PartialEq,
-    Eq,
-    Hash,
-    DeriveActiveEnum,
-    EnumIter,
-    Deserialize,
-    Serialize,
-    IntoPrimitive,
-    TryFromPrimitive,
-)]
-#[sea_orm(rs_type = "i16", db_type = "SmallInteger")]
-#[serde(rename_all = "snake_case")]
-pub enum RepositoryGrantSource {
-    #[default]
-    #[sea_orm(num_value = 0)]
-    Admin = 0,
-    #[sea_orm(num_value = 1)]
-    Upgrade = 1,
-    #[sea_orm(num_value = 2)]
-    StateFile = 2,
-}
+pub use gradient_api_types::RepositoryGrantSource;
 
 /// A connection owned by the instance or a team can act for project tasks only on repositories
 /// that are granted here. Set ``repository_name`` to ``None`` to allow all repositories of the owner.

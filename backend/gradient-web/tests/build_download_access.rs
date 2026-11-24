@@ -109,7 +109,7 @@ fn download_token(derivation: DerivationId, evaluation: EvaluationId) -> String 
     encode(
         &Header::default(),
         &claims,
-        &EncodingKey::from_secret(TEST_JWT_SECRET.as_bytes()),
+        &EncodingKey::from_secret(TEST_JWT_SECRET.as_bytes()).unwrap(),
     )
     .unwrap()
 }

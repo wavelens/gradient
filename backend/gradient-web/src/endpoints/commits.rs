@@ -26,13 +26,13 @@ use std::sync::Arc;
     summary = "Get commit",
     description = "Returns commit metadata (message, hash, author). Visibility follows the\ncommit's reachability: the caller must be a member of a project\nthat owns an evaluation (or direct build) referencing the commit, or\nthat project must be public. Anonymous callers may read commits\nreachable through public projects only. All other cases return\n`404` so existence isn't leaked.",
     params(("commit" = CommitId, Path)),
-    responses((status = OK, description = "Commit", body = MCommit), WebError)
+    responses((status = OK, description = "Commit", body = gradient_api_types::Commit), WebError)
 )]
 pub async fn get_commit(
     state: State<Arc<ServerState>>,
     Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
     Path(commit_id): Path<CommitId>,
-) -> WebResult<Json<BaseResponse<MCommit>>> {
+) -> WebResult<Json<BaseResponse<gradient_api_types::Commit>>> {
     let commit = require::<ECommit>(&state.web_db, commit_id).await?;
 
     let evaluations = gradient_db::evaluations::of_commit(&state.web_db, commit_id).await?;
@@ -75,6 +75,6 @@ pub async fn get_commit(
 
     Ok(Json(BaseResponse {
         error: false,
-        message: commit,
+        message: commit.into(),
     }))
 }

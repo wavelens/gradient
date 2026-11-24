@@ -5,43 +5,11 @@
  */
 
 use chrono::NaiveDateTime;
-use num_enum::{IntoPrimitive, TryFromPrimitive};
 use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
 
 use crate::ids::{GitHostConnectionId, IncomingWebhookDeliveryId};
-
-#[repr(i16)]
-#[derive(
-    Debug,
-    Clone,
-    Copy,
-    Default,
-    PartialEq,
-    Eq,
-    DeriveActiveEnum,
-    EnumIter,
-    Deserialize,
-    Serialize,
-    IntoPrimitive,
-    TryFromPrimitive,
-    utoipa::ToSchema,
-)]
-#[sea_orm(rs_type = "i16", db_type = "SmallInteger")]
-#[serde(rename_all = "snake_case")]
-pub enum DeliveryResult {
-    #[sea_orm(num_value = 0)]
-    Queued = 0,
-    #[sea_orm(num_value = 1)]
-    Skipped = 1,
-    #[sea_orm(num_value = 2)]
-    NoMatchingTask = 2,
-    #[default]
-    #[sea_orm(num_value = 3)]
-    Ignored = 3,
-    #[sea_orm(num_value = 4)]
-    Refused = 4,
-}
+pub use gradient_api_types::DeliveryResult;
 
 #[derive(Clone, Debug, Default, PartialEq, DeriveEntityModel, Deserialize, Serialize)]
 #[sea_orm(table_name = "incoming_webhook_delivery")]
@@ -72,3 +40,19 @@ pub enum Relation {
 }
 
 impl ActiveModelBehavior for ActiveModel {}
+
+impl From<Model> for gradient_api_types::IncomingWebhookDeliveryResponse {
+    fn from(m: Model) -> Self {
+        Self {
+            id: m.id,
+            event: m.event,
+            status_code: m.status_code,
+            result: m.result,
+            detail: m.detail,
+            repository: m.repository,
+            tasks_scanned: m.tasks_scanned,
+            queued: m.queued,
+            created_at: m.created_at,
+        }
+    }
+}

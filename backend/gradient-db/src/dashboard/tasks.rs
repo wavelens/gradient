@@ -248,6 +248,19 @@ pub async fn histories<C: ConnectionTrait>(
     Ok(out)
 }
 
+impl From<HistoryRow> for gradient_api_types::HistoryBar {
+    fn from(h: HistoryRow) -> Self {
+        Self {
+            id: h.id,
+            status: h.status,
+            duration_ms: h.duration_ms,
+            created_at: h.created_at,
+            started_at: h.started_at,
+            finished_at: h.finished_at,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -204,7 +204,7 @@ fn signed_cookie(name: &str, claims: Value) -> HeaderValue {
     let jwt = encode(
         &Header::default(),
         &claims,
-        &EncodingKey::from_secret(TEST_JWT_SECRET.as_bytes()),
+        &EncodingKey::from_secret(TEST_JWT_SECRET.as_bytes()).unwrap(),
     )
     .unwrap();
     HeaderValue::from_str(&format!("{name}={jwt}")).unwrap()

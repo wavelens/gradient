@@ -25,6 +25,7 @@ pub mod ids;
 pub mod input;
 pub mod log_api;
 pub mod permissions;
+pub use gradient_api_types::Paginated;
 pub use gradient_secret as secret;
 pub mod triggers;
 pub mod waiting_reason;
@@ -74,9 +75,6 @@ use chrono::NaiveDateTime;
 use clap::Parser;
 use gradient_derive::config_group;
 use serde::{Deserialize, Serialize};
-use std::borrow::Cow;
-use utoipa::openapi::{ArrayBuilder, ObjectBuilder, Ref, RefOr, Schema};
-use utoipa::{PartialSchema, ToSchema};
 
 #[inline]
 pub fn now() -> NaiveDateTime {
@@ -168,54 +166,6 @@ impl Cli {
 pub struct BaseResponse<T> {
     pub error: bool,
     pub message: T,
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-pub struct Paginated<T> {
-    pub items: Vec<T>,
-    pub total: u64,
-    pub page: u64,
-    pub per_page: u64,
-}
-
-impl<T: ToSchema> PartialSchema for Paginated<T> {
-    fn schema() -> RefOr<Schema> {
-        ObjectBuilder::new()
-            .property(
-                "items",
-                ArrayBuilder::new().items(Ref::from_schema_name(T::name())),
-            )
-            .required("items")
-            .property("total", u64::schema())
-            .required("total")
-            .property("page", u64::schema())
-            .required("page")
-            .property("per_page", u64::schema())
-            .required("per_page")
-            .into()
-    }
-}
-
-impl<T: ToSchema> ToSchema for Paginated<T> {
-    fn name() -> Cow<'static, str> {
-        Cow::Owned(format!("Paginated_{}", T::name()))
-    }
-
-    fn schemas(schemas: &mut Vec<(String, RefOr<Schema>)>) {
-        schemas.push((T::name().into_owned(), T::schema()));
-        T::schemas(schemas);
-    }
-}
-
-impl<T> Paginated<T> {
-    pub fn map<U, F: FnMut(T) -> U>(self, f: F) -> Paginated<U> {
-        Paginated {
-            items: self.items.into_iter().map(f).collect(),
-            total: self.total,
-            page: self.page,
-            per_page: self.per_page,
-        }
-    }
 }
 
 #[derive(Deserialize, Debug, Default, utoipa::IntoParams)]

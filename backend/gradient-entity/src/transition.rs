@@ -4,8 +4,4 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Transition<S: 'static> {
-    pub from: &'static [S],
-    pub to: S,
-}
+pub use gradient_api_types::transition::*;

@@ -41,3 +41,15 @@ impl Related<super::exec_job::Entity> for Entity {
 }
 
 impl ActiveModelBehavior for ActiveModel {}
+
+impl From<Model> for gradient_api_types::ExecJobOutputView {
+    fn from(row: Model) -> Self {
+        Self {
+            path: row.path,
+            size: row.size,
+            content_type: row.content_type,
+            created_at: row.created_at,
+            updated_at: row.updated_at,
+        }
+    }
+}

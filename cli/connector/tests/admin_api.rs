@@ -50,7 +50,7 @@ async fn list_admin_workers_decodes_registered_workers_with_their_team() {
     let workers = client(&server).admin().workers().await.unwrap();
     assert_eq!(workers[0].worker_id, "w1");
     assert_eq!(workers[0].team.as_ref().unwrap().name, "ops");
-    assert!(!workers[0].connected);
+    assert!(!workers[0].connection.connected);
 }
 
 #[tokio::test]
@@ -284,7 +284,7 @@ async fn deep_gc_returns_admin_task_id_and_tasks_list_decodes() {
                 "id": task_id,
                 "kind": "deep_gc",
                 "status": "pending",
-                "created_at": "2026-11-09T00:00:00Z"
+                "created_at": "2026-11-09T00:00:00"
             }]))),
         )
         .mount(&server)
@@ -315,7 +315,7 @@ async fn admin_webhook_deliveries_endpoint_accepts_limit_and_offset() {
                 "success": true,
                 "response_status": 200,
                 "duration_ms": 8,
-                "delivered_at": "2026-11-09T00:00:00Z"
+                "delivered_at": "2026-11-09T00:00:00"
             }]))),
         )
         .expect(1)

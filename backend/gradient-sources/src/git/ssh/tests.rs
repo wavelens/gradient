@@ -21,7 +21,7 @@ use gradient_util::http_validation::{
 };
 use gradient_wire::messages::{GitServerSshHostKey, GitSshHostKeyObservation};
 use russh::keys::{Algorithm, EcdsaCurve, PrivateKey, PublicKey};
-use russh::server::{Auth, ChannelOpenHandle, Handle, Msg, Session};
+use russh::server::{Auth, ChannelOpenHandle, Handle, Msg, Session, VerifiedPublicKey};
 use russh::{Channel, ChannelId, MethodKind, MethodSet};
 use ssh_key::LineEnding;
 use ssh_key::private::Ed25519Keypair;
@@ -53,8 +53,12 @@ struct GitServer {
 impl russh::server::Handler for GitServer {
     type Error = russh::Error;
 
-    async fn auth_publickey(&mut self, user: &str, key: &PublicKey) -> Result<Auth, Self::Error> {
-        if user == "git" && key.key_data() == self.client_key.key_data() {
+    async fn auth_publickey(
+        &mut self,
+        user: &str,
+        key: VerifiedPublicKey<'_>,
+    ) -> Result<Auth, Self::Error> {
+        if user == "git" && key.public_key.key_data() == self.client_key.key_data() {
             return Ok(Auth::Accept);
         }
 

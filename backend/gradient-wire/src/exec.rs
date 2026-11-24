@@ -5,119 +5,30 @@
  */
 
 use std::collections::BTreeMap;
-use std::fmt;
 
-use crate::codec::Proto;
+use crate::codec::{Proto, impl_proto_for_shared_struct};
 use crate::host_resource_project_access::WorkerResourceProjectAccess;
+pub use gradient_api_types::{
+    DeviceClass, DeviceRequest, DeviceRequestError, ExecOffer, GuestSize,
+};
+
+impl_proto_for_shared_struct!(DeviceRequest {
+    name: String,
+    count: u32
+});
+impl_proto_for_shared_struct!(GuestSize {
+    cpus: u32,
+    memory_mb: u64,
+    disk_mb: u64
+});
+impl_proto_for_shared_struct!(DeviceClass {
+    name: String,
+    total: u32,
+    free: u32
+});
 use crate::port_ranges::PortRanges;
 use serde::{Deserialize as SerdeDeserialize, Serialize as SerdeSerialize};
 use uuid::Uuid;
-
-#[derive(
-    Proto, SerdeSerialize, SerdeDeserialize, Debug, Clone, PartialEq, Eq, Default, utoipa::ToSchema,
-)]
-pub struct DeviceRequest {
-    pub name: String,
-    pub count: u32,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
-pub enum DeviceRequestError {
-    #[error("device name is empty")]
-    Empty,
-    #[error("device name has an empty part before or after a colon")]
-    EmptyPart,
-    #[error("device count \"{0}\" is out of range")]
-    BadCount(String),
-    #[error("device count must be at least 1")]
-    ZeroCount,
-}
-
-impl DeviceRequest {
-    pub fn parse(s: &str) -> Result<DeviceRequest, DeviceRequestError> {
-        let (name, count) = match s.rsplit_once(':') {
-            Some((name, tail)) if !tail.is_empty() && tail.bytes().all(|b| b.is_ascii_digit()) => {
-                let count = tail
-                    .parse::<u32>()
-                    .map_err(|_| DeviceRequestError::BadCount(tail.to_owned()))?;
-                (name, count)
-            }
-            _ => (s, 1),
-        };
-        if name.is_empty() {
-            return Err(DeviceRequestError::Empty);
-        }
-        if name.split(':').any(str::is_empty) {
-            return Err(DeviceRequestError::EmptyPart);
-        }
-        if count == 0 {
-            return Err(DeviceRequestError::ZeroCount);
-        }
-        Ok(DeviceRequest {
-            name: name.to_owned(),
-            count,
-        })
-    }
-}
-
-impl fmt::Display for DeviceRequest {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self.count {
-            1 => f.write_str(&self.name),
-            count => write!(f, "{}:{count}", self.name),
-        }
-    }
-}
-
-#[derive(
-    Proto,
-    SerdeSerialize,
-    SerdeDeserialize,
-    Debug,
-    Clone,
-    Copy,
-    PartialEq,
-    Eq,
-    Default,
-    utoipa::ToSchema,
-)]
-pub struct GuestSize {
-    pub cpus: u32,
-    pub memory_mb: u64,
-    pub disk_mb: u64,
-}
-
-impl GuestSize {
-    pub fn default_request() -> GuestSize {
-        GuestSize {
-            cpus: 2,
-            memory_mb: 500,
-            disk_mb: 2048,
-        }
-    }
-
-    pub fn is_unset(&self) -> bool {
-        *self == GuestSize::default()
-    }
-
-    pub fn work_disk_size_mb_for_requested_disk_size_mb(disk_mb: u64) -> u64 {
-        match disk_mb {
-            0 => GuestSize::default_request().disk_mb,
-            requested => requested,
-        }
-    }
-
-    pub fn warm_guest_takes(&self, job: GuestSize) -> bool {
-        self.cpus == job.cpus && self.memory_mb == job.memory_mb
-    }
-
-    pub fn warm(&self) -> GuestSize {
-        GuestSize {
-            disk_mb: 0,
-            ..*self
-        }
-    }
-}
 
 #[derive(
     Proto,
@@ -215,15 +126,6 @@ pub struct ExecRequirement {
     #[proto(51, default)]
     #[serde(default)]
     pub guest: GuestSize,
-}
-
-#[derive(
-    Proto, SerdeSerialize, SerdeDeserialize, Debug, Clone, PartialEq, Eq, Default, utoipa::ToSchema,
-)]
-pub struct DeviceClass {
-    pub name: String,
-    pub total: u32,
-    pub free: u32,
 }
 
 #[derive(
@@ -540,6 +442,15 @@ pub fn check_output_path(path: &str) -> Result<(), OutputPathError> {
 
 pub fn exec_image_attr(attr: &str) -> String {
     format!("{attr}.passthru.gradient.image")
+}
+
+impl From<ExecInventory> for ExecOffer {
+    fn from(inventory: ExecInventory) -> Self {
+        Self {
+            labels: inventory.labels,
+            devices: inventory.devices,
+        }
+    }
 }
 
 #[cfg(test)]

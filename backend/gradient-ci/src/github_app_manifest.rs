@@ -4,19 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use serde::{Deserialize, Serialize};
-
-#[derive(Clone, Debug, Deserialize, Serialize, utoipa::ToSchema)]
-pub struct ManifestResult {
-    pub id: i64,
-    pub slug: String,
-    pub html_url: String,
-    pub pem: String,
-    pub webhook_secret: String,
-    pub client_id: String,
-    pub client_secret: String,
-}
-
+pub use gradient_api_types::ManifestResult;
 use serde_json::{Value, json};
 
 pub const APP_NAME: &str = "Gradient CI";

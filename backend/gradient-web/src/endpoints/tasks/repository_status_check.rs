@@ -11,63 +11,13 @@ use super::repository::TaskCommitStatusPostAttempt;
 use crate::endpoints::git_host_connections::{
     GitHostConnectionSummary, IncomingWebhookDeliveryResponse,
 };
+pub use gradient_api_types::{
+    TaskGitHostChain, TaskGitHostChainStep, TaskGitHostChainStepAction, TaskGitHostChainStepState,
+};
 use gradient_entity::incoming_webhook_delivery::DeliveryResult;
 use gradient_git_host::repository_fit::repository_host;
 use gradient_types::GitHostType;
 use gradient_types::triggers::TriggerType;
-use serde::Serialize;
-
-#[derive(Serialize, Debug, Clone, Copy, PartialEq, Eq, utoipa::ToSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum TaskGitHostChainStepState {
-    Ok,
-    Attention,
-    Failing,
-    Off,
-}
-
-#[derive(Serialize, Debug, Clone, PartialEq, Eq, utoipa::ToSchema)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum TaskGitHostChainStepAction {
-    EditRepositoryUrl,
-    SelectConnection,
-    CreateConnection {
-        git_host_type: Option<String>,
-        base_url: String,
-    },
-    InstallGithubApp {
-        account: String,
-    },
-    InstallWebhook,
-    AddWebhookOnHost {
-        webhook_url: String,
-    },
-    ChangeWebhookSecret,
-    OpenConnectionSharedByTasks {
-        task_count: u64,
-    },
-    AddTrigger {
-        trigger_type: TriggerType,
-    },
-    TurnOnReportStatus,
-    TestStatusReport,
-}
-
-#[derive(Serialize, Debug, Clone, PartialEq, Eq, utoipa::ToSchema)]
-pub struct TaskGitHostChainStep {
-    pub state: TaskGitHostChainStepState,
-    pub detail: String,
-    pub at: Option<chrono::NaiveDateTime>,
-    pub action: Option<TaskGitHostChainStepAction>,
-}
-
-#[derive(Serialize, Debug, Clone, PartialEq, Eq, utoipa::ToSchema)]
-pub struct TaskGitHostChain {
-    pub repository: TaskGitHostChainStep,
-    pub connection: TaskGitHostChainStep,
-    pub incoming_events: TaskGitHostChainStep,
-    pub commit_status: TaskGitHostChainStep,
-}
 
 pub(crate) struct TaskRepositoryStatusCheckInput<'a> {
     pub(crate) repository: &'a str,
@@ -475,7 +425,9 @@ pub(crate) fn check_task_repository_readable_git_host_webhook_and_commit_status(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::endpoints::git_host_connections::RepositoryFit;
+    use crate::endpoints::git_host_connections::{
+        RepositoryFit, repository_fit_for_git_host_connection,
+    };
     use TaskGitHostChainStepState::*;
     use gradient_fixtures::test_date;
     use gradient_types::git_host::GitHostConnectionOwner;
@@ -664,7 +616,7 @@ mod tests {
 
     #[test]
     fn selected_connection_without_base_url_fails_and_is_not_suggested() {
-        let fit = RepositoryFit::of(
+        let fit = repository_fit_for_git_host_connection(
             GITEA_REPOSITORY,
             &gradient_types::MGitHostConnection {
                 git_host_type: gradient_types::GitHostType::Gitea,

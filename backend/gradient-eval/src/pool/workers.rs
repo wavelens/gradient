@@ -251,9 +251,15 @@ pub(super) async fn reap_loop(pool: Weak<EvalWorkerPool>, guard: MemoryGuard) {
     if !guard.is_active() {
         return;
     }
-    let mut sys = System::new_with_specifics(
+    let mut sys = match System::new_with_specifics(
         RefreshKind::nothing().with_memory(MemoryRefreshKind::nothing().with_ram()),
-    );
+    ) {
+        Ok(sys) => sys,
+        Err(error) => {
+            warn!(%error, "Memory guard can't start because host memory reads fail.");
+            return;
+        }
+    };
     let mut interval = tokio::time::interval(REAPER_INTERVAL);
     let mut last_reap: Option<Instant> = None;
     let mut reported_no_victim = false;

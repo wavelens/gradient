@@ -16,6 +16,7 @@ use crate::permissions::{
 use crate::refusal::SharedRefusal;
 use crate::resource::Resource;
 use crate::scope::{CacheScope, Member, Requires, RequiresUnmanaged, can};
+pub use gradient_api_types::CacheRoleOwner;
 use gradient_db::WebDb;
 use gradient_db::access::DirectMembershipsOfUser;
 use gradient_notify::InviteScope;
@@ -25,21 +26,9 @@ use gradient_types::events::audit::Action;
 use gradient_types::*;
 use sea_orm::ActiveValue::Set;
 use sea_orm::{ConnectionTrait, RelationDef, RelationTrait};
-use serde::Serialize;
 use std::collections::HashMap;
 
 pub struct CacheOwner;
-
-#[derive(Serialize, Debug, utoipa::ToSchema)]
-pub struct CacheRoleOwner {
-    cache: Option<CacheId>,
-}
-
-impl From<Option<CacheId>> for CacheRoleOwner {
-    fn from(cache: Option<CacheId>) -> Self {
-        Self { cache }
-    }
-}
 
 impl Table for ECacheUser {
     type Row = MCacheUser;

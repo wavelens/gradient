@@ -18,10 +18,10 @@ use axum::Json;
 use axum::extract::State;
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
-use chrono::NaiveDateTime;
+pub use gradient_api_types::{CachedPathPinStateChangeCount, NarDetail, NarStats};
 use gradient_core::ServerState;
 use gradient_db::DbContext;
-use gradient_db::cached_paths::{CacheTotals, NarFilter, NarOrder, NarSummary};
+use gradient_db::cached_paths::{NarFilter, NarOrder, NarSummary};
 use gradient_db::lookup::by_id;
 use gradient_types::events::EventOwner;
 use gradient_types::events::audit::Action;
@@ -50,81 +50,33 @@ pub struct PinUnpinClosureQuery {
     pub include_referenced_paths: bool,
 }
 
-#[derive(Debug, Serialize, utoipa::ToSchema)]
-pub struct CachedPathPinStateChangeCount {
-    pub pin_state_changed_path_count: u64,
-}
-
-#[derive(Debug, Serialize, utoipa::ToSchema)]
-pub struct NarDetail {
-    pub hash: String,
-    pub store_path: String,
-    pub package: String,
-    pub nar_size: Option<i64>,
-    pub file_size: Option<i64>,
-    pub file_hash: Option<String>,
-    pub nar_hash: Option<String>,
-    pub references: Vec<String>,
-    pub deriver: Option<String>,
-    pub ca: Option<String>,
-    pub created_at: NaiveDateTime,
-    pub last_fetched_at: Option<NaiveDateTime>,
-    pub fetch_count: i64,
-    pub signed: bool,
-    pub pinned_at: Option<NaiveDateTime>,
-    pub pinned_by_username: Option<String>,
-}
-
-impl NarDetail {
-    fn new(
-        path: MCachedPath,
-        signature: MCachedPathSignature,
-        references: Vec<String>,
-        pinned_by_username: Option<String>,
-        mapper: &StorePathMapper,
-    ) -> Self {
-        Self {
-            store_path: original_text(mapper, path.as_store_path().base()),
-            hash: original_text(mapper, path.hash),
-            package: path.package,
-            nar_size: Some(path.nar_size),
-            file_size: path.file_size,
-            file_hash: Some(path.file_hash),
-            nar_hash: Some(path.nar_hash),
-            references: references
-                .into_iter()
-                .map(|reference| original_text(mapper, reference))
-                .collect(),
-            deriver: path.deriver.map(|deriver| original_text(mapper, deriver)),
-            ca: path.ca,
-            created_at: path.created_at,
-            last_fetched_at: signature.last_fetched_at,
-            fetch_count: signature.fetch_count,
-            signed: signature.signature.is_some(),
-            pinned_at: signature.pinned_at,
-            pinned_by_username,
-        }
-    }
-}
-
-#[derive(Debug, Serialize, utoipa::ToSchema)]
-pub struct NarStats {
-    pub total_nars: i64,
-    pub total_nar_size: i64,
-    pub total_file_size: i64,
-    pub last_uploaded_at: Option<NaiveDateTime>,
-    pub oldest_fetched_at: Option<NaiveDateTime>,
-}
-
-impl From<CacheTotals> for NarStats {
-    fn from(totals: CacheTotals) -> Self {
-        Self {
-            total_nars: totals.total_nars,
-            total_nar_size: totals.total_nar_size.unwrap_or(0),
-            total_file_size: totals.total_file_size.unwrap_or(0),
-            last_uploaded_at: totals.last_uploaded_at,
-            oldest_fetched_at: totals.oldest_fetched_at,
-        }
+fn build_nar_detail_from_cached_path_row_with_signature_references_pinning_user_and_store_path_mapper(
+    path: MCachedPath,
+    signature: MCachedPathSignature,
+    references: Vec<String>,
+    pinned_by_username: Option<String>,
+    mapper: &StorePathMapper,
+) -> NarDetail {
+    NarDetail {
+        store_path: original_text(mapper, path.as_store_path().base()),
+        hash: original_text(mapper, path.hash),
+        package: path.package,
+        nar_size: Some(path.nar_size),
+        file_size: path.file_size,
+        file_hash: Some(path.file_hash),
+        nar_hash: Some(path.nar_hash),
+        references: references
+            .into_iter()
+            .map(|reference| original_text(mapper, reference))
+            .collect(),
+        deriver: path.deriver.map(|deriver| original_text(mapper, deriver)),
+        ca: path.ca,
+        created_at: path.created_at,
+        last_fetched_at: signature.last_fetched_at,
+        fetch_count: signature.fetch_count,
+        signed: signature.signature.is_some(),
+        pinned_at: signature.pinned_at,
+        pinned_by_username,
     }
 }
 
@@ -250,7 +202,7 @@ pub async fn show(
             .map(|user| user.username),
         None => None,
     };
-    Ok(ok_json(NarDetail::new(
+    Ok(ok_json(build_nar_detail_from_cached_path_row_with_signature_references_pinning_user_and_store_path_mapper(
         cp,
         sig,
         references,

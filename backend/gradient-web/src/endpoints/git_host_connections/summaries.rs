@@ -6,13 +6,11 @@
 
 //! API keys that are restricted to one project see only the tasks of that project. Such keys see only webhook deliveries for that project's repositories on a shared connection.
 
-use super::{
-    GitHostConnectionSummary, IncomingWebhookDeliveryResponse, RepositoryFit, name_owner,
-    webhook_url,
-};
+use super::{GitHostConnectionSummary, IncomingWebhookDeliveryResponse, name_owner, webhook_url};
 use crate::authorization::ApiKeyContext;
+use crate::endpoints::git_host_connections::repository_fit_for_git_host_connection;
 use crate::endpoints::git_host_hooks::repo_identity;
-use crate::endpoints::tasks::repository::TaskCommitStatusPostAttempt;
+use crate::endpoints::tasks::repository::task_commit_status_post_attempt_from_row_with_details_only_for_task_editor;
 use crate::error::WebResult;
 use crate::permissions::{Permission, mask_grants};
 use gradient_db::git_host_connections::{self as connections, GitHostConnectionOwnerByDatabaseId};
@@ -224,13 +222,15 @@ pub(crate) async fn summaries(
                 .map(IncomingWebhookDeliveryResponse::from),
             refused_signature_count: connection.refused_signature_count,
             last_refused_signature_at: connection.last_refused_signature_at,
-            last_status_post: status_posts
-                .remove(&connection.id)
-                .map(|post| TaskCommitStatusPostAttempt::of(post, can_manage)),
+            last_status_post: status_posts.remove(&connection.id).map(|post| {
+                task_commit_status_post_attempt_from_row_with_details_only_for_task_editor(
+                    post, can_manage,
+                )
+            }),
             task_count: task_counts.get(&connection.id).copied().unwrap_or(0),
             repository_fit: options
                 .repository
-                .map(|repository| RepositoryFit::of(repository, &connection)),
+                .map(|repository| repository_fit_for_git_host_connection(repository, &connection)),
         });
     }
     Ok(out)

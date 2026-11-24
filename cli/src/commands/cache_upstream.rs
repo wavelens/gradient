@@ -253,7 +253,7 @@ pub async fn handle(cmd: CacheUpstreamCommands, out: Output) {
                         .read_http_upstream_credential_request()
                         .unwrap_or_else(|error| out.fail(error)),
                     display_name: required(display_name, "--display-name"),
-                    http1_only: Some(http1_only),
+                    http1_only,
                     public_key,
                     url: required(url, "--url"),
                 },

@@ -1,4 +1,4 @@
-From 364c569a42a3e3c9ef9a87c95b88c6d7c904ce61 Mon Sep 17 00:00:00 2001
+From bed31ac84dcd7f1c04d9272004b0db42ce0651df Mon Sep 17 00:00:00 2001
 From: Dennis Wuitz <dennish@wuitz.de>
 Date: Sat, 13 Jun 2026 17:41:03 +0200
 Subject: [PATCH] libflake-c: expose nix_locked_flake_get_fingerprint
@@ -8,13 +8,28 @@ locked flake. A C API consumer that keeps evaluation results of its own
 needs the same key to tell whether a locked flake is the one it already
 has results for.
 ---
- src/libflake-c/nix_api_flake.cc     | 19 +++++++++
- src/libflake-c/nix_api_flake.h      | 23 +++++++++++
- src/libflake-tests/nix_api_flake.cc | 63 +++++++++++++++++++++++++++++
- 3 files changed, 105 insertions(+)
+ .../rl-next/c-api-locked-flake-fingerprint.md |  7 +++
+ src/libflake-c/nix_api_flake.cc               | 19 ++++++
+ src/libflake-c/nix_api_flake.h                | 23 +++++++
+ src/libflake-tests/nix_api_flake.cc           | 63 +++++++++++++++++++
+ 4 files changed, 112 insertions(+)
+ create mode 100644 doc/manual/rl-next/c-api-locked-flake-fingerprint.md
 
+diff --git a/doc/manual/rl-next/c-api-locked-flake-fingerprint.md b/doc/manual/rl-next/c-api-locked-flake-fingerprint.md
+new file mode 100644
+index 000000000..7117a41dd
+--- /dev/null
++++ b/doc/manual/rl-next/c-api-locked-flake-fingerprint.md
+@@ -0,0 +1,7 @@
++---
++synopsis: "C API: `nix_locked_flake_get_fingerprint`"
++---
++
++The new function `nix_locked_flake_get_fingerprint()` in `nix_api_flake.h` returns the fingerprint of a locked flake,
++the key under which Nix stores the flake's evaluation cache.
++For a flake whose source is not locked, the callback receives the empty string.
 diff --git a/src/libflake-c/nix_api_flake.cc b/src/libflake-c/nix_api_flake.cc
-index cbf5430f5..089fd6d6b 100644
+index 5bdd0213b..a7c0c5270 100644
 --- a/src/libflake-c/nix_api_flake.cc
 +++ b/src/libflake-c/nix_api_flake.cc
 @@ -7,8 +7,10 @@
@@ -28,7 +43,7 @@ index cbf5430f5..089fd6d6b 100644
  
  extern "C" {
  
-@@ -209,4 +211,21 @@ nix_value * nix_locked_flake_get_output_attrs(
+@@ -208,4 +210,21 @@ nix_value * nix_locked_flake_get_output_attrs(
      NIXC_CATCH_ERRS_NULL
  }
  
@@ -51,10 +66,10 @@ index cbf5430f5..089fd6d6b 100644
 +
  } // extern "C"
 diff --git a/src/libflake-c/nix_api_flake.h b/src/libflake-c/nix_api_flake.h
-index a3221e676..baa0e1d32 100644
+index 3c3208be3..88501409d 100644
 --- a/src/libflake-c/nix_api_flake.h
 +++ b/src/libflake-c/nix_api_flake.h
-@@ -239,6 +239,29 @@ void nix_flake_reference_free(nix_flake_reference * store);
+@@ -237,6 +237,29 @@ void nix_flake_reference_free(nix_flake_reference * store);
  nix_value * nix_locked_flake_get_output_attrs(
      nix_c_context * context, nix_flake_settings * settings, EvalState * evalState, nix_locked_flake * lockedFlake);
  
@@ -158,3 +173,6 @@ index 063dfc4d7..772cf4cd7 100644
  TEST_F(nix_api_store_test, nix_api_load_flake_with_flags)
  {
      nix_libstore_init(ctx);
+-- 
+2.56.0
+

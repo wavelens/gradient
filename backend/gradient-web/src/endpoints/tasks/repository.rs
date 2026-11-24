@@ -4,11 +4,11 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use super::error_message_if_caller_can_edit_task;
 use super::repository_status_check::{
-    TaskGitHostChain, TaskRepositoryStatusCheckInput,
+    TaskRepositoryStatusCheckInput,
     check_task_repository_readable_git_host_webhook_and_commit_status,
 };
-use super::{RepositoryFetchStatus, error_message_if_caller_can_edit_task};
 use crate::access::load_membership_with_permissions;
 use crate::api_spec::TaskPath;
 use crate::audit::Audit;
@@ -18,6 +18,7 @@ use crate::endpoints::git_host_connections::{
     IncomingWebhookDeliveryResponse, repository_fits_connection_with_known_host,
 };
 use crate::endpoints::git_host_hooks::repo_identity;
+use crate::endpoints::tasks::repository_fetch_status_for_task_row_when_caller_can_edit_task;
 use crate::error::{WebError, WebResult};
 use crate::extractors::JsonBody;
 use crate::helpers::ok_json;
@@ -25,6 +26,7 @@ use crate::permissions::{Permission, mask_grants};
 use crate::scope::{Member, RequiresUnmanaged, TaskScope, can};
 use axum::Json;
 use axum::extract::State;
+pub use gradient_api_types::{TaskCommitStatusPostAttempt, TaskRepositoryResponse};
 use gradient_ci::task_commit_status_posting::{
     CommitStatusTestSendError,
     post_pending_test_commit_status_for_last_evaluation_and_record_attempt,
@@ -46,55 +48,24 @@ use gradient_types::input::check_repository_url_is_ssh;
 use gradient_types::triggers::TriggerType;
 use gradient_types::*;
 use sea_orm::ActiveValue::Set;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use std::sync::Arc;
 
 const STATUS_POST_LIST_LIMIT: u64 = 10;
 const RECENT_DELIVERY_LIST_LIMIT: usize = 10;
 
-#[derive(Serialize, Debug, Clone, utoipa::ToSchema)]
-pub struct TaskCommitStatusPostAttempt {
-    pub id: TaskCommitStatusPostAttemptId,
-    pub event: String,
-    pub success: bool,
-    pub response_status: Option<i32>,
-    pub error_message: Option<String>,
-    pub delivered_at: chrono::NaiveDateTime,
-}
-
-impl TaskCommitStatusPostAttempt {
-    pub(crate) fn of(
-        row: gradient_entity::task_commit_status_post_attempt::Model,
-        can_edit_task: bool,
-    ) -> Self {
-        Self {
-            id: row.id,
-            event: row.event,
-            success: row.success,
-            response_status: row.response_status,
-            error_message: error_message_if_caller_can_edit_task(row.error_message, can_edit_task),
-            delivered_at: row.delivered_at,
-        }
+pub(crate) fn task_commit_status_post_attempt_from_row_with_details_only_for_task_editor(
+    row: gradient_entity::task_commit_status_post_attempt::Model,
+    can_edit_task: bool,
+) -> TaskCommitStatusPostAttempt {
+    TaskCommitStatusPostAttempt {
+        id: row.id,
+        event: row.event,
+        success: row.success,
+        response_status: row.response_status,
+        error_message: error_message_if_caller_can_edit_task(row.error_message, can_edit_task),
+        delivered_at: row.delivered_at,
     }
-}
-
-#[derive(Serialize, Debug, utoipa::ToSchema)]
-pub struct TaskRepositoryResponse {
-    pub repository: String,
-    pub uses_ssh: bool,
-    pub deploy_key: Option<String>,
-    pub fetch: Option<RepositoryFetchStatus>,
-    pub git_host_connection: Option<GitHostConnectionSummary>,
-    pub report_status: bool,
-    pub chain: TaskGitHostChain,
-    #[schema(required = false, default = json!([]))]
-    pub recent_deliveries: Vec<IncomingWebhookDeliveryResponse>,
-    pub status_posts: Vec<TaskCommitStatusPostAttempt>,
-    pub available_connections: Vec<GitHostConnectionSummary>,
-    pub can_edit: bool,
-    pub can_manage_integrations: bool,
-    #[schema(required = false, default = false)]
-    pub can_create_connection: bool,
 }
 
 #[derive(Deserialize, Debug, utoipa::ToSchema)]
@@ -102,7 +73,7 @@ pub struct TaskRepositoryConnectionAndCommitStatusPatchRequest {
     /// Omitted fields stay unchanged. Set git_host_connection to JSON null to detach the connection and disable commit status reporting.
     #[serde(
         default,
-        deserialize_with = "crate::helpers::deserialize_optional_field"
+        deserialize_with = "gradient_api_types::deserialize_optional_field"
     )]
     #[schema(value_type = Option<GitHostConnectionId>)]
     pub git_host_connection: Option<Option<GitHostConnectionId>>,
@@ -221,7 +192,12 @@ async fn repository_response(
         )
         .await?
         .into_iter()
-        .map(|row| TaskCommitStatusPostAttempt::of(row, can_edit_task))
+        .map(|row| {
+            task_commit_status_post_attempt_from_row_with_details_only_for_task_editor(
+                row,
+                can_edit_task,
+            )
+        })
         .collect();
 
     let uses_ssh = check_repository_url_is_ssh(&task.repository);
@@ -229,7 +205,7 @@ async fn repository_response(
         uses_ssh.then(|| format_public_key(project.clone(), &db.config.server.serve_url));
     let can_edit = can_edit_task && !task.managed;
     let can_create_connection = can_manage_integrations && !project.managed && !task.managed;
-    let fetch = RepositoryFetchStatus::of(task, can_edit_task);
+    let fetch = repository_fetch_status_for_task_row_when_caller_can_edit_task(task, can_edit_task);
     let chain = check_task_repository_readable_git_host_webhook_and_commit_status(
         &TaskRepositoryStatusCheckInput {
             repository: &task.repository,
@@ -493,5 +469,7 @@ pub async fn post_pending_commit_status_to_head_commit_for_status_test(
                     None => WebError::Internal(error),
                 },
             )?;
-    Ok(ok_json(TaskCommitStatusPostAttempt::of(attempt, true)))
+    Ok(ok_json(
+        task_commit_status_post_attempt_from_row_with_details_only_for_task_editor(attempt, true),
+    ))
 }

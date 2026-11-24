@@ -11,23 +11,13 @@ use crate::extractors::Path;
 use crate::helpers::ok_json;
 use axum::extract::State;
 use axum::{Extension, Json};
-use chrono::NaiveDateTime;
 use gradient_core::ServerState;
 use gradient_db::exec_jobs::pull_requests;
 use gradient_types::*;
-use serde::Serialize;
 use std::sync::Arc;
 
 use super::ExecJobAccessContext;
-
-#[derive(Serialize, Debug, utoipa::ToSchema)]
-pub struct ExecJobPullRequestView {
-    pub url: String,
-    pub branch: String,
-    pub number: i64,
-    pub git_host_connection: GitHostConnectionId,
-    pub created_at: NaiveDateTime,
-}
+pub use gradient_api_types::ExecJobPullRequestView;
 
 #[utoipa::path(
     get,

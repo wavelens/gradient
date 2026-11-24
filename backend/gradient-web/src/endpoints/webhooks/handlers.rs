@@ -19,6 +19,7 @@ use crate::resource::Resource;
 use anyhow::Context;
 use axum::Json;
 use axum::extract::State;
+pub use gradient_api_types::{CreateWebhookRequest, UpdateWebhookRequest};
 use gradient_ci::actions::encrypt_action_secret;
 use gradient_core::ServerState;
 use gradient_db::WebDb;
@@ -35,35 +36,11 @@ use std::sync::Arc;
 
 type ApiState = State<Arc<ServerState>>;
 
-#[derive(Deserialize, Debug, utoipa::ToSchema)]
-pub struct CreateWebhookRequest {
-    pub name: String,
-    #[schema(format = "uri")]
-    pub url: String,
-    #[serde(default)]
-    pub events: Vec<String>,
-    #[serde(default = "default_true")]
-    pub active: bool,
-}
-
-#[derive(Deserialize, Debug, utoipa::ToSchema)]
-pub struct UpdateWebhookRequest {
-    pub name: Option<String>,
-    #[schema(format = "uri")]
-    pub url: Option<String>,
-    pub events: Option<Vec<String>>,
-    pub active: Option<bool>,
-}
-
 #[derive(Deserialize, Debug, utoipa::IntoParams)]
 #[into_params(parameter_in = Query)]
 pub struct WebhookDeliveryListQuery {
     pub limit: Option<u64>,
     pub offset: Option<u64>,
-}
-
-fn default_true() -> bool {
-    true
 }
 
 fn check_events(events: &[String]) -> WebResult<()> {

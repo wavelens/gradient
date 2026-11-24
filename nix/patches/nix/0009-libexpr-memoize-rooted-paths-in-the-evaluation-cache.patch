@@ -1,4 +1,4 @@
-From 233adce9b327c013a8333f0cb9eb4230cfe78c10 Mon Sep 17 00:00:00 2001
+From 189e93f504860896243463eafb05ced827663369 Mon Sep 17 00:00:00 2001
 From: Dennis Wuitz <dennish@wuitz.de>
 Date: Sun, 25 Oct 2026 00:49:45 +0200
 Subject: [PATCH] libexpr: memoize rooted paths in the evaluation cache and
@@ -23,9 +23,9 @@ daemon ops on a cold flake walk that re-reads its own cache entries).
  src/libexpr/eval.cc                           |   1 +
  src/libexpr/include/nix/expr/eval.hh          |   9 +
  src/libexpr/primops.cc                        |   6 +
- .../nix/store/tests/forwarding-store.hh       | 124 ++++++++++++
+ .../nix/store/tests/forwarding-store.hh       | 129 ++++++++++++
  .../include/nix/store/tests/meson.build       |   1 +
- 8 files changed, 346 insertions(+), 6 deletions(-)
+ 8 files changed, 351 insertions(+), 6 deletions(-)
  create mode 100644 src/libexpr-tests/eval-cache.cc
  create mode 100644 src/libstore-test-support/include/nix/store/tests/forwarding-store.hh
 
@@ -225,10 +225,10 @@ index 000000000..9d484ff5b
 +
 +} // namespace nix
 diff --git a/src/libexpr-tests/meson.build b/src/libexpr-tests/meson.build
-index 50d158209..88e89bbf7 100644
+index 4924cb20b..73d3b1e61 100644
 --- a/src/libexpr-tests/meson.build
 +++ b/src/libexpr-tests/meson.build
-@@ -49,6 +49,7 @@ subdir('nix-meson-build-support/common')
+@@ -55,6 +55,7 @@ subdir('nix-meson-build-support/common')
  sources = files(
    'derived-path.cc',
    'error_traces.cc',
@@ -237,10 +237,10 @@ index 50d158209..88e89bbf7 100644
    'json.cc',
    'lazy-fetcher-attr.cc',
 diff --git a/src/libexpr/eval-cache.cc b/src/libexpr/eval-cache.cc
-index e0c76f96e..3cb2afb63 100644
+index 6cae38202..96e49040a 100644
 --- a/src/libexpr/eval-cache.cc
 +++ b/src/libexpr/eval-cache.cc
-@@ -8,6 +8,8 @@
+@@ -9,6 +9,8 @@
  // Need specialization involving `SymbolStr` just in this one module.
  #include "nix/util/strings-inline.hh"
  
@@ -249,7 +249,7 @@ index e0c76f96e..3cb2afb63 100644
  namespace nix::eval_cache {
  
  void CachedEvalError::anchor() {}
-@@ -635,6 +637,7 @@ string_t AttrCursor::getStringWithContext()
+@@ -647,6 +649,7 @@ string_t AttrCursor::getStringWithContext()
          if (cachedValue && !std::get_if<placeholder_t>(&cachedValue->second)) {
              if (auto s = std::get_if<string_t>(&cachedValue->second)) {
                  bool valid = true;
@@ -257,7 +257,7 @@ index e0c76f96e..3cb2afb63 100644
                  for (auto & c : s->second) {
                      const StorePath & path = std::visit(
                          overloaded{
-@@ -645,11 +648,16 @@ string_t AttrCursor::getStringWithContext()
+@@ -657,11 +660,16 @@ string_t AttrCursor::getStringWithContext()
                              [&](const NixStringContextElem::Opaque & o) -> const StorePath & { return o.path; },
                          },
                          c.raw);
@@ -279,7 +279,7 @@ index e0c76f96e..3cb2afb63 100644
                  }
                  if (valid) {
                      debug("using cached string attribute '%s'", getAttrPathStr());
-@@ -790,7 +798,7 @@ StorePath AttrCursor::forceDerivation()
+@@ -827,7 +835,7 @@ StorePath AttrCursor::forceDerivation()
      auto aDrvPath = getAttr(root->state.s.drvPath);
      auto drvPath = root->state.store->parseStorePath(aDrvPath->getString());
      drvPath.requireDerivation();
@@ -288,7 +288,7 @@ index e0c76f96e..3cb2afb63 100644
          root->state.store->addTempRoot(drvPath);
          if (!root->state.store->isValidPath(drvPath)) {
              /* The eval cache contains 'drvPath', but the actual path has
-@@ -800,6 +808,7 @@ StorePath AttrCursor::forceDerivation()
+@@ -837,6 +845,7 @@ StorePath AttrCursor::forceDerivation()
                  throw Error(
                      "don't know how to recreate store derivation '%s'!", root->state.store->printStorePath(drvPath));
          }
@@ -297,10 +297,10 @@ index e0c76f96e..3cb2afb63 100644
      return drvPath;
  }
 diff --git a/src/libexpr/eval.cc b/src/libexpr/eval.cc
-index 2b35e7f7a..1867f4da4 100644
+index c2bb7cc47..17171eaaa 100644
 --- a/src/libexpr/eval.cc
 +++ b/src/libexpr/eval.cc
-@@ -306,6 +306,7 @@ EvalState::EvalState(
+@@ -314,6 +314,7 @@ EvalState::EvalState(
      , debugRepl(nullptr)
      , debugStop(false)
      , trylevel(0)
@@ -309,7 +309,7 @@ index 2b35e7f7a..1867f4da4 100644
      , fileEvalCache(make_ref<decltype(fileEvalCache)::element_type>())
      , positionToDocComment(make_ref<decltype(positionToDocComment)::element_type>())
 diff --git a/src/libexpr/include/nix/expr/eval.hh b/src/libexpr/include/nix/expr/eval.hh
-index 8a810932d..6e9675c9e 100644
+index 5e66651e4..5a5dc658e 100644
 --- a/src/libexpr/include/nix/expr/eval.hh
 +++ b/src/libexpr/include/nix/expr/eval.hh
 @@ -23,6 +23,7 @@
@@ -320,7 +320,7 @@ index 8a810932d..6e9675c9e 100644
  
  #include <nlohmann/json_fwd.hpp>
  
-@@ -467,6 +468,14 @@ public:
+@@ -520,6 +521,14 @@ public:
       */
      std::map<const Hash, ref<eval_cache::EvalCache>> evalCaches;
  
@@ -336,10 +336,10 @@ index 8a810932d..6e9675c9e 100644
  
      /**
 diff --git a/src/libexpr/primops.cc b/src/libexpr/primops.cc
-index 46ef49a36..5c71cae2f 100644
+index f7e83fd3d..ed350789d 100644
 --- a/src/libexpr/primops.cc
 +++ b/src/libexpr/primops.cc
-@@ -22,6 +22,7 @@
+@@ -26,6 +26,7 @@
  
  #include <boost/container/small_vector.hpp>
  #include <boost/unordered/concurrent_flat_map.hpp>
@@ -347,7 +347,7 @@ index 46ef49a36..5c71cae2f 100644
  #include <boost/unordered/unordered_flat_map.hpp>
  #include <nlohmann/json.hpp>
  
-@@ -1860,6 +1861,11 @@ static void derivationStrictInternal(EvalState & state, std::string_view drvName
+@@ -1918,6 +1919,11 @@ static void derivationStrictInternal(EvalState & state, std::string_view drvName
          settings.readOnlyMode ? computeStorePath(*state.store, drv) : state.store->writeDerivation(drv, state.repair);
      auto drvPathS = state.store->printStorePath(drvPath);
  
@@ -361,10 +361,10 @@ index 46ef49a36..5c71cae2f 100644
      /* Optimisation, but required in read-only mode! because in that
 diff --git a/src/libstore-test-support/include/nix/store/tests/forwarding-store.hh b/src/libstore-test-support/include/nix/store/tests/forwarding-store.hh
 new file mode 100644
-index 000000000..02422d9eb
+index 000000000..64b6fd48c
 --- /dev/null
 +++ b/src/libstore-test-support/include/nix/store/tests/forwarding-store.hh
-@@ -0,0 +1,124 @@
+@@ -0,0 +1,129 @@
 +#pragma once
 +///@file
 +
@@ -452,6 +452,11 @@ index 000000000..02422d9eb
 +        inner->addTempRoot(path);
 +    }
 +
++    void registerDrvOutput(const Realisation & output, CheckSigsFlag checkSigs) override
++    {
++        inner->registerDrvOutput(output, checkSigs);
++    }
++
 +
 +protected:
 +
@@ -482,9 +487,9 @@ index 000000000..02422d9eb
 +        }
 +    }
 +
-+    void registerDrvOutput(const Realisation & output) override
++    void registerDrvOutputUnchecked(const Realisation & output) override
 +    {
-+        inner->registerDrvOutput(output);
++        inner->registerDrvOutput(output, NoCheckSigs);
 +    }
 +};
 +
@@ -501,3 +506,6 @@ index 8d844d24e..7e0d1cb89 100644
    'https-store.hh',
    'libstore-network.hh',
    'libstore.hh',
+-- 
+2.56.0
+

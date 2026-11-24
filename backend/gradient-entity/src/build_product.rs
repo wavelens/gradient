@@ -41,3 +41,28 @@ impl sea_orm::Related<super::derivation_output::Entity> for Entity {
         Relation::DerivationOutput.def()
     }
 }
+
+impl From<Model> for gradient_api_types::BuildProduct {
+    fn from(product: Model) -> Self {
+        Self {
+            file_type: product.file_type,
+            subtype: product.subtype,
+            name: product.name,
+            path: product.path,
+            size: product.size.map(|s| s as u64),
+        }
+    }
+}
+
+impl From<Model> for gradient_api_types::ProductArtefact {
+    fn from(p: Model) -> Self {
+        Self {
+            id: p.id,
+            file_type: p.file_type,
+            subtype: p.subtype,
+            name: p.name,
+            path: p.path,
+            size: p.size,
+        }
+    }
+}

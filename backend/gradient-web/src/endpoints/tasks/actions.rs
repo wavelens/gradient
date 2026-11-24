@@ -21,6 +21,9 @@ use anyhow::Context;
 use axum::Json;
 use axum::extract::State;
 use chrono::Utc;
+pub use gradient_api_types::{
+    ActionResponse, CreateActionRequest, CreateActionResponse, UpdateActionRequest,
+};
 use gradient_ci::actions::encrypt_action_secret;
 use gradient_core::ServerState;
 use gradient_db::WebDb;
@@ -34,8 +37,7 @@ use gradient_util::http_validation::{
     DestinationUrlRejectedError, parse_and_check_allowed_outbound_url,
 };
 use sea_orm::ActiveValue::Set;
-use serde::{Deserialize, Serialize};
-use serde_json::Value as JsonValue;
+use serde::Deserialize;
 use std::sync::Arc;
 use utoipa_axum::router::OpenApiRouter;
 use utoipa_axum::routes;
@@ -48,76 +50,6 @@ pub fn router() -> OpenApiRouter<Arc<ServerState>> {
         .routes(routes!(regenerate_token))
         .routes(routes!(list_deliveries))
         .routes(routes!(get_delivery))
-}
-
-#[derive(Serialize, Debug, utoipa::ToSchema)]
-pub struct ActionResponse {
-    pub id: TaskActionId,
-    pub name: String,
-    pub action_type: String,
-    pub config: JsonValue,
-    pub events: Vec<String>,
-    pub active: bool,
-    pub last_fired_at: Option<chrono::NaiveDateTime>,
-    pub last_delivery: Option<ActionDeliveryItem>,
-    pub created_by: UserId,
-    pub created_at: chrono::NaiveDateTime,
-    pub updated_at: chrono::NaiveDateTime,
-}
-
-impl From<MTaskAction> for ActionResponse {
-    fn from(m: MTaskAction) -> Self {
-        let at = m.action_type;
-        let mut config = m.config;
-        if let Some(field) = at.secret_field()
-            && let Some(obj) = config.as_object_mut()
-        {
-            obj.remove(field);
-        }
-        let events = m
-            .events
-            .as_array()
-            .map(|arr| {
-                arr.iter()
-                    .filter_map(|v| v.as_str().map(str::to_owned))
-                    .collect()
-            })
-            .unwrap_or_default();
-        Self {
-            id: m.id,
-            name: m.name,
-            action_type: at.as_str().into(),
-            config,
-            events,
-            active: m.active,
-            last_fired_at: m.last_fired_at,
-            last_delivery: None,
-            created_by: m.created_by,
-            created_at: m.created_at,
-            updated_at: m.updated_at,
-        }
-    }
-}
-
-#[derive(Serialize, Debug, utoipa::ToSchema)]
-pub struct CreateActionResponse {
-    pub action: ActionResponse,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub token: Option<String>,
-}
-
-#[derive(Deserialize, Debug, utoipa::ToSchema)]
-pub struct CreateActionRequest {
-    pub name: String,
-    pub config: ActionConfig,
-    #[serde(default)]
-    pub events: Vec<String>,
-    #[serde(default = "default_true")]
-    pub active: bool,
-}
-
-fn default_true() -> bool {
-    true
 }
 
 fn encrypt_secret(config: &RuntimeConfig, plain: &str) -> WebResult<String> {
@@ -367,14 +299,6 @@ pub async fn create_action(
         action: m.into(),
         token: plaintext_token,
     }))
-}
-
-#[derive(Deserialize, Debug, utoipa::ToSchema)]
-pub struct UpdateActionRequest {
-    pub name: Option<String>,
-    pub config: Option<ActionConfig>,
-    pub events: Option<Vec<String>>,
-    pub active: Option<bool>,
 }
 
 #[utoipa::path(

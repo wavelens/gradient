@@ -27,9 +27,9 @@ use clap::Subcommand;
 use clap_complete::engine::ArgValueCompleter;
 use connector::api::{
     AddMemberRequest, CacheSubscriptionMode, GrantProjectRequest, MakeProjectRequest,
-    PatchProjectGrantRequest, PatchProjectRequest, PutProjectSecretRequest, RemoveMemberRequest,
-    RevokeInvitationRequest, SubscribeCacheRequest, SubscriptionStatus, TaskRepositoryFetchStatus,
-    TeamRole,
+    PatchProjectGrantRequest, PatchProjectRequest, ProjectDisplayName, ProjectName,
+    PutProjectSecretRequest, RemoveMemberRequest, RevokeInvitationRequest, SubscribeCacheRequest,
+    SubscriptionStatus, TaskRepositoryFetchStatus, TeamRole,
 };
 use connector::git_host_connections::GitHostConnectionSetOwner;
 use connector::webhooks::WebhookResource;
@@ -333,8 +333,9 @@ pub async fn handle(cmd: Commands, out: Output) {
             match client
                 .projects()
                 .create(MakeProjectRequest {
-                    name: name.clone().into(),
-                    display_name: input.get("Display Name").into(),
+                    name: ProjectName::try_from(name.clone()).unwrap_or_else(|e| out.fail(e)),
+                    display_name: ProjectDisplayName::try_from(input.get("Display Name"))
+                        .unwrap_or_else(|e| out.fail(e)),
                     description: input.get("Description"),
                     hide_build_requests: None,
                     public: None,
@@ -441,7 +442,9 @@ pub async fn handle(cmd: Commands, out: Output) {
                 .update(
                     &project,
                     PatchProjectRequest {
-                        name: (input.get("Name") != project).then(|| input.get("Name").into()),
+                        name: (input.get("Name") != project).then(|| {
+                            ProjectName::try_from(input.get("Name")).unwrap_or_else(|e| out.fail(e))
+                        }),
                         display_name: Some(input.get("Display Name")),
                         description: Some(input.get("Description")),
                         hide_build_requests: None,
@@ -534,8 +537,7 @@ pub async fn handle(cmd: Commands, out: Output) {
                             AddMemberRequest {
                                 user,
                                 role: role.unwrap_or_else(|| "Write".to_string()),
-                                add_as_member_immediately: add_as_member_immediately
-                                    .then_some(true),
+                                add_as_member_immediately,
                             },
                         )
                         .await
@@ -663,7 +665,7 @@ pub async fn handle(cmd: Commands, out: Output) {
                                 out.human("No secrets in the project.");
                             }
                             for secret in secrets {
-                                out.human(format!("{}: {}", secret.name, secret.updated_at));
+                                out.human(format!("{}: {:?}", secret.name, secret.updated_at));
                             }
                         }
                         Err(e) => out.fail(e),
@@ -675,7 +677,7 @@ pub async fn handle(cmd: Commands, out: Output) {
                         Ok(secret) => {
                             out.ok(&secret);
                             out.human(format!("Name: {}", secret.name));
-                            out.human(format!("Updated at: {}", secret.updated_at));
+                            out.human(format!("Updated at: {:?}", secret.updated_at));
                             if let Some(by) = &secret.updated_by {
                                 out.human(format!("Updated by: {by}"));
                             }
@@ -792,8 +794,8 @@ pub async fn handle(cmd: Commands, out: Output) {
                             GrantProjectRequest {
                                 team,
                                 role,
-                                users: Some(users),
-                                workers: Some(workers),
+                                users,
+                                workers,
                             },
                         )
                         .await
@@ -844,7 +846,7 @@ pub async fn handle(cmd: Commands, out: Output) {
                             }
                             for invitation in invitations {
                                 out.human(format!(
-                                    "{}: {} until {}",
+                                    "{}: {} until {:?}",
                                     invitation.user, invitation.role, invitation.expires_at
                                 ));
                             }
@@ -947,7 +949,7 @@ pub async fn print_missing_project_prerequisites(client: &Client, project: &str,
         .cache
         .subscriptions
         .iter()
-        .filter(|subscription| subscription.status == SubscriptionStatus::Pending)
+        .filter(|subscription| matches!(subscription.status, SubscriptionStatus::Pending))
     {
         out.human(format!(
             "Subscription to {cache} pending approval from {approvers}",

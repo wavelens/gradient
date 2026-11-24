@@ -18,54 +18,32 @@ use crate::refusal::SharedRefusal;
 use crate::resource::Resource;
 use axum::Json;
 use axum::extract::State;
+pub use gradient_api_types::{
+    AddMemberRequest, ChangeMemberRoleRequest, MemberItem, RemoveMemberRequest,
+};
 use gradient_core::ServerState;
 use gradient_db::WebDb;
 use gradient_notify::{InvitationMail, generate_token};
 use gradient_types::*;
 use sea_orm::{ConnectionTrait, TransactionTrait};
-use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
 
-#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
-pub struct MemberItem {
-    pub id: String,
-    pub user_display_name: Option<String>,
-    pub name: String,
-}
-
-impl MemberItem {
-    fn new(member: MemberFields, user: Option<&MUser>, roles: &HashMap<RoleId, String>) -> Self {
-        Self {
-            id: user
-                .map(|u| u.username.clone())
-                .unwrap_or_else(|| member.user.to_string()),
-            user_display_name: user.map(|u| u.name.clone()),
-            name: roles
-                .get(&member.role)
-                .cloned()
-                .unwrap_or_else(|| member.role.to_string()),
-        }
+fn member_item_from_member_fields_user_row_and_role_names(
+    member: MemberFields,
+    user: Option<&MUser>,
+    roles: &HashMap<RoleId, String>,
+) -> MemberItem {
+    MemberItem {
+        id: user
+            .map(|u| u.username.clone())
+            .unwrap_or_else(|| member.user.to_string()),
+        user_display_name: user.map(|u| u.name.clone()),
+        name: roles
+            .get(&member.role)
+            .cloned()
+            .unwrap_or_else(|| member.role.to_string()),
     }
-}
-
-#[derive(Serialize, Deserialize, Debug, utoipa::ToSchema)]
-pub struct AddMemberRequest {
-    pub user: String,
-    pub role: String,
-    #[serde(default)]
-    pub add_as_member_immediately: bool,
-}
-
-#[derive(Serialize, Deserialize, Debug, utoipa::ToSchema)]
-pub struct ChangeMemberRoleRequest {
-    pub user: String,
-    pub role: String,
-}
-
-#[derive(Serialize, Deserialize, Debug, utoipa::ToSchema)]
-pub struct RemoveMemberRequest {
-    pub user: String,
 }
 
 async fn find_membership<T: MemberTable>(
@@ -124,7 +102,7 @@ pub async fn list<O: Owner>(
     let items: Vec<MemberItem> = members
         .iter()
         .map(|(member, user)| {
-            MemberItem::new(
+            member_item_from_member_fields_user_row_and_role_names(
                 <O::Members as MemberTable>::fields(member),
                 user.as_ref(),
                 &role_map,

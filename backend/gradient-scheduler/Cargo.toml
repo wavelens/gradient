@@ -18,6 +18,7 @@ path = "src/lib.rs"
 workspace = true
 
 [dependencies]
+gradient-api-types = { workspace = true }
 gradient-core = { workspace = true }
 gradient-ci = { workspace = true }
 gradient-graph = { workspace = true }

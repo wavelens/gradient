@@ -3,9 +3,9 @@
 
 use crate::api::{
     ApiKeyInfo, ApiKeyPermissionsResponse, ApiKeyRequest, AuditLogEntry, CreateApiKeyRequest,
-    CreateSshKeyRequest, DeleteUserRequest, GetUserSettingsResponse, InviteTokenRequest,
-    PaginatedSessionInfo, PatchApiKeyRequest, PatchUserSettingsRequest,
-    PendingUserDecisionsResponse, SshKeyInfo, UserAccessSummary, UserInfoResponse,
+    CreateSshKeyRequest, DeleteUserRequest, GetUserSettingsResponse, InviteTokenRequest, Paginated,
+    PatchApiKeyRequest, PatchUserSettingsRequest, PendingUserDecisionsResponse, SessionInfo,
+    SshKeyInfo, UserAccessSummary, UserInfoResponse,
 };
 use crate::http::encode_url_component;
 use crate::{Client, ConnectorError, http};
@@ -224,7 +224,7 @@ impl UserApi<'_> {
         &self,
         page: Option<u64>,
         per_page: Option<u64>,
-    ) -> Result<PaginatedSessionInfo, ConnectorError> {
+    ) -> Result<Paginated<SessionInfo>, ConnectorError> {
         let mut req = http::request(
             self.0.http(),
             self.0.base_url(),

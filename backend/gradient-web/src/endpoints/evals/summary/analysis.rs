@@ -4,9 +4,9 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+pub use gradient_api_types::PackageCounts;
 use gradient_entity::build::BuildStatus;
 use gradient_types::ids::DerivationId;
-use serde::Serialize;
 use std::collections::{BTreeSet, HashMap, HashSet};
 
 pub(super) struct Package {
@@ -32,15 +32,6 @@ pub(super) struct Failure {
     pub attributes: Vec<String>,
     pub blocked: Vec<String>,
     pub newly_failing: bool,
-}
-
-#[derive(Serialize, Debug, Default, PartialEq, Eq, utoipa::ToSchema)]
-pub struct PackageCounts {
-    pub total: usize,
-    pub built: usize,
-    pub failed: usize,
-    pub blocked: usize,
-    pub unfinished: usize,
 }
 
 const fn failed_itself(status: BuildStatus) -> bool {

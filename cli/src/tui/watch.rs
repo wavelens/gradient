@@ -473,13 +473,13 @@ mod tests {
             name: name.to_string(),
             prioritized: false,
             status: status.to_string(),
-            updated_at: String::new(),
+            updated_at: Default::default(),
         }
     }
 
     fn msg(id: &str, level: MessageLevel, text: &str) -> EvaluationMessageResponse {
         EvaluationMessageResponse {
-            created_at: String::new(),
+            created_at: Default::default(),
             entry_points: Vec::new(),
             id: id.parse().unwrap(),
             level,

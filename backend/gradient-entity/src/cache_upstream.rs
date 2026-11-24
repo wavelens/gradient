@@ -125,6 +125,15 @@ impl Model {
     }
 }
 
+impl From<UpstreamCredentialScheme> for gradient_api_types::CredentialSchemeItem {
+    fn from(scheme: UpstreamCredentialScheme) -> Self {
+        match scheme {
+            UpstreamCredentialScheme::Basic => Self::Basic,
+            UpstreamCredentialScheme::Bearer => Self::Bearer,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

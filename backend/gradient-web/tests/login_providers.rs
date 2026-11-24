@@ -112,7 +112,7 @@ fn csrf_cookie(set_cookie: &str) -> &str {
 fn decode_csrf(cookie: &str) -> CsrfClaims {
     decode::<CsrfClaims>(
         cookie.trim_start_matches("login_csrf="),
-        &DecodingKey::from_secret(TEST_JWT_SECRET.as_bytes()),
+        &DecodingKey::from_secret(TEST_JWT_SECRET.as_bytes()).unwrap(),
         &Validation::new(Algorithm::HS256),
     )
     .unwrap()
@@ -131,7 +131,7 @@ fn signed_cookie(purpose: Value, exp_offset: i64) -> String {
             "pkce_verifier": "v",
             "purpose": purpose,
         }),
-        &EncodingKey::from_secret(TEST_JWT_SECRET.as_bytes()),
+        &EncodingKey::from_secret(TEST_JWT_SECRET.as_bytes()).unwrap(),
     )
     .unwrap();
     format!("login_csrf={jwt}")

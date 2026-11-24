@@ -5,7 +5,7 @@
  */
 
 use gradient_types::input::*;
-use gradient_types::input::{InputError, check_task_name};
+use gradient_types::input::{IndexOrDisplayNameValidationError, InputError, check_task_name};
 
 #[test]
 fn url_to_addr_resolves_host_to_socket_addr() {
@@ -138,9 +138,12 @@ fn task_name_rejects_the_reserved_name_but_allows_similar() {
     }
     assert_eq!(
         check_task_name("Build-Request"),
-        Err(InputError::NameNotLowercase)
+        Err(IndexOrDisplayNameValidationError::NameNotLowercase)
     );
-    assert_eq!(check_task_name(""), Err(InputError::NameEmpty));
+    assert_eq!(
+        check_task_name(""),
+        Err(IndexOrDisplayNameValidationError::NameEmpty)
+    );
 }
 
 #[test]

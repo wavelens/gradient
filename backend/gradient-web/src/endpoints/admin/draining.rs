@@ -12,21 +12,11 @@ use axum::{Extension, Json, extract::State};
 use gradient_core::ServerState;
 use gradient_scheduler::Scheduler;
 use gradient_types::BaseResponse;
-use serde::{Deserialize, Serialize};
 use tracing::info;
 
 use crate::error::{WebError, WebResult};
 use crate::helpers::ok_json;
-
-#[derive(Deserialize, utoipa::ToSchema)]
-pub struct SetDrainingRequest {
-    pub enabled: bool,
-}
-
-#[derive(Serialize, Debug, utoipa::ToSchema)]
-pub struct DrainingResponse {
-    pub draining: bool,
-}
+pub use gradient_api_types::{DrainingResponse, SetDrainingRequest};
 
 #[utoipa::path(
     post,

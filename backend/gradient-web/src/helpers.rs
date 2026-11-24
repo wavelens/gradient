@@ -7,11 +7,11 @@
 use crate::error::{WebError, WebResult};
 use crate::resource::Resource;
 use axum::Json;
+pub use gradient_api_types::CreatedEntityResponse;
 use gradient_db::lookup::by_ids;
 use gradient_types::ids::RoleId;
 use gradient_types::{BaseResponse, ERole, Paginated, PaginationParams};
 use sea_orm::{ConnectionTrait, PaginatorTrait, SelectorTrait};
-use serde::Serialize;
 use std::collections::HashMap;
 
 #[inline]
@@ -20,31 +20,6 @@ pub fn ok_json<T>(message: T) -> Json<BaseResponse<T>> {
         error: false,
         message,
     })
-}
-
-#[derive(Serialize, Debug, utoipa::ToSchema)]
-pub struct CreatedEntityResponse {
-    pub id: String,
-    pub name: String,
-    pub url: String,
-}
-
-impl CreatedEntityResponse {
-    pub fn new(id: impl ToString, name: impl Into<String>, url: String) -> Self {
-        Self {
-            id: id.to_string(),
-            name: name.into(),
-            url,
-        }
-    }
-}
-
-pub fn deserialize_optional_field<'de, T, D>(de: D) -> Result<Option<Option<T>>, D::Error>
-where
-    T: serde::Deserialize<'de>,
-    D: serde::Deserializer<'de>,
-{
-    Ok(Some(<Option<T> as serde::Deserialize>::deserialize(de)?))
 }
 
 pub trait OptionExt<T> {

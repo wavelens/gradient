@@ -13,13 +13,12 @@ use crate::refusal::{Refusal, RefusalStatus, SharedRefusal};
 use crate::resource::Resource;
 use axum::extract::State;
 use axum::{Extension, Json};
-use chrono::NaiveDateTime;
+pub use gradient_api_types::{CreateSshKeyRequest, SshKeyInfo};
 use gradient_core::ServerState;
 use gradient_db::lookup::by_id;
 use gradient_types::events::EventOwner;
 use gradient_types::events::audit::Action;
 use gradient_types::*;
-use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
 #[derive(Debug, thiserror::Error)]
@@ -45,33 +44,6 @@ impl Refusal for SshKeyRefusal {
     }
 }
 
-#[derive(Serialize, utoipa::ToSchema)]
-pub struct SshKeyInfo {
-    pub id: UserSshKeyId,
-    pub name: String,
-    pub fingerprint: String,
-    pub created_at: NaiveDateTime,
-    pub last_used_at: Option<NaiveDateTime>,
-}
-
-impl From<MUserSshKey> for SshKeyInfo {
-    fn from(key: MUserSshKey) -> Self {
-        Self {
-            id: key.id,
-            name: key.name,
-            fingerprint: key.fingerprint,
-            created_at: key.created_at,
-            last_used_at: key.last_used_at,
-        }
-    }
-}
-
-#[derive(Deserialize, utoipa::ToSchema)]
-pub struct CreateSshKeyRequest {
-    pub name: String,
-    pub public_key: String,
-}
-
 const MIN_RSA_BITS: usize = 2048;
 
 fn fingerprint(public_key: &str) -> Result<String, SshKeyRefusal> {
@@ -89,7 +61,7 @@ fn fingerprint(public_key: &str) -> Result<String, SshKeyRefusal> {
         ssh_key::PublicKey::from_openssh(public_key).map_err(|_| SshKeyRefusal::NotAnOpenSshKey)?;
 
     if let ssh_key::public::KeyData::Rsa(rsa) = key.key_data()
-        && rsa_bits(&rsa.n) < MIN_RSA_BITS
+        && rsa_bits(rsa.n()) < MIN_RSA_BITS
     {
         return Err(SshKeyRefusal::WeakRsaKey);
     }

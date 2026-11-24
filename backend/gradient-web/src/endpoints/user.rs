@@ -15,9 +15,8 @@ use crate::extractors::{JsonBody, Path, Query};
 use crate::helpers::{OptionExt, ok_json, paginate};
 use crate::ip_allowlist::normalize_allowed_ips;
 use crate::lookup::require;
-use crate::names::UserDisplayName;
 use crate::permissions::{
-    CachePermission, Permission, PermissionEntry, PermissionMask, available_cache_permissions,
+    CachePermission, Permission, PermissionMask, available_cache_permissions,
     available_permissions, available_server_permissions, cache_mask_to_vec, cache_mask_to_wire,
     mask_grants, mask_to_vec, mask_with_view_project_permission, parse_cache_permission_list,
     parse_permission_list, project_permission_mask_to_wire_names, server_wide_mask,
@@ -49,6 +48,11 @@ use crate::password_hashing_and_wrong_sign_in_attempts::{
     WrongPasswordAttemptCountsAndLastAttemptTimesByUserId,
     acquire_password_hashing_slot_with_five_second_timeout,
     password_matches_account_hash_or_dummy_hash,
+};
+pub use gradient_api_types::{
+    ApiKeyInfo, ApiKeyPermissionsResponse, ApiKeyRequest, AuditLogEntry, ConnectedLoginProvider,
+    CreateApiKeyRequest, DeleteUserRequest, GetUserSettingsResponse, PatchApiKeyRequest,
+    PatchUserSettingsRequest, SessionInfo, UserInfoResponse,
 };
 
 #[derive(Debug, thiserror::Error)]
@@ -136,28 +140,18 @@ impl Refusal for UserRefusal {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug, utoipa::ToSchema)]
-pub struct UserInfoResponse {
-    pub id: String,
-    pub username: String,
-    pub name: String,
-    pub email: String,
-    pub superuser: bool,
-    pub last_seen_version: Option<String>,
-    pub can_create_cache: bool,
-}
-
-impl UserInfoResponse {
-    fn new(user: &MUser, can_create_cache: bool) -> Self {
-        Self {
-            id: user.id.to_string(),
-            username: user.username.clone(),
-            name: user.name.clone(),
-            email: user.email.clone(),
-            superuser: user.superuser,
-            last_seen_version: user.last_seen_version.clone(),
-            can_create_cache,
-        }
+fn build_user_info_response_from_user_row_and_cache_creation_permission(
+    user: &MUser,
+    can_create_cache: bool,
+) -> UserInfoResponse {
+    UserInfoResponse {
+        id: user.id.to_string(),
+        username: user.username.clone(),
+        name: user.name.clone(),
+        email: user.email.clone(),
+        superuser: user.superuser,
+        last_seen_version: user.last_seen_version.clone(),
+        can_create_cache,
     }
 }
 
@@ -173,90 +167,27 @@ fn is_version(version: &str) -> bool {
             .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '+'))
 }
 
-#[derive(Serialize, Deserialize, Debug, utoipa::ToSchema)]
-pub struct ApiKeyRequest {
-    pub name: String,
-}
-
-#[derive(Serialize, Deserialize, Debug, utoipa::ToSchema)]
-pub struct CreateApiKeyRequest {
-    pub name: String,
-    #[serde(default)]
-    #[schema(minimum = 1)]
-    pub expires_in_days: Option<u32>,
-    #[serde(default)]
-    pub permissions: Vec<String>,
-    #[serde(default)]
-    pub cache_permissions: Vec<String>,
-    #[serde(default)]
-    pub project: Option<String>,
-    #[serde(default)]
-    pub cache: Option<String>,
-    #[serde(default)]
-    pub allowed_ips: Option<Vec<String>>,
-}
-
-#[derive(Deserialize, Debug, utoipa::ToSchema)]
-pub struct PatchApiKeyRequest {
-    pub name: Option<String>,
-    pub permissions: Option<Vec<String>>,
-    pub cache_permissions: Option<Vec<String>>,
-    /// An omitted field leaves the pin unchanged. A name pins the key and JSON null unpins it.
-    #[serde(
-        default,
-        deserialize_with = "crate::helpers::deserialize_optional_field"
-    )]
-    pub project: Option<Option<String>>,
-    #[serde(
-        default,
-        deserialize_with = "crate::helpers::deserialize_optional_field"
-    )]
-    pub cache: Option<Option<String>>,
-    #[serde(default)]
-    pub allowed_ips: Option<Vec<String>>,
-}
-
-#[derive(Serialize, Debug, utoipa::ToSchema)]
-pub struct ApiKeyInfo {
-    pub id: String,
-    pub name: String,
-    pub managed: bool,
-    pub permissions: Vec<&'static str>,
-    pub cache_permissions: Vec<&'static str>,
-    pub project: Option<String>,
-    pub cache: Option<String>,
-    pub created_at: String,
-    pub last_used_at: Option<String>,
-    pub expires_at: Option<String>,
-    pub revoked_at: Option<String>,
-    pub allowed_ips: Vec<String>,
-}
-
-impl ApiKeyInfo {
-    fn new(key: MApi, pins: &PinNames) -> Self {
-        Self {
-            id: key.id.to_string(),
-            name: key.name,
-            managed: key.managed,
-            permissions: project_permission_mask_to_wire_names(key.permission),
-            cache_permissions: cache_mask_to_wire(key.cache_permission),
-            project: key.project.and_then(|id| pins.projects.get(&id).cloned()),
-            cache: key.cache.and_then(|id| pins.caches.get(&id).cloned()),
-            created_at: fmt_dt(key.created_at),
-            last_used_at: last_used_or_none(key.last_used_at),
-            expires_at: fmt_opt_dt(key.expires_at),
-            revoked_at: fmt_opt_dt(key.revoked_at),
-            allowed_ips: key.allowed_ips.unwrap_or_default(),
-        }
+fn api_key_info_from_api_key_row_and_pinned_names(key: MApi, pins: &PinNames) -> ApiKeyInfo {
+    ApiKeyInfo {
+        id: key.id.to_string(),
+        name: key.name,
+        managed: key.managed,
+        permissions: project_permission_mask_to_wire_names(key.permission)
+            .into_iter()
+            .map(String::from)
+            .collect(),
+        cache_permissions: cache_mask_to_wire(key.cache_permission)
+            .into_iter()
+            .map(String::from)
+            .collect(),
+        project: key.project.and_then(|id| pins.projects.get(&id).cloned()),
+        cache: key.cache.and_then(|id| pins.caches.get(&id).cloned()),
+        created_at: fmt_dt(key.created_at),
+        last_used_at: last_used_or_none(key.last_used_at),
+        expires_at: fmt_opt_dt(key.expires_at),
+        revoked_at: fmt_opt_dt(key.revoked_at),
+        allowed_ips: key.allowed_ips.unwrap_or_default(),
     }
-}
-
-#[derive(Serialize, Debug, utoipa::ToSchema)]
-pub struct ApiKeyPermissionsResponse {
-    pub available_permissions: Vec<PermissionEntry>,
-    #[serde(rename = "availableCache")]
-    pub available_cache: Vec<PermissionEntry>,
-    pub server_wide_permissions: Vec<PermissionEntry>,
 }
 
 #[derive(Serialize, Debug, utoipa::ToSchema)]
@@ -273,114 +204,46 @@ pub struct ApiKeyVisibleProjectsAndCachesWithPermissionsResponse {
     pub create_project: bool,
 }
 
-#[derive(Serialize, Deserialize, Debug, utoipa::ToSchema)]
-pub struct DeleteUserRequest {
-    #[serde(default)]
-    pub password: Option<String>,
-    #[serde(default)]
-    pub confirm_username: Option<String>,
-}
-
-#[derive(Serialize, Debug, utoipa::ToSchema)]
-pub struct SessionInfo {
-    pub id: String,
-    pub user_agent: Option<String>,
-    pub ip: Option<String>,
-    pub created_at: String,
-    pub last_used_at: String,
-    pub expires_at: String,
-    pub remember_me: bool,
-    pub current: bool,
-    /// True if `gradient login` created the session through approval in the browser. Such sessions end 30 days after sign-in and can't change account credentials.
-    pub is_cli_device_sign_in_session: bool,
-}
-
-impl SessionInfo {
-    fn new(session: MSession, current_session: Option<SessionId>) -> Self {
-        Self {
-            id: session.id.to_string(),
-            user_agent: session.user_agent,
-            ip: session.ip,
-            created_at: fmt_dt(session.created_at),
-            last_used_at: fmt_dt(session.last_used_at),
-            expires_at: fmt_dt(session.expires_at),
-            remember_me: session.remember_me,
-            current: Some(session.id) == current_session,
-            is_cli_device_sign_in_session: session.is_cli_device_sign_in_session,
-        }
+fn build_session_info_from_login_session_row_marking_if_current(
+    session: MSession,
+    current_session: Option<SessionId>,
+) -> SessionInfo {
+    SessionInfo {
+        id: session.id.to_string(),
+        user_agent: session.user_agent,
+        ip: session.ip,
+        created_at: fmt_dt(session.created_at),
+        last_used_at: fmt_dt(session.last_used_at),
+        expires_at: fmt_dt(session.expires_at),
+        remember_me: session.remember_me,
+        current: Some(session.id) == current_session,
+        is_cli_device_sign_in_session: session.is_cli_device_sign_in_session,
     }
 }
 
-#[derive(Serialize, Debug, utoipa::ToSchema)]
-pub struct AuditLogEntry {
-    pub id: String,
-    pub event: String,
-    pub ip: Option<String>,
-    pub user_agent: Option<String>,
-    pub metadata: Option<serde_json::Value>,
-    pub created_at: String,
-}
-
-impl From<MAuditLog> for AuditLogEntry {
-    fn from(entry: MAuditLog) -> Self {
-        Self {
-            id: entry.id.to_string(),
-            event: entry.event,
-            ip: entry.ip,
-            user_agent: entry.user_agent,
-            metadata: entry.metadata,
-            created_at: fmt_dt(entry.created_at),
-        }
-    }
-}
-
-#[derive(Serialize, Deserialize, Debug, utoipa::ToSchema)]
-pub struct PatchUserSettingsRequest {
-    pub username: Option<String>,
-    pub name: Option<UserDisplayName>,
-    pub email: Option<String>,
-}
-
-#[derive(Serialize, Deserialize, Debug, utoipa::ToSchema)]
-pub struct GetUserSettingsResponse {
-    pub username: String,
-    pub name: String,
-    pub email: String,
-    pub is_oidc: bool,
-    pub has_password: bool,
-    pub login_providers: Vec<ConnectedLoginProvider>,
-    pub managed: bool,
-}
-
-#[derive(Serialize, Deserialize, Debug, utoipa::ToSchema)]
-pub struct ConnectedLoginProvider {
-    pub id: String,
-    pub label: String,
-    pub connected: bool,
-    pub can_disconnect: bool,
-}
-
-impl GetUserSettingsResponse {
-    fn new(user: &MUser, identities: &[MUserIdentity], methods: &LoginMethods) -> Self {
-        let has_password = user.password.is_some();
-        Self {
-            is_oidc: has_oidc_identity(identities, methods),
-            has_password,
-            login_providers: methods
-                .providers
-                .iter()
-                .map(|p| ConnectedLoginProvider {
-                    id: p.id().to_owned(),
-                    label: p.label().to_owned(),
-                    connected: identities.iter().any(|i| i.issuer == p.issuer()),
-                    can_disconnect: can_disconnect(methods, has_password, identities, p.issuer()),
-                })
-                .collect(),
-            managed: user.managed,
-            username: user.username.clone(),
-            name: user.name.clone(),
-            email: user.email.clone(),
-        }
+fn build_get_user_settings_response_from_user_login_identities_and_login_methods(
+    user: &MUser,
+    identities: &[MUserIdentity],
+    methods: &LoginMethods,
+) -> GetUserSettingsResponse {
+    let has_password = user.password.is_some();
+    GetUserSettingsResponse {
+        is_oidc: has_oidc_identity(identities, methods),
+        has_password,
+        login_providers: methods
+            .providers
+            .iter()
+            .map(|p| ConnectedLoginProvider {
+                id: p.id().to_owned(),
+                label: p.label().to_owned(),
+                connected: identities.iter().any(|i| i.issuer == p.issuer()),
+                can_disconnect: can_disconnect(methods, has_password, identities, p.issuer()),
+            })
+            .collect(),
+        managed: user.managed,
+        username: user.username.clone(),
+        name: user.name.clone(),
+        email: user.email.clone(),
     }
 }
 
@@ -455,10 +318,12 @@ pub async fn get(
         .allows_another_cache(&user)
         .await?;
 
-    Ok(ok_json(Some(UserInfoResponse::new(
-        &user,
-        can_create_cache,
-    ))))
+    Ok(ok_json(Some(
+        build_user_info_response_from_user_row_and_cache_creation_permission(
+            &user,
+            can_create_cache,
+        ),
+    )))
 }
 
 #[utoipa::path(
@@ -829,7 +694,7 @@ pub async fn get_keys(
 
     let infos: Vec<ApiKeyInfo> = api_keys
         .into_iter()
-        .map(|k| ApiKeyInfo::new(k, &pins))
+        .map(|k| api_key_info_from_api_key_row_and_pinned_names(k, &pins))
         .collect();
 
     Ok(ok_json(infos))
@@ -1141,7 +1006,9 @@ pub async fn patch_key(
     .await;
 
     let pins = PinNames::of(&state.web_db, std::slice::from_ref(&updated)).await?;
-    Ok(ok_json(ApiKeyInfo::new(updated, &pins)))
+    Ok(ok_json(api_key_info_from_api_key_row_and_pinned_names(
+        updated, &pins,
+    )))
 }
 
 #[utoipa::path(
@@ -1316,7 +1183,9 @@ pub async fn get_sessions(
         &params,
     )
     .await?
-    .map(|session| SessionInfo::new(session, current_session_id));
+    .map(|session| {
+        build_session_info_from_login_session_row_marking_if_current(session, current_session_id)
+    });
 
     Ok(ok_json(listing))
 }
@@ -1405,7 +1274,11 @@ pub async fn get_settings(
     let identities = gradient_db::user_identities::of_user(&state.web_db, user.id).await?;
     let res = BaseResponse {
         error: false,
-        message: GetUserSettingsResponse::new(&user, &identities, &state.login_methods()),
+        message: build_get_user_settings_response_from_user_login_identities_and_login_methods(
+            &user,
+            &identities,
+            &state.login_methods(),
+        ),
     };
 
     Ok(Json(res))
@@ -1535,7 +1408,7 @@ pub async fn patch_settings(
 
 #[cfg(test)]
 mod tests {
-    use super::{ApiKeyInfo, PinNames, is_version};
+    use super::{PinNames, api_key_info_from_api_key_row_and_pinned_names, is_version};
     use gradient_types::permissions::{CachePermission, cache_mask_from};
     use gradient_types::{CacheId, MApi};
 
@@ -1555,7 +1428,7 @@ mod tests {
             caches: [(cache, "nix-cache".to_string())].into(),
         };
 
-        let info = ApiKeyInfo::new(key, &pins);
+        let info = api_key_info_from_api_key_row_and_pinned_names(key, &pins);
 
         assert_eq!(info.cache.as_deref(), Some("nix-cache"));
         assert_eq!(info.project, None);

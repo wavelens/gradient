@@ -141,6 +141,17 @@ pub async fn delivery_of<C: ConnectionTrait>(
         .await
 }
 
+impl From<NewestWebhookDeliveryRow> for gradient_api_types::WebhookNewestDeliveryAttemptSummary {
+    fn from(row: NewestWebhookDeliveryRow) -> Self {
+        Self {
+            success: row.success,
+            delivered_at: row.delivered_at,
+            response_status: row.response_status,
+            error_message: row.error_message,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

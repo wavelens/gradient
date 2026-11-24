@@ -20,7 +20,7 @@ use crate::input::{
 use crate::output::{ExitKind, Output};
 use clap::{Args, Subcommand};
 use clap_complete::engine::ArgValueCompleter;
-use connector::api::{MakeCacheRequest, PatchCacheRequest};
+use connector::api::{CacheDisplayName, CacheName, MakeCacheRequest, PatchCacheRequest};
 use connector::webhooks::WebhookResource;
 
 #[derive(Subcommand, Debug)]
@@ -230,8 +230,9 @@ pub async fn handle(cmd: Commands, out: Output) {
             match client
                 .caches()
                 .create(MakeCacheRequest {
-                    name: name.into(),
-                    display_name: input.get("Display Name").into(),
+                    name: CacheName::try_from(name).unwrap_or_else(|e| out.fail(e)),
+                    display_name: CacheDisplayName::try_from(input.get("Display Name"))
+                        .unwrap_or_else(|e| out.fail(e)),
                     description: input.get("Description"),
                     priority,
                     max_storage_gb: Some(max_storage_gb),

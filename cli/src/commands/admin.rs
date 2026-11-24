@@ -252,7 +252,7 @@ async fn set_worker_draining(
 
 fn print_admin_background_task_human_readable_line(task: &AdminTaskDto, out: Output) {
     out.human(format!(
-        "{} {} [{}] {}",
+        "{} {} [{}] {:?}",
         task.id.0, task.kind, task.status, task.created_at
     ));
 }

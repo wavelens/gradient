@@ -1,4 +1,4 @@
-From b7c6cf29489211c57bdcbcf548ecc4d29a675415 Mon Sep 17 00:00:00 2001
+From cca862877c3801162531968ff1c83030cb3d510c Mon Sep 17 00:00:00 2001
 From: Dennis Wuitz <dennish@wuitz.de>
 Date: Sun, 25 Oct 2026 00:47:29 +0200
 Subject: [PATCH] libexpr: make the evaluation statistics readable without
@@ -14,10 +14,10 @@ enough to read around every evaluation.
  2 files changed, 51 insertions(+), 5 deletions(-)
 
 diff --git a/src/libexpr/eval.cc b/src/libexpr/eval.cc
-index 79652ee34..2b35e7f7a 100644
+index 8a37611f9..c2bb7cc47 100644
 --- a/src/libexpr/eval.cc
 +++ b/src/libexpr/eval.cc
-@@ -3049,7 +3049,7 @@ void EvalState::maybePrintStats()
+@@ -3080,7 +3080,7 @@ void EvalState::maybePrintStats()
      }
  }
  
@@ -26,7 +26,7 @@ index 79652ee34..2b35e7f7a 100644
  {
      std::chrono::microseconds cpuTimeDuration = getCpuUserTime();
      float cpuTime = std::chrono::duration_cast<std::chrono::duration<float>>(cpuTimeDuration).count();
-@@ -3071,10 +3071,6 @@ void EvalState::printStatistics()
+@@ -3102,10 +3102,6 @@ void EvalState::printStatistics()
      auto gcCycles = getGCCycles();
  #endif
  
@@ -37,7 +37,7 @@ index 79652ee34..2b35e7f7a 100644
      json topObj = json::object();
      topObj["cpuTime"] = cpuTime;
      topObj["time"] = {
-@@ -3173,9 +3169,37 @@ void EvalState::printStatistics()
+@@ -3209,9 +3205,37 @@ void EvalState::printStatistics()
          auto & list = topObj["symbols"];
          symbols.dump([&](std::string_view s) { list.emplace_back(s); });
      }
@@ -76,7 +76,7 @@ index 79652ee34..2b35e7f7a 100644
      }
  }
 diff --git a/src/libexpr/include/nix/expr/eval.hh b/src/libexpr/include/nix/expr/eval.hh
-index 34c2bef98..8a810932d 100644
+index c4953dacf..5e66651e4 100644
 --- a/src/libexpr/include/nix/expr/eval.hh
 +++ b/src/libexpr/include/nix/expr/eval.hh
 @@ -24,6 +24,8 @@
@@ -88,7 +88,7 @@ index 34c2bef98..8a810932d 100644
  #include <map>
  #include <optional>
  #include <functional>
-@@ -1043,6 +1045,26 @@ public:
+@@ -1122,6 +1124,26 @@ public:
       */
      void maybePrintStats();
  
@@ -115,3 +115,6 @@ index 34c2bef98..8a810932d 100644
      /**
       * Print statistics, unconditionally, cheaply, without performing a GC first.
       */
+-- 
+2.56.0
+

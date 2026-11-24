@@ -7,5 +7,5 @@
 import slugifyText from '@sindresorhus/slugify';
 
 export function slugify(text: string): string {
-  return slugifyText(text.normalize('NFC'), { decamelize: false });
+  return slugifyText(text, { decamelize: false });
 }

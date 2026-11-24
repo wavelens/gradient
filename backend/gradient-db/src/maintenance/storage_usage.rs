@@ -117,6 +117,19 @@ pub async fn get_cache_storage_usage_rows<C: ConnectionTrait>(
         .await
 }
 
+impl From<CacheStorageUsageRow> for gradient_api_types::CacheStorageSummary {
+    fn from(row: CacheStorageUsageRow) -> Self {
+        Self {
+            id: row.cache,
+            name: row.name,
+            display_name: row.display_name,
+            max_storage_gb: row.max_storage_gb,
+            packages: row.packages,
+            bytes: row.bytes,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -17,8 +17,9 @@ use crate::access::{
 use crate::api_spec::{Binary, TaskPath};
 use crate::audit::Audit;
 use crate::authorization::{MaybeApiKey, MaybeUser};
-use crate::endpoints::evals::types::EvaluationAbortReplacementRetryPhaseStartsAndExpectedDuration;
+use crate::endpoints::evals::types::new_evaluation_abort_replacement_retry_phase_starts_and_expected_duration;
 use crate::endpoints::evals::{live_progress, live_progress_status};
+use crate::endpoints::tasks::build_task_details_response_from_task_row_queue_summary_last_evaluations_triggers_and_caller_permission_mask;
 use crate::endpoints::{archive_headers, build_product_headers};
 use crate::error::{WebError, WebResult};
 use crate::extractors::{Path, Query};
@@ -181,7 +182,7 @@ pub(super) async fn evaluations_to_summaries(
             })
             .and_then(|n| n.as_u64());
 
-        let history = EvaluationAbortReplacementRetryPhaseStartsAndExpectedDuration::new(
+        let history = new_evaluation_abort_replacement_retry_phase_starts_and_expected_duration(
             &evaluation,
             evaluation
                 .aborted_by
@@ -494,7 +495,7 @@ pub async fn get_task_details(
 
     let triggers = gradient_db::triggers::of_task(&state.web_db, task.id).await?;
 
-    let task_details = TaskDetailsResponse::new(
+    let task_details = build_task_details_response_from_task_row_queue_summary_last_evaluations_triggers_and_caller_permission_mask(
         task,
         QueueSummary { building, queued },
         evaluation_summaries,

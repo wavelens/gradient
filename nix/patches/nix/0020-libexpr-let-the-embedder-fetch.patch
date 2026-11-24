@@ -1,4 +1,4 @@
-From 8e21548835b5e165215b54c3288a1d9c7d89a983 Mon Sep 17 00:00:00 2001
+From d88eae330c52e35e7e8041ab60ec91b779131b26 Mon Sep 17 00:00:00 2001
 From: Dennis Wuitz <dennish@wuitz.de>
 Date: Sun, 18 Oct 2026 14:56:12 +0200
 Subject: [PATCH] libexpr: let the embedder fetch
@@ -15,6 +15,7 @@ already in the store or for the path scheme.
 nix_eval_state_builder_set_fetch_hook() installs a C callback as the
 hook.
 ---
+ doc/manual/rl-next/c-api-fetch-hook.md        |  9 ++
  src/libexpr-c/nix_api_expr.cc                 | 19 +++++
  src/libexpr-c/nix_api_expr.h                  | 34 ++++++++
  src/libexpr-tests/nix_api_expr.cc             | 41 +++++++++
@@ -22,10 +23,26 @@ hook.
  src/libfetchers/fetchers.cc                   | 84 +++++++++++++++----
  .../include/nix/fetchers/fetch-settings.hh    |  8 ++
  .../include/nix/fetchers/fetchers.hh          |  8 ++
- 7 files changed, 205 insertions(+), 22 deletions(-)
+ 8 files changed, 214 insertions(+), 22 deletions(-)
+ create mode 100644 doc/manual/rl-next/c-api-fetch-hook.md
 
+diff --git a/doc/manual/rl-next/c-api-fetch-hook.md b/doc/manual/rl-next/c-api-fetch-hook.md
+new file mode 100644
+index 000000000..b503dfcd1
+--- /dev/null
++++ b/doc/manual/rl-next/c-api-fetch-hook.md
+@@ -0,0 +1,9 @@
++---
++synopsis: "C API: `nix_eval_state_builder_set_fetch_hook`"
++---
++
++The new function `nix_eval_state_builder_set_fetch_hook()` in `nix_api_expr.h` installs a callback that fetches the
++inputs an evaluation needs and does not find in the store: the inputs of `fetchTree` other than `path`, and the
++downloads of `fetchurl` and `fetchTarball`.
++The callback receives the fetch request as JSON and answers with the store path it added.
++In C++, the same hook is `fetchers::Settings::fetchHook`.
 diff --git a/src/libexpr-c/nix_api_expr.cc b/src/libexpr-c/nix_api_expr.cc
-index 7b6f34069..e863b66d1 100644
+index c69a13868..5cfa91cdb 100644
 --- a/src/libexpr-c/nix_api_expr.cc
 +++ b/src/libexpr-c/nix_api_expr.cc
 @@ -228,6 +228,25 @@ nix_err nix_eval_state_builder_set_realise_hook(
@@ -55,7 +72,7 @@ index 7b6f34069..e863b66d1 100644
  {
      if (context)
 diff --git a/src/libexpr-c/nix_api_expr.h b/src/libexpr-c/nix_api_expr.h
-index 877dbcad6..e7975a751 100644
+index 7012a4404..329651554 100644
 --- a/src/libexpr-c/nix_api_expr.h
 +++ b/src/libexpr-c/nix_api_expr.h
 @@ -274,6 +274,40 @@ typedef nix_err (*nix_realise_hook)(
@@ -100,10 +117,10 @@ index 877dbcad6..e7975a751 100644
   * @brief Create a new Nix language evaluator state
   * @ingroup libexpr_init
 diff --git a/src/libexpr-tests/nix_api_expr.cc b/src/libexpr-tests/nix_api_expr.cc
-index dbf45cbaa..b7007952a 100644
+index eb386ab46..0de826d34 100644
 --- a/src/libexpr-tests/nix_api_expr.cc
 +++ b/src/libexpr-tests/nix_api_expr.cc
-@@ -757,4 +757,45 @@ TEST_F(nix_api_expr_test, nix_eval_state_builder_set_realise_hook)
+@@ -853,4 +853,45 @@ TEST_F(nix_api_expr_test, nix_eval_state_builder_set_realise_hook)
      nix_state_free(hookedState);
  }
  
@@ -150,18 +167,18 @@ index dbf45cbaa..b7007952a 100644
 +
  } // namespace nixC
 diff --git a/src/libexpr/primops/fetchTree.cc b/src/libexpr/primops/fetchTree.cc
-index 0e092927b..96d4eedf6 100644
+index 77b320b47..500071f4e 100644
 --- a/src/libexpr/primops/fetchTree.cc
 +++ b/src/libexpr/primops/fetchTree.cc
-@@ -6,6 +6,7 @@
- #include "nix/expr/fetch-tree.hh"
+@@ -7,6 +7,7 @@
  #include "nix/store/store-api.hh"
+ #include "nix/store/build.hh"
  #include "nix/fetchers/fetchers.hh"
 +#include "nix/fetchers/fetch-settings.hh"
  #include "nix/store/filetransfer.hh"
  #include "nix/fetchers/registry.hh"
  #include "nix/fetchers/tarball.hh"
-@@ -471,6 +472,22 @@ static RegisterPrimOp primop_fetchFinalTree({
+@@ -479,6 +480,22 @@ static RegisterPrimOp primop_fetchFinalTree({
      .internal = true,
  });
  
@@ -181,10 +198,10 @@ index 0e092927b..96d4eedf6 100644
 +        .first;
 +}
 +
- static void fetch(
-     EvalState & state,
-     const PosIdx pos,
-@@ -552,8 +569,9 @@ static void fetch(
+ static void
+ fetch(EvalState & state, Value * const * args, Value & v, const std::string & who, bool unpack, std::string name)
+ {
+@@ -554,8 +571,9 @@ fetch(EvalState & state, Value * const * args, Value & v, const std::string & wh
              .debugThrow();
  
      // early exit if pinned and already in the store
@@ -195,14 +212,14 @@ index 0e092927b..96d4eedf6 100644
              name,
              FixedOutputInfo{
                  .method = unpack ? FileIngestionMethod::NixArchive : FileIngestionMethod::Flat,
-@@ -562,19 +580,24 @@ static void fetch(
+@@ -564,19 +582,24 @@ fetch(EvalState & state, Value * const * args, Value & v, const std::string & wh
  
          // Try to get the path from the local store or substituters
          try {
--            state.store->ensurePath(expectedPath);
+-            state.store->getBuilder()->ensurePath(expectedPath);
 -            debug("using substituted/cached path '%s' for '%s'", state.store->printStorePath(expectedPath), *url);
 -            state.allowAndSetStorePathString(expectedPath, v);
-+            state.store->ensurePath(*expectedPath);
++            state.store->getBuilder()->ensurePath(*expectedPath);
 +            debug("using substituted/cached path '%s' for '%s'", state.store->printStorePath(*expectedPath), *url);
 +            state.allowAndSetStorePathString(*expectedPath, v);
              return;
@@ -225,10 +242,10 @@ index 0e092927b..96d4eedf6 100644
          auto attrs = fetchers::Attrs{
              {"type", "tarball"},
 diff --git a/src/libfetchers/fetchers.cc b/src/libfetchers/fetchers.cc
-index 6d7266e09..c05074c37 100644
+index 7e81b24ae..5c1c888ef 100644
 --- a/src/libfetchers/fetchers.cc
 +++ b/src/libfetchers/fetchers.cc
-@@ -297,6 +297,69 @@ std::pair<ref<SourceAccessor>, Input> Input::getAccessor(const Settings & settin
+@@ -314,6 +314,69 @@ std::pair<ref<SourceAccessor>, Input> Input::getAccessor(const Settings & settin
      }
  }
  
@@ -287,7 +304,7 @@ index 6d7266e09..c05074c37 100644
 +
 +    auto result = input;
 +    if (auto attrs = optionalValueAt(getObject(response), "attrs")) {
-+        result = Input::fromAttrs(settings, jsonToAttrs(*attrs));
++        result = Input::fromAttrs(jsonToAttrs(*attrs));
 +        if (input.isFinal())
 +            result.attrs.insert_or_assign("__final", Explicit<bool>(true));
 +    }
@@ -298,7 +315,7 @@ index 6d7266e09..c05074c37 100644
  std::pair<ref<SourceAccessor>, Input> Input::getAccessorUnchecked(const Settings & settings, Store & store) const
  {
      // FIXME: cache the accessor
-@@ -325,28 +388,15 @@ std::pair<ref<SourceAccessor>, Input> Input::getAccessorUnchecked(const Settings
+@@ -342,28 +405,15 @@ std::pair<ref<SourceAccessor>, Input> Input::getAccessorUnchecked(const Settings
  
              debug("using substituted/cached input '%s' in '%s'", to_string(), store.printStorePath(storePath));
  
@@ -332,7 +349,7 @@ index 6d7266e09..c05074c37 100644
       * to the fetchers to guarantee this), so this is merely intended to avoid work duplication. Note that we don't need
       * this when substituting the input. */
 diff --git a/src/libfetchers/include/nix/fetchers/fetch-settings.hh b/src/libfetchers/include/nix/fetchers/fetch-settings.hh
-index bb9a67d06..b1b64c3a4 100644
+index dd999edc5..ee765e603 100644
 --- a/src/libfetchers/include/nix/fetchers/fetch-settings.hh
 +++ b/src/libfetchers/include/nix/fetchers/fetch-settings.hh
 @@ -6,6 +6,7 @@
@@ -343,9 +360,9 @@ index bb9a67d06..b1b64c3a4 100644
  #include <map>
  #include <limits>
  
-@@ -162,6 +163,13 @@ struct Settings : public Config
-     const ref<SrcToStore> srcToStore = createSrcToStore();
+@@ -164,6 +165,13 @@ struct Settings : public Config
  
+     ref<GitRepoPool> getTarballWriterPool() const;
  
 +    /**
 +     * Fetches an input that is not in the store instead of the built-in
@@ -358,12 +375,12 @@ index bb9a67d06..b1b64c3a4 100644
      void anchor() override;
  
 diff --git a/src/libfetchers/include/nix/fetchers/fetchers.hh b/src/libfetchers/include/nix/fetchers/fetchers.hh
-index 180d10e9d..074696001 100644
+index df288a5cb..c036d2f2f 100644
 --- a/src/libfetchers/include/nix/fetchers/fetchers.hh
 +++ b/src/libfetchers/include/nix/fetchers/fetchers.hh
-@@ -284,6 +284,14 @@ using InputSchemeMap = std::map<std::string_view, std::shared_ptr<InputScheme>>;
+@@ -299,6 +299,14 @@ const InputSchemeMap & getAllInputSchemes();
   */
- const InputSchemeMap & getAllInputSchemes();
+ std::optional<ParsedURL> getLocalRepoURL(const std::filesystem::path & path);
  
 +/**
 + * Hand `request` to `Settings::fetchHook` and return the store path of
@@ -376,3 +393,6 @@ index 180d10e9d..074696001 100644
  struct PublicKey
  {
      std::string type = "ssh-ed25519";
+-- 
+2.56.0
+

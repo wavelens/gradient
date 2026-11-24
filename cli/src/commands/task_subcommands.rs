@@ -116,7 +116,7 @@ fn print_commit_status_post_attempt_line(out: Output, attempt: &TaskCommitStatus
         .map(|error| format!(": {error}"))
         .unwrap_or_default();
     out.human(format!(
-        "{} {} {result} {status}{error}",
+        "{:?} {} {result} {status}{error}",
         attempt.delivered_at, attempt.event
     ));
 }
@@ -261,9 +261,7 @@ pub async fn handle_task_repository_subcommand(cmd: TaskRepositoryCommands, out:
         } => {
             let chosen = match connection {
                 Some(reference) => Some(
-                    find_git_host_connection_by_name_or_uuid(&reference, &current().await, out)
-                        .id
-                        .clone(),
+                    find_git_host_connection_by_name_or_uuid(&reference, &current().await, out).id,
                 ),
                 None => None,
             };
@@ -367,7 +365,7 @@ pub async fn run_gradient_task_action_subcommand(cmd: TaskActionCommands, out: O
                 name,
                 config: parse_json_configuration_from_command_line::<ActionConfig>(&config, out),
                 events,
-                active: Some(!inactive),
+                active: !inactive,
             };
             let created = actions
                 .create(&project, &task, &body)
@@ -449,7 +447,7 @@ pub async fn run_gradient_task_action_subcommand(cmd: TaskActionCommands, out: O
                     Color::Red
                 };
                 out.human(format!(
-                    "{} {} {} {}",
+                    "{:?} {} {} {}",
                     delivery.delivered_at,
                     delivery.event,
                     out.paint(&result, color),
@@ -467,16 +465,17 @@ pub async fn run_gradient_task_action_subcommand(cmd: TaskActionCommands, out: O
                 .unwrap_or_else(|e| out.fail(e));
             out.ok(&delivery);
             out.human(format!(
-                "{} {} {} {}ms",
-                delivery.delivered_at,
-                delivery.event,
+                "{:?} {} {} {}ms",
+                delivery.item.delivered_at,
+                delivery.item.event,
                 delivery
+                    .item
                     .response_status
                     .map(|status| status.to_string())
                     .unwrap_or_default(),
-                delivery.duration_ms
+                delivery.item.duration_ms
             ));
-            if let Some(error) = &delivery.error_message {
+            if let Some(error) = &delivery.item.error_message {
                 out.human(error);
             }
             out.human("");
@@ -607,7 +606,7 @@ pub async fn run_task_trigger_subcommand(cmd: TaskTriggerCommands, out: Output) 
         out.human(out.paint(
             &format!(
                 "{}: {} {}{default}",
-                trigger.id, trigger.type_, trigger.config
+                trigger.id, trigger.trigger_type, trigger.config
             ),
             color,
         ));
@@ -646,7 +645,7 @@ pub async fn run_task_trigger_subcommand(cmd: TaskTriggerCommands, out: Output) 
         TaskTriggerCommands::Create { config, inactive } => {
             let body = CreateTriggerRequest {
                 config: parse_json_configuration_from_command_line::<TriggerConfig>(&config, out),
-                active: Some(!inactive),
+                active: !inactive,
             };
             let created = tasks
                 .create_trigger(&project, &task, body)

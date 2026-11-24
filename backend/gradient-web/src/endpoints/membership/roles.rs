@@ -13,44 +13,13 @@ use crate::error::{WebError, WebResult};
 use crate::extractors::JsonBody;
 use crate::helpers::ok_json;
 use crate::lookup::{require, require_for_delete};
-use crate::names::RoleName;
-use crate::permissions::PermissionEntry;
 use crate::refusal::{Change, SharedRefusal};
 use crate::resource::Resource;
 use axum::Json;
+pub use gradient_api_types::{CreateRoleRequest, PatchRoleRequest, RoleListResponse, RoleResponse};
 use gradient_db::WebDb;
 use gradient_types::*;
 use sea_orm::{ConnectionTrait, TransactionTrait};
-use serde::{Deserialize, Serialize};
-
-#[derive(Serialize, Debug, utoipa::ToSchema)]
-pub struct RoleResponse<F> {
-    pub id: RoleId,
-    pub name: String,
-    #[serde(flatten)]
-    pub owner: F,
-    pub builtin: bool,
-    pub managed: bool,
-    pub permissions: Vec<&'static str>,
-}
-
-#[derive(Serialize, Debug, utoipa::ToSchema)]
-pub struct RoleListResponse<F> {
-    pub roles: Vec<RoleResponse<F>>,
-    pub available_permissions: Vec<PermissionEntry>,
-}
-
-#[derive(Deserialize, Debug, utoipa::ToSchema)]
-pub struct CreateRoleRequest {
-    pub name: RoleName,
-    pub permissions: Vec<String>,
-}
-
-#[derive(Deserialize, Debug, utoipa::ToSchema)]
-pub struct PatchRoleRequest {
-    pub name: Option<RoleName>,
-    pub permissions: Option<Vec<String>>,
-}
 
 type OwnerField<O> = <<O as Owner>::Roles as RoleTable>::OwnerField;
 type Role<O> = RoleResponse<OwnerField<O>>;
@@ -63,7 +32,10 @@ fn response<O: Owner>(row: &RoleRow<O>) -> Role<O> {
         owner: fields.owner.into(),
         builtin: O::is_builtin_role(fields.id),
         managed: fields.managed,
-        permissions: O::permission_names(fields.permission),
+        permissions: O::permission_names(fields.permission)
+            .into_iter()
+            .map(String::from)
+            .collect(),
     }
 }
 

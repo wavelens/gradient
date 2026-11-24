@@ -144,7 +144,7 @@ async fn logged_in_user_api_key_create_sends_cache_permissions() {
     Mock::given(method("POST"))
         .and(path("/api/v1/user/keys"))
         .and(body_json(
-            json!({"name": "ci", "cache_permissions": ["readStore"]}),
+            json!({"name": "ci", "permissions": [], "cache_permissions": ["readStore"]}),
         ))
         .respond_with(ok(json!("GRADabc")))
         .expect(1)

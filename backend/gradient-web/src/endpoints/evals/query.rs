@@ -23,11 +23,12 @@ use std::time::Instant;
 
 use super::shared_build_reuse_after_evaluation_abort::is_build_continued_after_aborted_evaluation_finished;
 use super::types::{
-    BuildItem, BuildsQuery, EntryPointBrief,
-    EvaluationAbortReplacementRetryPhaseStartsAndExpectedDuration, EvaluationMessageResponse,
-    EvaluationResponse, PaginatedBuilds,
+    BuildItem, BuildsQuery, EvaluationMessageResponse, EvaluationResponse, PaginatedBuilds,
 };
 use super::{EvalAccessContext, live_progress, live_progress_status};
+use crate::endpoints::evals::types::entry_point_brief_from_row_and_build_status;
+use crate::endpoints::evals::types::evaluation_message_response_from_message_row_and_entry_point_ids;
+use crate::endpoints::evals::types::new_evaluation_abort_replacement_retry_phase_starts_and_expected_duration;
 use crate::endpoints::tasks::EvaluationTriggerSummary;
 use gradient_entity::build::BuildStatus;
 
@@ -105,7 +106,7 @@ pub async fn get_evaluation(
                     .cloned()
                     .unwrap_or(gradient_entity::build::BuildStatus::Queued)
                     .for_api();
-                EntryPointBrief::new(ep, build_status)
+                entry_point_brief_from_row_and_build_status(ep, build_status)
             })
             .collect()
     };
@@ -132,7 +133,7 @@ pub async fn get_evaluation(
         .await?,
         None => None,
     };
-    let history = EvaluationAbortReplacementRetryPhaseStartsAndExpectedDuration::new(
+    let history = new_evaluation_abort_replacement_retry_phase_starts_and_expected_duration(
         &evaluation,
         aborted_by,
         expected_duration_ms,
@@ -469,7 +470,7 @@ pub async fn get_evaluation_messages(
         .into_iter()
         .map(|m| {
             let entry_points = ep_map.get(&m.id).cloned().unwrap_or_default();
-            EvaluationMessageResponse::new(m, entry_points)
+            evaluation_message_response_from_message_row_and_entry_point_ids(m, entry_points)
         })
         .collect();
 

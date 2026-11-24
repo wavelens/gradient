@@ -58,7 +58,7 @@ async fn post_user_and_role_to_cache_members() {
     Mock::given(method("POST"))
         .and(path("/api/v1/caches/prod/members"))
         .and(body_json(
-            serde_json::json!({"user": "bob", "role": "View"}),
+            serde_json::json!({"user": "bob", "role": "View", "add_as_member_immediately": false}),
         ))
         .respond_with(ok(serde_json::json!("invited")))
         .expect(1)
@@ -501,7 +501,8 @@ async fn test_gradient_cache_webhook_create_posts_webhook_events_list() {
         .and(body_json(serde_json::json!({
             "name": "hook",
             "url": "https://example.com/hook",
-            "events": ["cache.*", "nar.pushed"]
+            "events": ["cache.*", "nar.pushed"],
+            "active": true
         })))
         .respond_with(ok(serde_json::json!({
             "secret": "whsec",
@@ -513,8 +514,8 @@ async fn test_gradient_cache_webhook_create_posts_webhook_events_list() {
                 "events": ["cache.*", "nar.pushed"],
                 "active": true,
                 "created_by": "00000000-0000-0000-0000-00000000000e",
-                "created_at": "2026-11-09T00:00:00Z",
-                "updated_at": "2026-11-09T00:00:00Z"
+                "created_at": "2026-11-09T00:00:00",
+                "updated_at": "2026-11-09T00:00:00"
             }
         })))
         .expect(1)

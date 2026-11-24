@@ -3301,7 +3301,7 @@ fn git_host_oauth_connect_cookie_claims_signed_with_signing_key(
             "name": "codeberg",
             "display_name": "Codeberg",
         }),
-        &jsonwebtoken::EncodingKey::from_secret(secret.as_bytes()),
+        &jsonwebtoken::EncodingKey::from_secret(secret.as_bytes()).unwrap(),
     )
     .unwrap()
 }

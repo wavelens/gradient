@@ -10,8 +10,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::ids::{CacheId, TeamId, UserId};
 
-#[derive(Clone, PartialEq, DeriveEntityModel, Deserialize, Serialize, utoipa::ToSchema)]
-#[schema(as = Cache)]
+#[derive(Clone, PartialEq, DeriveEntityModel, Deserialize, Serialize)]
 #[sea_orm(table_name = "cache")]
 pub struct Model {
     #[sea_orm(primary_key)]
@@ -93,3 +92,25 @@ pub enum Relation {
 }
 
 impl ActiveModelBehavior for ActiveModel {}
+
+impl From<Model> for gradient_api_types::Cache {
+    fn from(cache: Model) -> Self {
+        Self {
+            id: cache.id,
+            name: cache.name,
+            display_name: cache.display_name,
+            description: cache.description,
+            active: cache.active,
+            priority: cache.priority,
+            local_priority: cache.local_priority,
+            public_key: cache.public_key,
+            public: cache.public,
+            created_by: cache.created_by,
+            created_at: cache.created_at,
+            managed: cache.managed,
+            max_storage_gb: cache.max_storage_gb,
+            pull_through: cache.pull_through,
+            owner_team: cache.owner_team,
+        }
+    }
+}

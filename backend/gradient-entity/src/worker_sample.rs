@@ -70,3 +70,20 @@ pub struct Model {
 pub enum Relation {}
 
 impl ActiveModelBehavior for ActiveModel {}
+
+impl From<Model> for gradient_api_types::WorkerSamplePoint {
+    fn from(sample: Model) -> Self {
+        Self {
+            at: sample.at,
+            cpu_usage_pct: sample.cpu_usage_pct,
+            ram_free_mb: sample.ram_free_mb,
+            ram_total_mb: sample.ram_total_mb,
+            disk_speed_mbps: sample.disk_speed_mbps,
+            upload_speed_mbps: sample.upload_speed_mbps,
+            download_speed_mbps: sample.download_speed_mbps,
+            assigned_jobs: sample.assigned_jobs,
+            max_concurrent_builds: sample.max_concurrent_builds,
+            state: i16::from(sample.state),
+        }
+    }
+}

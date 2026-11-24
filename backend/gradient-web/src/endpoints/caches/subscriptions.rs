@@ -18,7 +18,9 @@ use crate::resource::Resource;
 use crate::scope::{CacheScope, Readable, Requires, can};
 use axum::extract::State;
 use axum::{Extension, Json};
-use chrono::NaiveDateTime;
+pub use gradient_api_types::{
+    CacheSubscriberItem, CacheSubscribersResponse, SubscriptionRequestItem,
+};
 use gradient_ci::CiContext;
 use gradient_core::ServerState;
 use gradient_db::lookup::by_ids;
@@ -30,41 +32,27 @@ use gradient_types::events::EventOwner;
 use gradient_types::events::audit::Action;
 use gradient_types::*;
 use sea_orm::TransactionTrait;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use std::collections::HashMap;
 use std::sync::Arc;
 
-#[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
-pub struct SubscriptionRequestItem {
-    pub cache: String,
-    pub cache_display_name: String,
-    pub project: String,
-    pub project_display_name: String,
-    pub mode: CacheSubscriptionMode,
-    pub requested_by: String,
-    pub requested_by_display_name: Option<String>,
-    pub created_at: NaiveDateTime,
-}
-
-impl SubscriptionRequestItem {
-    fn new(
-        request: &MCacheSubscriptionRequest,
-        cache: &MCache,
-        project: &MProject,
-        requester: Option<&MUser>,
-    ) -> Self {
-        Self {
-            cache: cache.name.clone(),
-            cache_display_name: cache.display_name.clone(),
-            project: project.name.clone(),
-            project_display_name: project.display_name.clone(),
-            mode: request.mode.clone(),
-            requested_by: requester
-                .map(|u| u.username.clone())
-                .unwrap_or_else(|| request.requested_by.to_string()),
-            requested_by_display_name: requester.map(|u| u.name.clone()),
-            created_at: request.created_at,
-        }
+fn build_subscription_request_item_from_cache_subscription_request_row(
+    request: &MCacheSubscriptionRequest,
+    cache: &MCache,
+    project: &MProject,
+    requester: Option<&MUser>,
+) -> SubscriptionRequestItem {
+    SubscriptionRequestItem {
+        cache: cache.name.clone(),
+        cache_display_name: cache.display_name.clone(),
+        project: project.name.clone(),
+        project_display_name: project.display_name.clone(),
+        mode: request.mode.clone(),
+        requested_by: requester
+            .map(|u| u.username.clone())
+            .unwrap_or_else(|| request.requested_by.to_string()),
+        requested_by_display_name: requester.map(|u| u.name.clone()),
+        created_at: request.created_at,
     }
 }
 
@@ -109,12 +97,14 @@ pub(crate) async fn subscription_request_items(
     Ok(requests
         .iter()
         .filter_map(|r| {
-            Some(SubscriptionRequestItem::new(
-                r,
-                caches.get(&r.cache)?,
-                projects.get(&r.project)?,
-                requesters.get(&r.requested_by),
-            ))
+            Some(
+                build_subscription_request_item_from_cache_subscription_request_row(
+                    r,
+                    caches.get(&r.cache)?,
+                    projects.get(&r.project)?,
+                    requesters.get(&r.requested_by),
+                ),
+            )
         })
         .collect())
 }
@@ -122,19 +112,6 @@ pub(crate) async fn subscription_request_items(
 #[derive(Debug, Deserialize, utoipa::ToSchema)]
 pub struct ApproveSubscriptionRequest {
     pub mode: Option<CacheSubscriptionMode>,
-}
-
-#[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
-pub struct CacheSubscriberItem {
-    pub project: String,
-    pub project_display_name: String,
-    pub mode: CacheSubscriptionMode,
-}
-
-#[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
-pub struct CacheSubscribersResponse {
-    pub projects: Vec<CacheSubscriberItem>,
-    pub hidden: usize,
 }
 
 #[utoipa::path(
@@ -408,7 +385,7 @@ mod tests {
 
     #[test]
     fn a_request_names_the_requester_by_username_and_display_name() {
-        let item = SubscriptionRequestItem::new(
+        let item = build_subscription_request_item_from_cache_subscription_request_row(
             &request(),
             &rows::cache(),
             &rows::project(),
@@ -421,7 +398,12 @@ mod tests {
     #[test]
     fn a_request_from_a_deleted_user_falls_back_to_the_user_id() {
         let request = request();
-        let item = SubscriptionRequestItem::new(&request, &rows::cache(), &rows::project(), None);
+        let item = build_subscription_request_item_from_cache_subscription_request_row(
+            &request,
+            &rows::cache(),
+            &rows::project(),
+            None,
+        );
         assert_eq!(item.requested_by, request.requested_by.to_string());
         assert_eq!(item.requested_by_display_name, None);
     }

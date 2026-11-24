@@ -5,6 +5,9 @@
  */
 
 use crate::access::{Caller, ProjectItemAccessRequirement};
+pub use gradient_api_types::{
+    ComparedEvaluation, EvaluationFailureSummary, FailedAttributeReport, FailedBuildSummary,
+};
 mod analysis;
 
 use crate::authorization::{MaybeApiKey, MaybeUser};
@@ -22,7 +25,6 @@ use gradient_entity::evaluation::EvaluationStatus;
 use gradient_types::input::vec_to_hex;
 use gradient_types::*;
 use sea_orm::{ConnectionTrait, DbErr};
-use serde::Serialize;
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -36,52 +38,14 @@ const BLOCKED_SHOWN: usize = 20;
 const FIXED_SHOWN: usize = 100;
 const UNFINISHED_SHOWN: usize = 100;
 
-#[derive(Serialize, Debug, utoipa::ToSchema)]
-pub struct EvaluationFailureSummary {
-    pub compared_with: Option<ComparedEvaluation>,
-    pub packages: PackageCounts,
-    pub failures: Vec<FailedBuildSummary>,
-    pub failures_total: usize,
-    pub failed_attributes: Vec<FailedAttributeReport>,
-    pub fixed: Vec<String>,
-    pub fixed_total: usize,
-    pub unfinished_attributes: Vec<String>,
-}
-
-#[derive(Serialize, Debug, utoipa::ToSchema)]
-pub struct ComparedEvaluation {
-    pub id: EvaluationId,
-    pub commit: String,
-}
-
-#[derive(Serialize, Debug, utoipa::ToSchema)]
-pub struct FailedBuildSummary {
-    pub build_id: BuildJobId,
-    pub name: String,
-    pub derivation_path: String,
-    #[schema(value_type = String)]
-    pub architecture: gradient_entity::server::Architecture,
-    pub status: BuildStatus,
-    pub attributes: Vec<String>,
-    pub blocked: Vec<String>,
-    pub blocked_total: usize,
-    pub newly_failing: bool,
-}
-
-#[derive(Serialize, Debug, utoipa::ToSchema)]
-pub struct FailedAttributeReport {
-    pub attr: String,
-    pub message: String,
-    pub newly_failing: bool,
-}
-
-impl FailedAttributeReport {
-    fn new(failed: FailedAttribute, newly_failing: bool) -> Self {
-        Self {
-            attr: failed.attr,
-            message: failed.message,
-            newly_failing,
-        }
+fn failed_attribute_report_from_row_and_newly_failing_flag(
+    failed: FailedAttribute,
+    newly_failing: bool,
+) -> FailedAttributeReport {
+    FailedAttributeReport {
+        attr: failed.attr,
+        message: failed.message,
+        newly_failing,
     }
 }
 
@@ -265,7 +229,7 @@ fn failed_attribute_reports(
         .into_iter()
         .map(|f| {
             let newly_failing = baseline.is_some_and(|before| !before.broken.contains(&f.attr));
-            FailedAttributeReport::new(f, newly_failing)
+            failed_attribute_report_from_row_and_newly_failing_flag(f, newly_failing)
         })
         .collect()
 }

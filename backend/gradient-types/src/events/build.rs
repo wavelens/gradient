@@ -6,26 +6,10 @@
 
 use super::{EventKind, EventOwner, firehose, names};
 use crate::ids::{BuildJobId, DerivationBuildId, DerivationId, EvaluationId, ProjectId, TaskId};
+pub use gradient_api_types::{BuildProgress, BuildProgressPhase};
 use gradient_entity::build::BuildStatus;
 use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
-pub struct BuildProgress {
-    pub phase: BuildProgressPhase,
-    pub bytes_done: u64,
-    pub bytes_total: Option<u64>,
-    pub paths_done: u32,
-    pub paths_total: Option<u32>,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum BuildProgressPhase {
-    Download,
-    Prefetch,
-    Upload,
-}
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct StatusChanged {

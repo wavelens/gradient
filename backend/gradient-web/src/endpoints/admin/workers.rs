@@ -15,52 +15,17 @@ use gradient_db::WebDb;
 use gradient_pool::WorkerInfo;
 use gradient_scheduler::Scheduler;
 use gradient_types::*;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use uuid::Uuid;
 
 use crate::endpoints::board_subjects::{BoardProject, board_projects};
-use crate::endpoints::projects::workers::{WorkerConnection, worker_connection};
+use crate::endpoints::projects::workers::worker_connection;
 use crate::error::{WebError, WebResult};
 use crate::helpers::ok_json;
 use crate::resource::Resource;
-
-#[derive(Serialize, Clone, utoipa::ToSchema)]
-pub struct WorkerOwningTeam {
-    pub id: TeamId,
-    pub name: String,
-    pub display_name: String,
-    pub active: bool,
-    pub managed: bool,
-}
-
-#[derive(Serialize, Clone, utoipa::ToSchema)]
-pub struct WorkerProjectRegistration {
-    pub project: BoardProject,
-    pub display_name: String,
-    pub active: bool,
-    pub managed: bool,
-}
-
-#[derive(Serialize, utoipa::ToSchema)]
-pub struct AdminWorkerListEntry {
-    pub worker_id: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub display_name: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub team: Option<WorkerOwningTeam>,
-    pub registrations: Vec<WorkerProjectRegistration>,
-    pub projects: Vec<BoardProject>,
-    #[serde(flatten)]
-    pub connection: WorkerConnection,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub live: Option<WorkerInfo>,
-    pub requested_by_admin: bool,
-}
-
-#[derive(Deserialize, utoipa::ToSchema)]
-pub struct UpdateWorkerRequest {
-    pub draining: Option<bool>,
-}
+pub use gradient_api_types::{
+    AdminWorkerListEntry, UpdateWorkerRequest, WorkerOwningTeam, WorkerProjectRegistration,
+};
 
 #[derive(Deserialize, utoipa::ToSchema)]
 pub struct UpdateAllWorkersRequest {
@@ -101,7 +66,7 @@ fn build_admin_worker_list_entries_by_worker_id(
                     Some(&scheduler.connection_failures),
                     worker_id,
                 ),
-                live: live.get(worker_id).cloned(),
+                live: live.get(worker_id).map(Into::into),
                 requested_by_admin: scheduler.drained_workers.contains(worker_id),
             };
             (worker_id.to_owned(), entry)

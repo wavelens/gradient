@@ -10,7 +10,7 @@ use crate::error::{CliError, FileAction};
 use crate::input::server_base;
 use crate::output::{ExitKind, Output};
 use connector::ConnectorError;
-use connector::api::{ArtefactTree, DispatchResponse};
+use connector::api::{ArtefactTree, DispatchResponse, OutputArtefacts};
 use futures::StreamExt as _;
 use harmonia_file_nar::NarByteStream;
 
@@ -99,6 +99,16 @@ pub async fn start_via_nar(
     }
 }
 
+/// The API is returning the prefix-free base form. An already-prefixed value is tolerated
+/// during the transition.
+fn full_store_path(output: &OutputArtefacts) -> String {
+    if output.store_path.starts_with("/nix/store/") {
+        output.store_path.clone()
+    } else {
+        format!("/nix/store/{}", output.store_path)
+    }
+}
+
 fn human_bytes(n: usize) -> String {
     const UNITS: [&str; 5] = ["B", "KiB", "MiB", "GiB", "TiB"];
     let mut value = n as f64;
@@ -165,7 +175,7 @@ pub async fn link_results(
                 .find(|o| o.name == "out")
                 .or_else(|| ep.outputs.first())
         })
-        .map(|o| o.full_store_path())
+        .map(full_store_path)
         .collect();
 
     if paths.is_empty() {

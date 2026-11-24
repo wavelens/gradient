@@ -664,7 +664,7 @@ impl GradientMcp {
                 build_id: ep.build_id.to_string(),
                 build_status: ep.build_status.to_string(),
             }));
-            if fetched == 0 || i64::try_from(statuses.len()).is_ok_and(|seen| seen >= page.total) {
+            if fetched == 0 || u64::try_from(statuses.len()).is_ok_and(|seen| seen >= page.total) {
                 return Ok(statuses);
             }
         }

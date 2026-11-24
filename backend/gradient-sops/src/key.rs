@@ -6,7 +6,7 @@
 
 use std::str::FromStr as _;
 
-use bech32::{ToBase32 as _, Variant};
+use bech32::{Bech32, Hrp};
 use curve25519_dalek::edwards::CompressedEdwardsY;
 use gradient_secret::SecretString;
 use sha2::{Digest as _, Sha512};
@@ -62,9 +62,7 @@ fn x25519_identity(private: &PrivateKey) -> Result<age::x25519::Identity, SopsEr
     })?;
     let seed = Zeroizing::new(keypair.private.to_bytes());
     let scalar = Zeroizing::new(Sha512::digest(seed.as_slice())[..32].to_vec());
-    let encoded = bech32::encode("age-secret-key-", scalar.to_base32(), Variant::Bech32)
-        .map_err(key_error)?;
-    let encoded = Zeroizing::new(encoded.to_uppercase());
+    let encoded = Zeroizing::new(bech32_encode("age-secret-key-", &scalar)?.to_uppercase());
     age::x25519::Identity::from_str(&encoded).map_err(|reason| SopsError::Key {
         reason: reason.to_owned(),
     })
@@ -109,12 +107,12 @@ fn age_recipient_of(public: &PublicKey) -> Result<String, SopsError> {
         .ok_or_else(|| SopsError::Key {
             reason: "invalid Ed25519 public key".into(),
         })?;
-    bech32::encode(
-        "age",
-        point.to_montgomery().to_bytes().to_base32(),
-        Variant::Bech32,
-    )
-    .map_err(key_error)
+    bech32_encode("age", &point.to_montgomery().to_bytes())
+}
+
+fn bech32_encode(hrp: &str, data: &[u8]) -> Result<String, SopsError> {
+    let hrp = Hrp::parse(hrp).map_err(key_error)?;
+    bech32::encode::<Bech32>(hrp, data).map_err(key_error)
 }
 
 fn unsupported(algorithm: &Algorithm) -> SopsError {

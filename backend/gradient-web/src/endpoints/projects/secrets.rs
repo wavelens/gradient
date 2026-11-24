@@ -15,36 +15,19 @@ use crate::scope::{Member, PathParams, ProjectScope, Requires, can};
 use anyhow::Context;
 use axum::Json;
 use axum::extract::State;
+pub use gradient_api_types::{
+    ProjectSecretSummary, PutProjectSecretRequest, SopsRecipientResponse,
+};
 use gradient_ci::actions::encrypt_secret_with_file;
 use gradient_core::ServerState;
 use gradient_types::events::EventOwner;
 use gradient_types::events::audit::Action;
 use gradient_types::*;
 use gradient_wire::types::validate_secret_name;
-use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
 const MAX_SECRET_VALUE_BYTES: usize = 65536;
-
-#[derive(Serialize, Debug, utoipa::ToSchema)]
-pub struct ProjectSecretSummary {
-    pub name: String,
-    pub updated_at: chrono::NaiveDateTime,
-    pub updated_by: Option<String>,
-    pub managed: bool,
-}
-
-#[derive(Deserialize, utoipa::ToSchema)]
-pub struct PutProjectSecretRequest {
-    pub value: String,
-}
-
-#[derive(Serialize, Debug, utoipa::ToSchema)]
-pub struct SopsRecipientResponse {
-    pub age: Option<String>,
-    pub ssh: String,
-}
 
 fn summary(secret: MProjectSecret, usernames: &BTreeMap<UserId, String>) -> ProjectSecretSummary {
     ProjectSecretSummary {

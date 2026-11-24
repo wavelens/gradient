@@ -30,7 +30,7 @@ impl ExecJobsApi<'_> {
             .await
     }
 
-    pub async fn log(&self, job: &str, offset: u64) -> Result<ExecJobLog, ConnectorError> {
+    pub async fn log(&self, job: &str, offset: usize) -> Result<ExecJobLog, ConnectorError> {
         self.get_json(&format!(
             "exec/{}/log?offset={}",
             encode_url_component(job),

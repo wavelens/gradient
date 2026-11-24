@@ -56,7 +56,7 @@ fn jwt_decode(cookie: &str) -> CsrfClaims {
         .expect("oidc_csrf cookie present");
     decode::<CsrfClaims>(
         jwt,
-        &DecodingKey::from_secret(b"test-jwt-secret"),
+        &DecodingKey::from_secret(b"test-jwt-secret").expect("jwt key"),
         &Validation::new(Algorithm::HS256),
     )
     .expect("decode CSRF cookie")

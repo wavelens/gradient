@@ -6,24 +6,8 @@
 
 use std::collections::HashMap;
 
-use chrono::NaiveDateTime;
+pub use gradient_api_types::{ConnectionDirection, ConnectionFailure};
 use gradient_util::sync::Mutex;
-use serde::Serialize;
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, utoipa::ToSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum ConnectionDirection {
-    Outbound,
-    Inbound,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, utoipa::ToSchema)]
-pub struct ConnectionFailure {
-    pub reason: String,
-    pub at: NaiveDateTime,
-    pub direction: ConnectionDirection,
-    pub before_auth: bool,
-}
 
 #[derive(Default)]
 pub struct ConnectionFailures(Mutex<HashMap<String, ConnectionFailure>>);

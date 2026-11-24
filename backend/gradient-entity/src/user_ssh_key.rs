@@ -35,3 +35,15 @@ pub enum Relation {
 }
 
 impl ActiveModelBehavior for ActiveModel {}
+
+impl From<Model> for gradient_api_types::SshKeyInfo {
+    fn from(key: Model) -> Self {
+        Self {
+            id: key.id,
+            name: key.name,
+            fingerprint: key.fingerprint,
+            created_at: key.created_at,
+            last_used_at: key.last_used_at,
+        }
+    }
+}

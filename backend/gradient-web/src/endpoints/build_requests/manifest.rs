@@ -5,7 +5,6 @@
  */
 
 use super::refusal::BuildRequestRefusal;
-use super::types::ManifestEntry;
 use crate::access::{Caller, ProjectAccess, load_project};
 use crate::authorization::MaybeApiKey;
 use crate::error::{WebError, WebResult};
@@ -16,26 +15,14 @@ use anyhow::Context;
 use axum::Extension;
 use axum::extract::{Json, State};
 use chrono::Duration;
+pub use gradient_api_types::{ManifestRequest, ManifestResponse};
 use gradient_core::ServerState;
 use gradient_types::constants::UPLOAD_SESSION_TTL;
 use gradient_types::ids::UploadSessionId;
 use gradient_types::input::{check_manifest_path, decode_blake3_hex};
 use gradient_types::{BaseResponse, MUploadSession, MUser, now};
-use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::sync::Arc;
-
-#[derive(Serialize, Deserialize, Debug, utoipa::ToSchema)]
-pub struct ManifestRequest {
-    pub project: String,
-    pub files: Vec<ManifestEntry>,
-}
-
-#[derive(Serialize, Deserialize, Debug, utoipa::ToSchema)]
-pub struct ManifestResponse {
-    pub session: UploadSessionId,
-    pub missing: Vec<String>,
-}
 
 #[utoipa::path(
     post,

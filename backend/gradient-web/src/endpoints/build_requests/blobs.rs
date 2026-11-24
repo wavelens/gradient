@@ -19,21 +19,15 @@ use axum::Extension;
 use axum::Json;
 use axum::extract::multipart::Field;
 use axum::extract::{Multipart, State};
+pub use gradient_api_types::BlobsResponse;
 use gradient_core::ServerState;
 use gradient_db::WebDb;
 use gradient_storage::NarStore;
 use gradient_types::ids::{BuildRequestBlobId, ProjectId, UploadSessionId};
 use gradient_types::input::decode_blake3_hex;
 use gradient_types::{BaseResponse, EUploadSession, MBuildRequestBlob, MUser, now};
-use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::sync::Arc;
-
-#[derive(Serialize, Deserialize, Debug, utoipa::ToSchema)]
-pub struct BlobsResponse {
-    pub uploaded: usize,
-    pub remaining: usize,
-}
 
 struct VerifiedBlob {
     name: String,

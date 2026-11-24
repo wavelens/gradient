@@ -9,30 +9,7 @@ use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
 
 use crate::ids::{EvaluationId, EvaluationMessageId};
-
-#[derive(
-    Debug,
-    Clone,
-    Default,
-    PartialEq,
-    Eq,
-    Hash,
-    DeriveActiveEnum,
-    EnumIter,
-    Deserialize,
-    Serialize,
-    utoipa::ToSchema,
-)]
-#[sea_orm(rs_type = "i32", db_type = "Integer")]
-pub enum MessageLevel {
-    #[default]
-    #[sea_orm(num_value = 0)]
-    Error,
-    #[sea_orm(num_value = 1)]
-    Warning,
-    #[sea_orm(num_value = 2)]
-    Notice,
-}
+pub use gradient_api_types::MessageLevel;
 
 /// Messages without `entry_point_message` rows are evaluation-scoped. `source` is one of
 /// `flake-prefetch`, `nix-eval`, `nix-eval:<attr>`, `dep-graph`, `db-insert`, `scheduler` or

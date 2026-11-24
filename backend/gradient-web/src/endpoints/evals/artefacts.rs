@@ -14,82 +14,35 @@ use axum::extract::State;
 use axum::{Extension, Json};
 use gradient_core::ServerState;
 use gradient_types::*;
-use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use super::EvalAccessContext;
+pub use gradient_api_types::{ArtefactTree, EntryPointArtefacts, OutputArtefacts, ProductArtefact};
 
-#[derive(Serialize, Deserialize, Debug, utoipa::ToSchema)]
-pub struct ArtefactTree {
-    pub evaluation: EvaluationId,
-    pub created_at: chrono::NaiveDateTime,
-    pub entry_points: Vec<EntryPointArtefacts>,
-}
-
-impl ArtefactTree {
-    fn new(evaluation: &MEvaluation, entry_points: Vec<EntryPointArtefacts>) -> Self {
-        Self {
-            evaluation: evaluation.id,
-            created_at: evaluation.created_at,
-            entry_points,
-        }
+fn build_artefact_tree_from_evaluation_row_and_entry_point_artefacts(
+    evaluation: &MEvaluation,
+    entry_points: Vec<EntryPointArtefacts>,
+) -> ArtefactTree {
+    ArtefactTree {
+        evaluation: evaluation.id,
+        created_at: evaluation.created_at,
+        entry_points,
     }
 }
 
-#[derive(Serialize, Deserialize, Debug, utoipa::ToSchema)]
-pub struct EntryPointArtefacts {
-    pub attr: String,
-    pub derivation: String,
-    pub build_id: BuildJobId,
-    pub outputs: Vec<OutputArtefacts>,
-}
-
-#[derive(Serialize, Deserialize, Debug, utoipa::ToSchema)]
-pub struct OutputArtefacts {
-    pub name: String,
-    pub store_path: String,
-    pub products: Vec<ProductArtefact>,
-}
-
-impl OutputArtefacts {
-    fn new(
-        mapper: &StorePathMapper,
-        output: MDerivationOutput,
-        products: Vec<ProductArtefact>,
-    ) -> Self {
-        Self {
-            store_path: output
-                .store_path()
-                .map(|p| original_text(mapper, p.base()))
-                .unwrap_or_default(),
-            name: output.name,
-            products,
-        }
-    }
-}
-
-#[derive(Serialize, Deserialize, Debug, utoipa::ToSchema)]
-pub struct ProductArtefact {
-    pub id: BuildProductId,
-    #[serde(rename = "type")]
-    pub file_type: String,
-    pub subtype: String,
-    pub name: String,
-    pub path: String,
-    pub size: Option<i64>,
-}
-
-impl From<MBuildProduct> for ProductArtefact {
-    fn from(p: MBuildProduct) -> Self {
-        Self {
-            id: p.id,
-            file_type: p.file_type,
-            subtype: p.subtype,
-            name: p.name,
-            path: p.path,
-            size: p.size,
-        }
+fn build_output_artefacts_from_derivation_output(
+    mapper: &StorePathMapper,
+    output: MDerivationOutput,
+    products: Vec<ProductArtefact>,
+) -> OutputArtefacts {
+    OutputArtefacts {
+        store_path: output
+            .store_path()
+            .map(|p| original_text(mapper, p.base()))
+            .unwrap_or_default(),
+        name: output.name,
+        products,
     }
 }
 
@@ -124,7 +77,9 @@ pub async fn get_artefacts(
         gradient_db::entry_points::of_evaluation(&state.web_db, evaluation.id).await?;
 
     if entry_points.is_empty() {
-        return Ok(ok_json(ArtefactTree::new(&evaluation, vec![])));
+        return Ok(ok_json(
+            build_artefact_tree_from_evaluation_row_and_entry_point_artefacts(&evaluation, vec![]),
+        ));
     }
 
     let drv_ids: Vec<DerivationId> = entry_points
@@ -187,7 +142,7 @@ pub async fn get_artefacts(
                             ..ProductArtefact::from(p)
                         })
                         .collect();
-                    OutputArtefacts::new(&mapper, o, products)
+                    build_output_artefacts_from_derivation_output(&mapper, o, products)
                 })
                 .collect();
             Some(EntryPointArtefacts {
@@ -207,5 +162,7 @@ pub async fn get_artefacts(
         }
     }
 
-    Ok(ok_json(ArtefactTree::new(&evaluation, tree)))
+    Ok(ok_json(
+        build_artefact_tree_from_evaluation_row_and_entry_point_artefacts(&evaluation, tree),
+    ))
 }

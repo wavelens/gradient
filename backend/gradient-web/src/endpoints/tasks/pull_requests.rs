@@ -16,6 +16,7 @@ use crate::refusal::{Refusal, RefusalStatus};
 use crate::scope::{Requires, TaskScope, can};
 use axum::extract::State;
 use axum::{Extension, Json};
+pub use gradient_api_types::{CreatePullRequestRequest, PullRequestResponse};
 use gradient_ci::pull_requests::{
     PatchPullRequest, PullRequestError, default_branch_name, evaluation_commit_of_job,
     open_from_patch, patch_paths, pull_request_git_host_connection,
@@ -26,25 +27,7 @@ use gradient_types::events::audit::Action;
 use gradient_types::input::hex_to_vec;
 use gradient_types::*;
 use sea_orm::ConnectionTrait;
-use serde::{Deserialize, Serialize};
 use std::sync::Arc;
-
-#[derive(Deserialize, Debug, utoipa::ToSchema)]
-pub struct CreatePullRequestRequest {
-    pub title: String,
-    pub body: Option<String>,
-    pub branch: Option<String>,
-    pub base: Option<String>,
-    pub patch: String,
-    pub commit: Option<String>,
-}
-
-#[derive(Serialize, Debug, utoipa::ToSchema)]
-pub struct PullRequestResponse {
-    pub url: String,
-    pub number: i64,
-    pub branch: String,
-}
 
 #[derive(Debug, thiserror::Error)]
 enum PullRequestRefusal {

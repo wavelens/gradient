@@ -11,7 +11,6 @@ use crate::extractors::Path;
 use crate::helpers::ok_json;
 use axum::extract::State;
 use axum::{Extension, Json};
-use chrono::NaiveDateTime;
 use gradient_core::ServerState;
 use gradient_db::exec_jobs::reads::{
     self, ExecJobDetail, ExecJobRow, ExecNodeDetail, StartedEvaluation,
@@ -19,12 +18,9 @@ use gradient_db::exec_jobs::reads::{
 use gradient_db::exec_jobs::tokens::JobTokenRow;
 use gradient_db::exec_jobs::{exec_job_waiting_reason, outputs};
 use gradient_db::scheduling::cluster::clusters_of_assignments;
-use gradient_entity::evaluation::EvaluationStatus;
 use gradient_entity::exec_job::ExecJobStatus;
-use gradient_entity::exec_job_attempt::AttemptEndReason;
-use gradient_types::exec::{DeviceRequest, ExecRequirement, ExecSpec, GuestSize};
+use gradient_types::exec::{ExecRequirement, ExecSpec};
 use gradient_types::*;
-use serde::Serialize;
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -35,118 +31,10 @@ use crate::endpoints::board::JobPhaseView;
 use crate::endpoints::board_subjects::WorkerNames;
 use crate::endpoints::evals::EvalAccessContext;
 use crate::metrics_scope::MetricsScope;
-
-#[derive(Serialize, Debug, utoipa::ToSchema)]
-pub struct ExecJobAttemptView {
-    pub number: i32,
-    pub worker: String,
-    pub started_at: NaiveDateTime,
-    pub program_started_at: Option<NaiveDateTime>,
-    pub ended_at: Option<NaiveDateTime>,
-    pub end_reason: Option<AttemptEndReason>,
-    pub message: Option<String>,
-}
-
-#[derive(Serialize, Debug, utoipa::ToSchema)]
-pub struct ExecJobNode {
-    pub node: u32,
-    pub id: ExecJobId,
-    pub status: ExecJobStatus,
-    pub worker: Option<String>,
-    pub worker_name: Option<String>,
-    pub guest_address: Option<String>,
-    pub master_port: Option<u16>,
-    pub attempts: Vec<ExecJobAttemptView>,
-}
-
-#[derive(Serialize, Debug, utoipa::ToSchema)]
-pub struct ExecJobPhaseView {
-    pub name: String,
-    pub attempt: i32,
-    pub created_at: NaiveDateTime,
-}
-
-#[derive(Serialize, Debug, utoipa::ToSchema)]
-pub struct ExecJobTokenView {
-    pub attempt: i32,
-    pub created_at: NaiveDateTime,
-    pub expires_at: NaiveDateTime,
-    pub revoked: bool,
-}
-
-#[derive(Serialize, Debug, utoipa::ToSchema)]
-pub struct StartedEvaluationView {
-    pub evaluation: EvaluationId,
-    pub task: String,
-    pub status: EvaluationStatus,
-    pub created_at: NaiveDateTime,
-}
-
-#[derive(Serialize, Debug, utoipa::ToSchema)]
-pub struct ExecJobResponse {
-    pub id: ExecJobId,
-    pub status: ExecJobStatus,
-    pub entry_point: String,
-    pub evaluation: EvaluationId,
-    pub task: String,
-    pub project: String,
-    pub nodes: u32,
-    pub labels: Vec<String>,
-    pub devices: Vec<DeviceRequest>,
-    pub guest: GuestSize,
-    pub architecture: String,
-    pub mounts: Vec<String>,
-    pub secrets: Vec<String>,
-    pub network: bool,
-    pub ssh: bool,
-    pub ports: Vec<u16>,
-    pub image: Option<String>,
-    pub timeout_secs: Option<u64>,
-    pub max_silent_secs: Option<u64>,
-    pub retries: u32,
-    pub waiting_reason: Option<WaitingReason>,
-    pub message: Option<String>,
-    pub retries_left: i32,
-    pub autostart: bool,
-    pub keep_vm_running: bool,
-    pub program_exit_code: Option<i32>,
-    pub created_at: NaiveDateTime,
-    pub started_at: Option<NaiveDateTime>,
-    pub finished_at: Option<NaiveDateTime>,
-    pub worker: Option<String>,
-    pub worker_name: Option<String>,
-    pub dispatched_job: Option<DispatchedJobId>,
-    pub cluster_job: Option<ClusterJobId>,
-    pub attempts: Vec<ExecJobAttemptView>,
-    pub node_jobs: Vec<ExecJobNode>,
-    pub phases: Vec<ExecJobPhaseView>,
-    pub timeline: Vec<JobPhaseView>,
-    pub tokens: Vec<ExecJobTokenView>,
-    pub started_evaluations: Vec<StartedEvaluationView>,
-    pub outputs_size: i64,
-    pub ssh_command: Option<String>,
-    pub forward_commands: Vec<String>,
-}
-
-#[derive(Serialize, Debug, utoipa::ToSchema)]
-pub struct ExecJobSummary {
-    pub id: ExecJobId,
-    pub entry_point: String,
-    pub status: ExecJobStatus,
-    pub waiting_reason: Option<WaitingReason>,
-    pub message: Option<String>,
-    pub nodes: u32,
-    pub labels: Vec<String>,
-    pub devices: Vec<DeviceRequest>,
-    pub autostart: bool,
-    pub keep_vm_running: bool,
-    pub program_exit_code: Option<i32>,
-    pub started_at: Option<NaiveDateTime>,
-    pub last_phase: Option<String>,
-    pub end_reason: Option<AttemptEndReason>,
-    pub dispatched_job: Option<DispatchedJobId>,
-    pub cluster_job: Option<ClusterJobId>,
-}
+pub use gradient_api_types::{
+    ExecJobAttemptView, ExecJobNode, ExecJobPhaseView, ExecJobResponse, ExecJobSummary,
+    ExecJobTokenView, StartedEvaluationView,
+};
 
 fn spec_of(job: &MExecJob) -> ExecSpec {
     serde_json::from_value(job.spec.clone()).unwrap_or_default()

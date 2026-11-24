@@ -47,7 +47,7 @@ fn token_for_user(user: UserId, session_id: SessionId) -> String {
     encode(
         &Header::default(),
         &claims,
-        &EncodingKey::from_secret(TEST_JWT_SECRET.as_bytes()),
+        &EncodingKey::from_secret(TEST_JWT_SECRET.as_bytes()).expect("jwt key"),
     )
     .expect("sign jwt")
 }

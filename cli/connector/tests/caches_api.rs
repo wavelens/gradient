@@ -191,7 +191,7 @@ async fn invite_cache_member_posts_user_and_role_as_json() {
             connector::api::AddMemberRequest {
                 user: "bob".into(),
                 role: "View".into(),
-                add_as_member_immediately: None,
+                add_as_member_immediately: false,
             },
         )
         .await
@@ -250,7 +250,7 @@ async fn creating_custom_role_returns_role() {
         .create_custom_role(
             "mycache",
             connector::api::CreateRoleRequest {
-                name: connector::api::IndexName("pusher".into()),
+                name: connector::api::IndexName::try_from("pusher".to_owned()).expect("valid name"),
                 permissions: vec!["writeCache".into()],
             },
         )
@@ -370,8 +370,8 @@ async fn create_cache_webhook_returns_secret() {
                     "events": ["cache.*"],
                     "active": true,
                     "created_by": "00000000-0000-0000-0000-000000000003",
-                    "created_at": "2026-11-09T00:00:00Z",
-                    "updated_at": "2026-11-09T00:00:00Z"
+                    "created_at": "2026-11-09T00:00:00",
+                    "updated_at": "2026-11-09T00:00:00"
                 }
             }))),
         )
@@ -391,7 +391,7 @@ async fn create_cache_webhook_returns_secret() {
                 name: "hook".into(),
                 url: "https://example.com/hook".into(),
                 events: vec!["cache.*".into()],
-                active: None,
+                active: true,
             },
         )
         .await

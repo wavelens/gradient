@@ -75,6 +75,6 @@ fn emit_message(m: &EvaluationMessageResponse, out: Output) {
             &serde_json::json!({"error": false, "message": m.message, "level": m.level}),
         );
     } else {
-        out.human(logfmt::eval_message_line(m.level, &m.message));
+        out.human(logfmt::eval_message_line(m.level.clone(), &m.message));
     }
 }

@@ -95,8 +95,9 @@ async fn create_project_sends_body() {
     let id = client
         .projects()
         .create(connector::api::MakeProjectRequest {
-            name: "n".to_string().into(),
-            display_name: "d".to_string().into(),
+            name: connector::api::ProjectName::try_from("n".to_owned()).expect("valid name"),
+            display_name: connector::api::ProjectDisplayName::try_from("d".to_owned())
+                .expect("valid name"),
             description: "x".into(),
             hide_build_requests: None,
             public: None,

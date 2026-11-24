@@ -12,6 +12,7 @@ use crate::endpoints::projects::workers::{
     encrypt_for_dialing, live_workers, patch_edits_managed_fields, worker_connection,
 };
 use crate::endpoints::worker_setup::WorkerRegistrationResponse;
+use crate::endpoints::worker_setup::make_new_worker_registration_response_with_nixos_config;
 use crate::error::{WebError, WebResult};
 use crate::extractors::JsonBody;
 use crate::helpers::{OptionExt, ok_json};
@@ -21,7 +22,7 @@ use crate::resource::Resource;
 use crate::scope::{Admin, Member, TeamScope};
 use axum::extract::State;
 use axum::{Extension, Json};
-use chrono::NaiveDateTime;
+pub use gradient_api_types::TeamWorkerEntry;
 use gradient_core::ServerState;
 use gradient_db::WebDb;
 use gradient_pool::WorkerInfo;
@@ -30,56 +31,31 @@ use gradient_types::events::EventOwner;
 use gradient_types::events::audit::Action;
 use gradient_types::*;
 use sea_orm::ActiveValue::Set;
-use serde::Serialize;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
-#[derive(Serialize, utoipa::ToSchema)]
-pub struct TeamWorkerEntry {
-    pub worker_id: String,
-    pub display_name: String,
-    pub registered_at: NaiveDateTime,
-    pub active: bool,
-    pub managed: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub url: Option<String>,
-    pub gradient_ci: bool,
-    pub enable_network: bool,
-    pub enable_secrets: bool,
-    pub enable_exec: bool,
-    pub enable_eval: bool,
-    pub enable_build: bool,
-    #[serde(flatten)]
-    pub connection: WorkerConnection,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub live: Option<WorkerLiveInfo>,
-    pub requested_by_admin: bool,
-}
-
-impl TeamWorkerEntry {
-    fn new(
-        worker: MTeamWorker,
-        connection: WorkerConnection,
-        live: Option<WorkerLiveInfo>,
-        requested_by_admin: bool,
-    ) -> Self {
-        Self {
-            worker_id: worker.worker_id,
-            display_name: worker.display_name,
-            registered_at: worker.created_at,
-            active: worker.active,
-            managed: worker.managed,
-            url: worker.url,
-            gradient_ci: worker.gradient_ci,
-            enable_network: worker.enable_network,
-            enable_secrets: worker.enable_secrets,
-            enable_exec: worker.enable_exec,
-            enable_eval: worker.enable_eval,
-            enable_build: worker.enable_build,
-            connection,
-            live,
-            requested_by_admin,
-        }
+fn team_worker_entry_from_worker_row_connection_state_live_info_and_admin_request(
+    worker: MTeamWorker,
+    connection: WorkerConnection,
+    live: Option<WorkerLiveInfo>,
+    requested_by_admin: bool,
+) -> TeamWorkerEntry {
+    TeamWorkerEntry {
+        worker_id: worker.worker_id,
+        display_name: worker.display_name,
+        registered_at: worker.created_at,
+        active: worker.active,
+        managed: worker.managed,
+        url: worker.url,
+        gradient_ci: worker.gradient_ci,
+        enable_network: worker.enable_network,
+        enable_secrets: worker.enable_secrets,
+        enable_exec: worker.enable_exec,
+        enable_eval: worker.enable_eval,
+        enable_build: worker.enable_build,
+        connection,
+        live,
+        requested_by_admin,
     }
 }
 
@@ -138,12 +114,14 @@ pub async fn get_team_workers(
         let connection = worker_connection(&live_workers, failures, &worker.worker_id);
         let live = team_worker_live(&live_workers, &worker.worker_id);
         let requested_by_admin = scheduler.drained_workers.contains(&worker.worker_id);
-        entries.push(TeamWorkerEntry::new(
-            worker,
-            connection,
-            live,
-            requested_by_admin,
-        ));
+        entries.push(
+            team_worker_entry_from_worker_row_connection_state_live_info_and_admin_request(
+                worker,
+                connection,
+                live,
+                requested_by_admin,
+            ),
+        );
     }
 
     Ok(ok_json(entries))
@@ -168,7 +146,7 @@ pub async fn post_team_worker(
     JsonBody(body): JsonBody<RegisterWorkerRequest>,
 ) -> WebResult<Json<BaseResponse<WorkerRegistrationResponse>>> {
     let token = crate::endpoints::worker_tokens::issue();
-    let registration = WorkerRegistrationResponse::new(
+    let registration = make_new_worker_registration_response_with_nixos_config(
         &state.config.server.serve_url,
         &body,
         frontend_page_urls::team(&state.config.server.frontend_url, &team.name),

@@ -286,7 +286,7 @@ async fn key_permissions_returns_the_catalogue() {
 #[tokio::test]
 async fn ssh_keys_list_add_and_delete() {
     let server = MockServer::start().await;
-    let key = json!({"id": "00000000-0000-0000-0000-000000000002", "name": "laptop", "fingerprint": "SHA256:x", "created_at": "2026-01-01T00:00:00Z"});
+    let key = json!({"id": "00000000-0000-0000-0000-000000000002", "name": "laptop", "fingerprint": "SHA256:x", "created_at": "2026-01-01T00:00:00"});
     Mock::given(method("GET"))
         .and(path("/api/v1/user/ssh-keys"))
         .respond_with(ResponseTemplate::new(200).set_body_json(ok(json!([key.clone()]))))

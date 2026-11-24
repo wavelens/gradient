@@ -6,7 +6,6 @@
 
 use super::ValidationError;
 use crate::config::StateConfiguration;
-use gradient_types::input::InputError;
 use std::collections::HashSet;
 
 pub(super) struct ErrorCollector {
@@ -28,7 +27,7 @@ impl ErrorCollector {
     pub(super) fn record_input_error_at_field(
         &mut self,
         field: impl Into<String>,
-        result: Result<(), InputError>,
+        result: Result<(), impl std::fmt::Display>,
     ) {
         if let Err(e) = result {
             self.push(field, e.to_string());

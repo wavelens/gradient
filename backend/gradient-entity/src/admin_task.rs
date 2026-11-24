@@ -118,3 +118,20 @@ impl Related<super::user::Entity> for Entity {
 }
 
 impl ActiveModelBehavior for ActiveModel {}
+
+impl From<Model> for gradient_api_types::AdminTaskDto {
+    fn from(m: Model) -> Self {
+        Self {
+            id: m.id,
+            kind: m.kind.as_str().to_string(),
+            status: m.status.as_str().to_string(),
+            created_at: m.created_at,
+            started_at: m.started_at,
+            finished_at: m.finished_at,
+            progress: m.progress,
+            checkpoint: m.checkpoint,
+            error: m.error,
+            created_by: m.created_by,
+        }
+    }
+}

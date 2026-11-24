@@ -118,7 +118,9 @@ pub async fn handle(cmd: Commands, out: Output) {
                         out.human("No NARs match.");
                     } else {
                         for item in &res.items {
-                            let lf = item.last_fetched_at.as_deref().unwrap_or("never");
+                            let lf = item
+                                .last_fetched_at
+                                .map_or_else(|| "never".to_owned(), |at| format!("{at:?}"));
                             let short = &item.hash[..item.hash.len().min(16)];
                             let pinned = match (&item.pinned_at, &item.pinned_by_username) {
                                 (Some(_), Some(user)) => format!("  pinned_by={user}"),
@@ -134,10 +136,10 @@ pub async fn handle(cmd: Commands, out: Output) {
                                 pinned,
                             ));
                         }
-                        let pages = if res.per_page <= 0 {
+                        let pages = if res.per_page == 0 {
                             1
                         } else {
-                            (res.total + res.per_page - 1) / res.per_page
+                            res.total.div_ceil(res.per_page)
                         };
                         out.human(format!("page {}/{} (total {})", res.page, pages, res.total));
                     }
@@ -163,10 +165,10 @@ pub async fn handle(cmd: Commands, out: Output) {
                     out.human(format!("signed:      {}", d.signed));
                     out.human(format!("fetch_count: {}", d.fetch_count));
                     if let Some(t) = d.last_fetched_at {
-                        out.human(format!("last_fetched_at: {}", t));
+                        out.human(format!("last_fetched_at: {:?}", t));
                     }
                     if let Some(t) = d.pinned_at {
-                        out.human(format!("pinned_at:   {}", t));
+                        out.human(format!("pinned_at:   {:?}", t));
                     }
                     if let Some(user) = d.pinned_by_username {
                         out.human(format!("pinned_by:   {}", user));
@@ -243,10 +245,10 @@ pub async fn handle(cmd: Commands, out: Output) {
                     out.human(format!("total_nar_size:    {}", s.total_nar_size));
                     out.human(format!("total_file_size:   {}", s.total_file_size));
                     if let Some(t) = s.last_uploaded_at {
-                        out.human(format!("last_uploaded_at:  {}", t));
+                        out.human(format!("last_uploaded_at:  {:?}", t));
                     }
                     if let Some(t) = s.oldest_fetched_at {
-                        out.human(format!("oldest_fetched_at: {}", t));
+                        out.human(format!("oldest_fetched_at: {:?}", t));
                     }
                 }
                 Err(e) => out.fail(e),

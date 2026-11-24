@@ -9,11 +9,10 @@ use crate::helpers::ok_json;
 use anyhow::Context;
 use axum::http::StatusCode;
 use axum::{Extension, Json, extract::State};
+pub use gradient_api_types::StartDeepGcResponse;
 use gradient_core::ServerState;
 use gradient_db::maintenance::admin_tasks::{self, InsertPendingError};
-use gradient_entity::ids::AdminTaskId;
 use gradient_types::{AdminTaskKind, BaseResponse, MUser};
-use serde::Serialize;
 use std::sync::Arc;
 use tracing::info;
 
@@ -30,12 +29,6 @@ pub async fn start_gc_round_now(State(state): State<Arc<ServerState>>) -> Status
     state.wake.run_cache_maintenance_now.notify_one();
     info!("cache maintenance: round requested");
     StatusCode::ACCEPTED
-}
-
-#[derive(Serialize, Debug, utoipa::ToSchema)]
-pub struct StartDeepGcResponse {
-    pub task_id: AdminTaskId,
-    pub status: &'static str,
 }
 
 #[utoipa::path(
@@ -71,7 +64,7 @@ pub async fn start_deep_gc(
         StatusCode::ACCEPTED,
         ok_json(StartDeepGcResponse {
             task_id,
-            status: "pending",
+            status: "pending".to_string(),
         }),
     ))
 }

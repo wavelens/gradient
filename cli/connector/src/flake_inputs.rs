@@ -75,13 +75,10 @@ impl TaskFlakeInputOverridesApi<'_> {
         input_name: Option<&str>,
         url: Option<Option<&str>>,
     ) -> Result<FlakeInputOverrideOut, ConnectorError> {
-        let mut body = serde_json::to_value(UpdateFlakeInputOverrideRequest {
+        let body = UpdateFlakeInputOverrideRequest {
             input_name: input_name.map(str::to_owned),
-            url: None,
-        })?;
-        if let Some(url) = url {
-            body["url"] = url.into();
-        }
+            url: url.map(|url| url.map(str::to_owned)),
+        };
         let req = self
             .request(
                 Method::PATCH,

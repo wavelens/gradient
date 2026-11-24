@@ -290,7 +290,7 @@ pub async fn handle(cmd: Commands, out: Output) {
                             name,
                             permissions,
                             cache_permissions,
-                            expires_in_days,
+                            expires_in_days: expires_in_days.map(NonZeroU32::get),
                             project: api_key_project,
                             cache,
                             allowed_ips: (!allowed_ips.is_empty()).then_some(allowed_ips),
@@ -325,8 +325,8 @@ pub async fn handle(cmd: Commands, out: Output) {
                                 permissions: (!permissions.is_empty()).then_some(permissions),
                                 cache_permissions: (!cache_permissions.is_empty())
                                     .then_some(cache_permissions),
-                                project: api_key_project,
-                                cache,
+                                project: api_key_project.map(Some),
+                                cache: cache.map(Some),
                                 allowed_ips: (!allowed_ips.is_empty()).then_some(allowed_ips),
                             },
                         )

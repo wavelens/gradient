@@ -24,6 +24,10 @@ use crate::resource::Resource;
 use crate::scope::{CacheScope, ProjectScope, Requires, RequiresUnmanaged, can};
 use axum::extract::State;
 use axum::{Extension, Json};
+pub use gradient_api_types::{
+    GrantCacheRequest, GrantProjectRequest, PatchCacheGrantRequest, PatchProjectGrantRequest,
+    TeamGrantEntry,
+};
 use gradient_core::ServerState;
 use gradient_db::WebDb;
 use gradient_db::lookup::{by_ids, get_any_cache_by_name, get_any_project_by_name};
@@ -33,59 +37,24 @@ use gradient_types::events::audit::Action;
 use gradient_types::*;
 use sea_orm::ActiveValue::Set;
 use sea_orm::TransactionTrait;
-use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
 
-#[derive(Serialize, utoipa::ToSchema)]
-pub struct TeamGrantEntry {
-    pub team: String,
-    pub display_name: String,
-    pub role: Option<String>,
-    pub users: bool,
-    pub workers: bool,
-    pub pending: bool,
-}
-
-impl TeamGrantEntry {
-    fn new(team: &MTeam, role: Option<String>, users: bool, workers: bool, pending: bool) -> Self {
-        Self {
-            team: team.name.clone(),
-            display_name: team.display_name.clone(),
-            role,
-            users,
-            workers,
-            pending,
-        }
+fn build_team_grant_entry_from_team_row_role_and_flags(
+    team: &MTeam,
+    role: Option<String>,
+    users: bool,
+    workers: bool,
+    pending: bool,
+) -> TeamGrantEntry {
+    TeamGrantEntry {
+        team: team.name.clone(),
+        display_name: team.display_name.clone(),
+        role,
+        users,
+        workers,
+        pending,
     }
-}
-
-#[derive(Deserialize, utoipa::ToSchema)]
-pub struct GrantProjectRequest {
-    pub team: String,
-    pub role: Option<String>,
-    #[serde(default)]
-    pub users: bool,
-    #[serde(default)]
-    pub workers: bool,
-}
-
-#[derive(Deserialize, utoipa::ToSchema)]
-pub struct PatchProjectGrantRequest {
-    pub role: Option<String>,
-    pub users: Option<bool>,
-    pub workers: Option<bool>,
-}
-
-#[derive(Deserialize, utoipa::ToSchema)]
-pub struct GrantCacheRequest {
-    pub team: String,
-    pub role: String,
-}
-
-#[derive(Deserialize, utoipa::ToSchema)]
-pub struct PatchCacheGrantRequest {
-    pub role: String,
 }
 
 async fn find_team(db: &WebDb, name: &str) -> WebResult<MTeam> {
@@ -246,7 +215,7 @@ pub async fn get_project_teams(
 
     let entry = |team: TeamId, role, users, workers, pending| {
         teams.get(&team).map(|team| {
-            TeamGrantEntry::new(
+            build_team_grant_entry_from_team_row_role_and_flags(
                 team,
                 project_role_name(&roles, role),
                 users,
@@ -663,7 +632,13 @@ pub async fn get_cache_teams(
 
     let entry = |team: TeamId, role, pending| {
         teams.get(&team).map(|team| {
-            TeamGrantEntry::new(team, cache_role_name(&roles, role), true, false, pending)
+            build_team_grant_entry_from_team_row_role_and_flags(
+                team,
+                cache_role_name(&roles, role),
+                true,
+                false,
+                pending,
+            )
         })
     };
     let items = grants

@@ -16,6 +16,7 @@ use crate::resource::Resource;
 use crate::scope::{Member, ProjectScope, Requires, RequiresUnmanaged, can};
 use axum::extract::State;
 use axum::{Extension, Json};
+pub use gradient_api_types::{CacheSubscriptionItem, SubscribeCacheRequest, SubscriptionStatus};
 use gradient_ci::CiContext;
 use gradient_core::ServerState;
 use gradient_db::WebDb;
@@ -33,35 +34,10 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 #[derive(Deserialize, utoipa::ToSchema)]
-pub struct SubscribeCacheRequest {
-    pub mode: Option<CacheSubscriptionMode>,
-}
-
-#[derive(Clone, Copy, Debug, Serialize, utoipa::ToSchema)]
-#[serde(rename_all = "lowercase")]
-pub enum SubscriptionStatus {
-    Active,
-    Pending,
-}
-
-#[derive(Deserialize, utoipa::ToSchema)]
 pub struct UpdateCacheSubscriptionRequest {
     /// Left out: on for a subscription that writes to the cache, off for a read-only one.
     #[serde(default)]
     pub sign_outputs: Option<bool>,
-}
-
-#[derive(Serialize, utoipa::ToSchema)]
-pub struct CacheSubscriptionItem {
-    pub id: CacheId,
-    pub name: String,
-    pub display_name: String,
-    pub mode: CacheSubscriptionMode,
-    pub status: SubscriptionStatus,
-    pub managed: bool,
-    pub sign_outputs: bool,
-    /// Usernames of the users that can approve a pending request. Empty for an active subscription.
-    pub approvers: Vec<String>,
 }
 
 #[derive(Serialize, utoipa::ToSchema)]

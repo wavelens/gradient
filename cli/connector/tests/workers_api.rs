@@ -55,11 +55,11 @@ async fn create_worker_returns_response() {
             connector::api::RegisterWorkerRequest {
                 display_name: "My Worker".into(),
                 url: None,
-                enable_build: None,
-                enable_eval: None,
-                enable_exec: None,
-                enable_network: None,
-                enable_secrets: None,
+                enable_build: true,
+                enable_eval: true,
+                enable_exec: false,
+                enable_network: true,
+                enable_secrets: true,
             },
         )
         .await
@@ -81,13 +81,13 @@ async fn worker_metrics_decode() {
                 "display_name": "Worker 1",
                 "jobs_dispatched": 7,
                 "samples": [{
-                    "at": "2026-11-09T00:00:00Z",
+                    "at": "2026-11-09T00:00:00",
                     "assigned_jobs": 1,
                     "max_concurrent_builds": 4,
                     "state": 0,
                     "cpu_usage_pct": 12.5
                 }],
-                "connections": [{"connected_at": "2026-11-09T00:00:00Z"}]
+                "connections": [{"connected_at": "2026-11-09T00:00:00"}]
             }))),
         )
         .mount(&server)

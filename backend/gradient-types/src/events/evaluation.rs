@@ -7,6 +7,7 @@
 use super::{EventKind, EventOwner, firehose, names};
 use crate::ids::{EvaluationId, ProjectId, TaskId};
 use crate::waiting_reason::WaitingReason;
+pub use gradient_api_types::{EvaluationProgress, InputFetch, InputFetchState};
 use gradient_entity::evaluation::EvaluationStatus;
 use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
@@ -144,29 +145,6 @@ pub struct Progress {
     pub task: Option<TaskId>,
 }
 firehose!(Progress, names::EVALUATION_PROGRESS);
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
-#[serde(tag = "kind", rename_all = "snake_case")]
-pub enum EvaluationProgress {
-    Fetching { inputs: Vec<InputFetch> },
-    Evaluating { thunks: u64 },
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
-pub struct InputFetch {
-    pub name: String,
-    pub state: InputFetchState,
-    pub downloaded_bytes: u64,
-    pub expected_bytes: u64,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
-pub enum InputFetchState {
-    Queued,
-    Fetching,
-    Done,
-    Failed,
-}
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Activity {

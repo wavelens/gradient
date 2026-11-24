@@ -9,7 +9,7 @@ pub use gradient_types::permissions::*;
 use crate::error::WebResult;
 use crate::refusal::{Refusal, RefusalStatus};
 use axum::http::Method;
-use serde::Serialize;
+pub use gradient_api_types::PermissionEntry;
 
 pub fn superuser_permission_for_http_method(method: &Method) -> Permission {
     if method.is_safe() {
@@ -39,33 +39,6 @@ impl Refusal for PermissionRefusal {
             Self::UnknownPermission { .. } | Self::UnknownCachePermission { .. } => {
                 RefusalStatus::BadRequest
             }
-        }
-    }
-}
-
-#[derive(Serialize, Debug, utoipa::ToSchema)]
-pub struct PermissionEntry {
-    pub id: &'static str,
-    pub mutating: bool,
-    pub permission_explanation: &'static str,
-}
-
-impl From<Permission> for PermissionEntry {
-    fn from(permission: Permission) -> Self {
-        Self {
-            id: permission.as_wire_name(),
-            mutating: is_mutating(permission),
-            permission_explanation: permission.permission_explanation(),
-        }
-    }
-}
-
-impl From<CachePermission> for PermissionEntry {
-    fn from(permission: CachePermission) -> Self {
-        Self {
-            id: permission.as_wire_name(),
-            mutating: is_cache_mutating(permission),
-            permission_explanation: permission.permission_explanation(),
         }
     }
 }

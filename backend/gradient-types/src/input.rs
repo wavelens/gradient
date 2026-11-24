@@ -8,6 +8,11 @@ use anyhow::Result as AnyhowResult;
 use std::net::{SocketAddr, ToSocketAddrs};
 use thiserror::Error;
 
+pub use gradient_api_types::index_and_display_names::{
+    IndexOrDisplayNameValidationError, MAX_SLUG_NAME_CHARACTER_COUNT, RESERVED_TASK_NAMES,
+    check_index_name, check_task_name, validate_display_name,
+};
+
 use crate::consts::*;
 pub use crate::fetch_source_allowlist_and_request_validation::{
     check_allowed_uri_prefix_has_remote_nix_scheme,
@@ -16,6 +21,8 @@ pub use crate::fetch_source_allowlist_and_request_validation::{
 
 #[derive(Debug, Error, PartialEq)]
 pub enum InputError {
+    #[error(transparent)]
+    InvalidName(#[from] IndexOrDisplayNameValidationError),
     #[error("Port {port} is out of range {start}-{end}", port = .0, start = PORT_RANGE.start(), end = PORT_RANGE.end())]
     PortOutOfRange(i32),
     #[error("Invalid address: {0}")]
@@ -61,18 +68,6 @@ pub enum InputError {
         "Evaluation wildcard cannot use `#`; pick `*` for a single level or `**` for nested outputs"
     )]
     EvaluationWildcardHashRemoved,
-    #[error("Name cannot be empty")]
-    NameEmpty,
-    #[error("Name cannot exceed {max} characters", max = MAX_SLUG_NAME_CHARACTER_COUNT)]
-    SlugNameTooLong,
-    #[error("Name must be lowercase")]
-    NameNotLowercase,
-    #[error("Name can only contain letters, numbers, and dashes")]
-    NameInvalidCharacters,
-    #[error("Name can only start and end with letters or numbers")]
-    NameInvalidStartEnd,
-    #[error("This task name is reserved and cannot be used")]
-    TaskNameReserved,
     #[error("Empty path in manifest")]
     ManifestPathEmpty,
     #[error("Invalid path (null byte): {0}")]
@@ -141,18 +136,6 @@ pub enum InputError {
     UsernameReserved,
     #[error("Email address is invalid")]
     EmailAddressNotValid,
-    #[error("Display name cannot be empty")]
-    DisplayNameEmpty,
-    #[error("Display name cannot exceed 100 characters")]
-    DisplayNameTooLong,
-    #[error(
-        "Display name can only contain letters, numbers, spaces, apostrophes, dots, dashes, and underscores"
-    )]
-    DisplayNameInvalidCharacters,
-    #[error("Display name cannot start or end with spaces")]
-    DisplayNameInvalidStartEnd,
-    #[error("Display name cannot contain consecutive spaces")]
-    DisplayNameConsecutiveSpaces,
     #[error("Password must be at least 8 characters long")]
     PasswordTooShort,
     #[error("Password cannot exceed 128 characters")]
@@ -227,45 +210,6 @@ pub fn check_repository_url_is_ssh(url: &str) -> bool {
     }
 
     false
-}
-
-pub const MAX_SLUG_NAME_CHARACTER_COUNT: usize = 64;
-
-pub fn check_index_name(s: &str) -> Result<(), InputError> {
-    if s.is_empty() {
-        return Err(InputError::NameEmpty);
-    }
-
-    if s.chars().count() > MAX_SLUG_NAME_CHARACTER_COUNT {
-        return Err(InputError::SlugNameTooLong);
-    }
-
-    if s != s.to_lowercase() {
-        return Err(InputError::NameNotLowercase);
-    }
-
-    if s.contains(|c: char| !c.is_ascii_alphanumeric() && c != '-') {
-        return Err(InputError::NameInvalidCharacters);
-    }
-
-    if s.starts_with('-') || s.ends_with('-') {
-        return Err(InputError::NameInvalidStartEnd);
-    }
-
-    Ok(())
-}
-
-pub const RESERVED_TASK_NAMES: &[&str] = &["build-request"];
-
-pub fn check_task_name(s: &str) -> Result<(), InputError> {
-    check_index_name(s)?;
-    if RESERVED_TASK_NAMES
-        .iter()
-        .any(|r| s.eq_ignore_ascii_case(r))
-    {
-        return Err(InputError::TaskNameReserved);
-    }
-    Ok(())
 }
 
 /// Startup callers must propagate the error to `init_state` for a clean exit. Per-request
@@ -396,33 +340,6 @@ pub fn choose_account_display_name_from_identity_provider(
         .filter(|name| validate_display_name(name).is_ok())
         .unwrap_or(username)
         .to_owned()
-}
-
-pub fn validate_display_name(display_name: &str) -> Result<(), InputError> {
-    if display_name.is_empty() {
-        return Err(InputError::DisplayNameEmpty);
-    }
-
-    if display_name.len() > 100 {
-        return Err(InputError::DisplayNameTooLong);
-    }
-
-    if !display_name
-        .chars()
-        .all(|c| c.is_alphanumeric() || matches!(c, ' ' | '\'' | '.' | '-' | '_'))
-    {
-        return Err(InputError::DisplayNameInvalidCharacters);
-    }
-
-    if display_name.starts_with(' ') || display_name.ends_with(' ') {
-        return Err(InputError::DisplayNameInvalidStartEnd);
-    }
-
-    if display_name.contains("  ") {
-        return Err(InputError::DisplayNameConsecutiveSpaces);
-    }
-
-    Ok(())
 }
 
 pub fn validate_password(password: &str) -> Result<(), InputError> {

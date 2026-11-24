@@ -9,8 +9,8 @@
 use connector::Client;
 use connector::api::{
     AddTeamMemberRequest, MakeTeamRequest, PatchTeamRequest, PatchWorkerRequest,
-    RegisterWorkerRequest, RemoveTeamMemberRequest, RevokeInvitationRequest, TeamMemberRequest,
-    TeamRole,
+    RegisterWorkerRequest, RemoveTeamMemberRequest, RevokeInvitationRequest, TeamDisplayName,
+    TeamMemberRequest, TeamName, TeamRole,
 };
 use serde_json::{Value, json};
 use wiremock::matchers::{body_json, method, path, query_param};
@@ -85,8 +85,8 @@ async fn create_team_puts_name_and_display_name() {
     let id = client
         .teams()
         .create(MakeTeamRequest {
-            name: "ops".to_owned().into(),
-            display_name: "Ops".to_owned().into(),
+            name: TeamName::try_from("ops".to_owned()).expect("valid name"),
+            display_name: TeamDisplayName::try_from("Ops".to_owned()).expect("valid name"),
         })
         .await
         .unwrap();
@@ -136,7 +136,9 @@ async fn update_team_sends_only_given_fields() {
         .update(
             "ops",
             PatchTeamRequest {
-                display_name: Some("Operations".to_owned().into()),
+                display_name: Some(
+                    TeamDisplayName::try_from("Operations".to_owned()).expect("valid name"),
+                ),
                 ..Default::default()
             },
         )
@@ -187,7 +189,7 @@ async fn add_user_posts_member_request() {
             AddTeamMemberRequest {
                 user: "bob".into(),
                 role: TeamRole::Member,
-                add_as_member_immediately: None,
+                add_as_member_immediately: false,
             },
         )
         .await
@@ -354,11 +356,11 @@ async fn register_team_worker_returns_team_and_token() {
             RegisterWorkerRequest {
                 display_name: "builder".into(),
                 url: None,
-                enable_network: None,
-                enable_secrets: None,
-                enable_exec: None,
-                enable_eval: None,
-                enable_build: None,
+                enable_network: true,
+                enable_secrets: true,
+                enable_exec: false,
+                enable_eval: true,
+                enable_build: true,
             },
         )
         .await

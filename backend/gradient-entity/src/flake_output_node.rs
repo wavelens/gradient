@@ -34,3 +34,20 @@ pub enum Relation {
 }
 
 impl ActiveModelBehavior for ActiveModel {}
+
+impl From<Model> for gradient_api_types::FlakeGraphNode {
+    fn from(n: Model) -> Self {
+        Self {
+            path: n.path,
+            parent: n.parent,
+            name: n.name,
+            kind: n.kind,
+            is_derivation: n.is_derivation,
+            drv_path: n.drv_path.map(|p| {
+                crate::StorePath::parse_stored(&p)
+                    .map(|sp| sp.base())
+                    .unwrap_or(p)
+            }),
+        }
+    }
+}

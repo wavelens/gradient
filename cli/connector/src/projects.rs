@@ -3,12 +3,12 @@
 
 use crate::api::{
     AddMemberRequest, CacheSubscriptionItem, ChangeMemberRoleRequest, CreateRoleRequest,
-    CreatedEntityResponse, GrantProjectRequest, MakeProjectRequest, MemberItem,
-    PaginatedProjectSummary, PatchProjectGrantRequest, PatchProjectRequest, PatchRoleRequest,
-    PendingInvitationItem, PersonWithAccessToProjectOrCache, ProjectReadinessResponse,
-    ProjectResponse, ProjectSecretSummary, PutProjectSecretRequest, RemoveMemberRequest,
-    RevokeInvitationRequest, RoleResponseProjectRoleOwner, SopsRecipientResponse,
-    SubscribeCacheRequest, TeamGrantEntry,
+    CreatedEntityResponse, GrantProjectRequest, MakeProjectRequest, MemberItem, Paginated,
+    PatchProjectGrantRequest, PatchProjectRequest, PatchRoleRequest, PendingInvitationItem,
+    PersonWithAccessToProjectOrCache, ProjectReadinessResponse, ProjectResponse, ProjectRoleOwner,
+    ProjectSecretSummary, ProjectSummary, PutProjectSecretRequest, RemoveMemberRequest,
+    RevokeInvitationRequest, RoleResponse, SopsRecipientResponse, SubscribeCacheRequest,
+    TeamGrantEntry,
 };
 use crate::http::encode_url_component;
 use crate::{Client, ConnectorError, http};
@@ -17,10 +17,10 @@ use reqwest::Method;
 pub struct ProjectsApi<'a>(pub(crate) &'a Client);
 
 impl ProjectsApi<'_> {
-    pub async fn list(&self) -> Result<PaginatedProjectSummary, ConnectorError> {
+    pub async fn list(&self) -> Result<Paginated<ProjectSummary>, ConnectorError> {
         let (items, total) = self.0.fetch_all_pages_and_total_count("projects").await?;
-        Ok(PaginatedProjectSummary {
-            per_page: i64::try_from(items.len()).unwrap_or(i64::MAX),
+        Ok(Paginated {
+            per_page: u64::try_from(items.len()).unwrap_or(u64::MAX),
             page: 1,
             total,
             items,
@@ -178,7 +178,7 @@ impl ProjectsApi<'_> {
     pub async fn roles(
         &self,
         project: &str,
-    ) -> Result<Vec<RoleResponseProjectRoleOwner>, ConnectorError> {
+    ) -> Result<Vec<RoleResponse<ProjectRoleOwner>>, ConnectorError> {
         let req = http::request(
             self.0.http(),
             self.0.base_url(),
@@ -211,7 +211,7 @@ impl ProjectsApi<'_> {
         &self,
         project: &str,
         role_id: &str,
-    ) -> Result<RoleResponseProjectRoleOwner, ConnectorError> {
+    ) -> Result<RoleResponse<ProjectRoleOwner>, ConnectorError> {
         let req = http::request(
             self.0.http(),
             self.0.base_url(),

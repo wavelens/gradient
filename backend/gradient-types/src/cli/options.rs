@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+pub use gradient_api_types::{EffectiveConfigOption, ServerOptionValueSource};
 use serde::Serialize;
 
 #[derive(Debug, Clone, Serialize)]
@@ -17,28 +18,6 @@ pub struct OptionSpec {
     pub description: &'static str,
     #[serde(skip)]
     pub secret: bool,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, utoipa::ToSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum ServerOptionValueSource {
-    Flag,
-    Env,
-    Default,
-    Unset,
-}
-
-#[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
-pub struct EffectiveConfigOption {
-    pub group: String,
-    pub field: String,
-    pub flag: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub env: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub value: Option<String>,
-    pub secret: bool,
-    pub source: ServerOptionValueSource,
 }
 
 pub fn collect_active_options_with_secret_values_hidden(
