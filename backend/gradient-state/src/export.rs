@@ -278,6 +278,7 @@ pub async fn export_state<C: ConnectionTrait>(db: &C) -> Result<StateConfigurati
             StateCache {
                 name: c.name.clone(),
                 display_name: c.display_name.clone(),
+                id: Some(c.id.to_string()),
                 description: opt(&c.description),
                 active: c.active,
                 priority: c.priority,
@@ -464,6 +465,7 @@ fn export_task(
         name: task.name.clone(),
         project: name_or_blank(project_name, task.project),
         display_name: task.display_name.clone(),
+        id: Some(task.id.to_string()),
         description: opt(&task.description),
         repository: task.repository.clone(),
         wildcard: task.wildcard.clone(),

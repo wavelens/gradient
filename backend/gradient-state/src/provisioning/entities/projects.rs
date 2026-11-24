@@ -6,7 +6,11 @@
 
 use super::super::StateApplicator;
 use super::super::{DynError, StateFileManagedUserIdsByUsername};
-use super::super::{derive_public_key, lookup_id, read_credential};
+use super::super::{
+    choose_row_to_update_from_declared_id_and_name, derive_public_key, lookup_id,
+    order_state_entries_with_declared_id_first, parse_optional_uuid_string_as_typed_id,
+    read_credential,
+};
 use crate::config::*;
 use anyhow::Result;
 use gradient_entity::*;
@@ -25,7 +29,11 @@ impl<'a> StateApplicator<'a> {
     ) -> Result<(), DynError> {
         let state_users = self.load_managed_accounts_by_lowercase_user_name().await?;
 
-        for state_project in state_projects.values() {
+        for state_project in
+            order_state_entries_with_declared_id_first(state_projects.values(), |p| {
+                (&p.id, &p.name)
+            })
+        {
             let owner_team = state_project
                 .owner_team
                 .as_deref()
@@ -43,10 +51,27 @@ impl<'a> StateApplicator<'a> {
             let public_key = derive_public_key(private_key)?;
             let encrypted_private_key = self.encrypt_to_b64(private_key, "SSH private key")?;
 
-            let existing_project = project::Entity::find()
+            let declared_id = parse_optional_uuid_string_as_typed_id::<ProjectId>(
+                "Project",
+                &state_project.name,
+                state_project.id.as_deref(),
+            )?;
+            let row_with_declared_id = match declared_id {
+                Some(id) => project::Entity::find_by_id(id).one(self.db).await?,
+                None => None,
+            };
+            let row_with_name = project::Entity::find()
                 .filter(project::Column::Name.eq(&state_project.name))
                 .one(self.db)
                 .await?;
+            let existing_project = choose_row_to_update_from_declared_id_and_name(
+                "Project",
+                &state_project.name,
+                declared_id,
+                row_with_declared_id,
+                row_with_name,
+                |project| project.id,
+            )?;
             let created_by_id = state_users.resolve_creator_username_to_state_account_id(
                 &state_project.created_by,
                 &format!("project '{}'", state_project.name),
@@ -55,28 +80,10 @@ impl<'a> StateApplicator<'a> {
 
             let now = now();
 
-            let declared_id = match &state_project.id {
-                Some(s) => Some(s.trim().parse::<ProjectId>().map_err(|e| {
-                    format!(
-                        "Project '{}' has an invalid id '{}': {}",
-                        state_project.name, s, e
-                    )
-                })?),
-                None => None,
-            };
-
-            let _project_id = if let Some(existing) = existing_project {
+            if let Some(existing) = existing_project {
                 let project_id = existing.id;
-                if let Some(declared) = declared_id
-                    && declared != project_id
-                {
-                    return Err(format!(
-                        "Project '{}' already exists with id {} but state declares id {}; the id is immutable",
-                        state_project.name, project_id, declared
-                    )
-                    .into());
-                }
                 let mut project: project::ActiveModel = existing.into();
+                project.name = Set(state_project.name.clone());
                 project.display_name = Set(state_project.display_name.clone());
                 project.description = Set(state_project.description.clone().unwrap_or_default());
                 project.public_key = Set(public_key);
@@ -94,7 +101,6 @@ impl<'a> StateApplicator<'a> {
                 )
                 .await?;
                 tracing::info!(name = %state_project.name, "Updated managed project");
-                project_id
             } else {
                 let project_id = declared_id.unwrap_or_else(ProjectId::now_v7);
                 let project = project::Model {
@@ -126,8 +132,7 @@ impl<'a> StateApplicator<'a> {
                 )
                 .await?;
                 tracing::info!(name = %state_project.name, "Created managed project");
-                project_id
-            };
+            }
         }
 
         Ok(())

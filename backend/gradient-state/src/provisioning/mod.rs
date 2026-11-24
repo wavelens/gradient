@@ -18,8 +18,9 @@ pub(crate) use credentials::{
 };
 pub(crate) use entities::build_trigger_config;
 pub(crate) use lookups::{
-    StateFileManagedUserIdsByUsername, load_git_host_connections_usable_by_project_by_name,
-    lookup_id,
+    StateFileManagedUserIdsByUsername, choose_row_to_update_from_declared_id_and_name,
+    load_git_host_connections_usable_by_project_by_name, lookup_id,
+    order_state_entries_with_declared_id_first, parse_optional_uuid_string_as_typed_id,
 };
 
 pub(crate) type DynError = Box<dyn std::error::Error>;

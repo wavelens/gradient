@@ -7,6 +7,7 @@
 use super::ValidationError;
 use crate::config::StateConfiguration;
 use gradient_types::input::InputError;
+use std::collections::HashSet;
 
 pub(super) struct ErrorCollector {
     errors: Vec<ValidationError>,
@@ -31,6 +32,23 @@ impl ErrorCollector {
     ) {
         if let Err(e) = result {
             self.push(field, e.to_string());
+        }
+    }
+
+    pub(super) fn validate_optional_declared_uuid_and_record_duplicate_error(
+        &mut self,
+        field: String,
+        kind: &str,
+        id: Option<&str>,
+        ids_seen: &mut HashSet<uuid::Uuid>,
+    ) {
+        let Some(id) = id else { return };
+        match id.trim().parse::<uuid::Uuid>() {
+            Ok(parsed) if !ids_seen.insert(parsed) => {
+                self.push(field, format!("Duplicate {kind} id '{id}'"))
+            }
+            Ok(_) => {}
+            Err(_) => self.push(field, format!("Invalid UUID '{id}'")),
         }
     }
 

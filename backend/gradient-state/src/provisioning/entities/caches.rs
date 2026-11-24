@@ -6,7 +6,11 @@
 
 use super::super::DynError;
 use super::super::StateApplicator;
-use super::super::{lookup_id, read_credential};
+use super::super::{
+    choose_row_to_update_from_declared_id_and_name, lookup_id,
+    order_state_entries_with_declared_id_first, parse_optional_uuid_string_as_typed_id,
+    read_credential,
+};
 use crate::config::*;
 use anyhow::Result;
 use base64::{Engine, engine::general_purpose};
@@ -32,8 +36,11 @@ impl<'a> StateApplicator<'a> {
     ) -> Result<(), DynError> {
         let state_users = self.load_managed_accounts_by_lowercase_user_name().await?;
         let project_map = self.project_lookup().await?;
+        let mut applied = Vec::with_capacity(state_caches.len());
 
-        for state_cache in state_caches.values() {
+        for state_cache in
+            order_state_entries_with_declared_id_first(state_caches.values(), |c| (&c.id, &c.name))
+        {
             let owner_team = state_cache
                 .owner_team
                 .as_deref()
@@ -70,10 +77,27 @@ impl<'a> StateApplicator<'a> {
                 &format!("signing key for cache '{}'", state_cache.name),
             )?;
 
-            let existing_cache = cache::Entity::find()
+            let declared_id = parse_optional_uuid_string_as_typed_id::<CacheId>(
+                "Cache",
+                &state_cache.name,
+                state_cache.id.as_deref(),
+            )?;
+            let row_with_declared_id = match declared_id {
+                Some(id) => cache::Entity::find_by_id(id).one(self.db).await?,
+                None => None,
+            };
+            let row_with_name = cache::Entity::find()
                 .filter(cache::Column::Name.eq(&state_cache.name))
                 .one(self.db)
                 .await?;
+            let existing_cache = choose_row_to_update_from_declared_id_and_name(
+                "Cache",
+                &state_cache.name,
+                declared_id,
+                row_with_declared_id,
+                row_with_name,
+                |cache| cache.id,
+            )?;
             let created_by_id = state_users.resolve_creator_username_to_state_account_id(
                 &state_cache.created_by,
                 &format!("cache '{}'", state_cache.name),
@@ -84,6 +108,7 @@ impl<'a> StateApplicator<'a> {
 
             let cache_id = if let Some(existing) = existing_cache {
                 let mut cache_model: cache::ActiveModel = existing.clone().into();
+                cache_model.name = Set(state_cache.name.clone());
                 cache_model.display_name = Set(state_cache.display_name.clone());
                 cache_model.description = Set(state_cache.description.clone().unwrap_or_default());
                 cache_model.active = Set(state_cache.active);
@@ -101,7 +126,7 @@ impl<'a> StateApplicator<'a> {
                 tracing::info!(name = %state_cache.name, "Updated managed cache");
                 existing.id
             } else {
-                let cache_id = CacheId::now_v7();
+                let cache_id = declared_id.unwrap_or_else(CacheId::now_v7);
                 let cache_model = cache::Model {
                     owner_team,
                     id: cache_id,
@@ -126,7 +151,10 @@ impl<'a> StateApplicator<'a> {
                 tracing::info!(name = %state_cache.name, "Created managed cache");
                 cache_id
             };
+            applied.push((cache_id, created_by_id, state_cache));
+        }
 
+        for (cache_id, created_by_id, state_cache) in applied {
             self.apply_upstream_caches(cache_id, &state_cache.name, &state_cache.upstream_caches)
                 .await?;
 

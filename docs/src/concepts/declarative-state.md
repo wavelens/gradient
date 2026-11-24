@@ -83,6 +83,27 @@ The command outputs two values: the `API token` for clients (`Authorization: Bea
 
     1.  `printf %s` excludes the trailing newline from the digest.
 
+## Rename
+
+State entries match database rows by name. Entries with a changed `name` and no `id` delete the old entity and create a new one. Caches lose all stored paths in that case.
+
+Projects, caches and tasks accept an `id` with the UUID of an existing entity. Find that UUID in the danger zone of the settings page. That UUID is in the `GET /api/v1/admin/state` export. Use an `id` with a changed `name` to rename the entity in place.
+
+```nix
+services.gradient.state.caches.some-cache = {
+  id = "bae05ff2-30a1-40b3-993a-7e16d4fcd83c"; # (1)!
+  created_by = "alice";
+  signing_key_file = "/run/secrets/main-cache-key";
+};
+```
+
+1.  The UUID of a cache that previously had the name `main`.
+
+- A new UUID from `uuidgen` can only match new entities. A new UUID and a new `name` together create a new entity and delete the old entity.
+- The cache URL and the signing key name for the cache change with the cache name. Update the substituter URL and `trusted-public-keys` in Nix clients.
+- Tasks can't move to another project.
+- Rename controls for entities that the UI created sit in the Danger Zone on the settings page.
+
 ## Removal
 
 The option `services.gradient.state.delete` controls deletion of users, projects and caches that no longer appear in the config. That option is on by default. Disable that option and these entities remain in the database, editable in the UI. Deleted users become inactive and lose superuser status. Always delete API keys removed from the config.

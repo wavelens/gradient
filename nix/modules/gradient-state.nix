@@ -170,10 +170,7 @@
         type = types.nullOr types.str;
         default = null;
         description = ''
-          Project UUID. `null` lets the server generate one. Set it to reference the project
-          as `<id>:<token>` in a worker's {option}`services.gradient.worker.peersFile` in a fully
-          declarative deployment. The server applies it only on creation and rejects a value
-          conflicting with an existing project. Generate one with {command}`uuidgen`.
+          The UUID of the project. Use `null` to let the server generate a UUID. Set this option to keep a project after a rename. Use the existing UUID of the project to rename a project. Find that UUID in the danger zone of the settings page. Use a new UUID from {command}`uuidgen` for new projects only. A rename with the new UUID can create a new project. The worker's {option}`services.gradient.worker.peersFile` can also refer to the project as `<id>:<token>` in a fully declarative deployment. Values that conflict with an existing project of the same name fail validation on the server.
         '';
       };
 
@@ -295,6 +292,14 @@
 
   taskType = types.submodule ({ config, name, ... }: {
     options = {
+      id = mkOption {
+        type = types.nullOr types.str;
+        default = null;
+        description = ''
+          UUID of the task. Set `null` to let the server generate one. Set this value to keep the task, its evaluations and its triggers after a rename. Use the UUID that the task already has to rename the task. Find that UUID in the danger zone of the settings page. Use a new UUID from {command}`uuidgen` for new tasks only. A rename with a new UUID can create a new task. Keep the task in the same project. Values get a rejection from the server when they conflict with an existing task of the same name.
+        '';
+      };
+
       name = mkOption {
         type = types.str;
         default = name;
@@ -1034,6 +1039,14 @@
 
   cacheType = types.submodule ({ config, name, ... }: {
     options = {
+      id = mkOption {
+        type = types.nullOr types.str;
+        default = null;
+        description = ''
+          Cache UUID. Set the value to `null` to let the server generate a UUID. Set the value to keep the cache and its stored paths after a rename. A rename can use only the existing UUID of the cache to keep that cache. Find that UUID in the danger zone on the settings page. Use a new UUID from {command}`uuidgen` for a new cache only. A rename with a new UUID can create a new cache and delete the old cache. The cache URL and the signing key name change with the rename. The server can reject a value in conflict with an existing cache of the same name.
+        '';
+      };
+
       name = mkOption {
         type = types.str;
         default = name;
