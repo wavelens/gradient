@@ -36,9 +36,9 @@ use crate::proto::progress::{
 };
 use gradient_wire::traits::{EvalProgressSink, InputProgressSink, JobReporter};
 use gradient_wire::types::{
-    BuildProgressPhase, BuildStage, EvalShardOutcome, EvalShardSpec, FinishedShard, GrantTarget,
-    ImportOutcome, InputOutcome, Realisation, SegmentFetch, SegmentSource, UploadMetadata,
-    UploadObject, UrlWithSecretQuery,
+    BuildProgressPhase, BuildStage, EvalShardOutcome, EvalShardSpec, ExecMetrics, FinishedShard,
+    GrantTarget, ImportOutcome, InputOutcome, Realisation, SegmentFetch, SegmentSource,
+    UploadMetadata, UploadObject, UrlWithSecretQuery,
 };
 use gradient_worker_client::connection::reconnecting::ReconnectingWriter;
 use gradient_worker_client::nar_recv::{NarPayload, NarReceiver, NarUnavailable};
@@ -701,6 +701,15 @@ impl JobUpdater {
                 job_id: self.job_id.clone(),
                 name,
                 payload,
+            })
+            .await
+    }
+
+    pub async fn send_exec_metrics(&self, metrics: ExecMetrics) -> Result<()> {
+        self.writer
+            .send(ClientMessage::ExecMetrics {
+                job_id: self.job_id.clone(),
+                metrics,
             })
             .await
     }
