@@ -1185,3 +1185,53 @@ async fn two_projects_alternate_dispatch_of_one_shared_build_each_killed_out_of_
     );
     case.finish().await;
 }
+
+#[tokio::test]
+async fn t20_attempt_one_reports_substituted_but_storage_lacks_the_outputs_fails_transiently_then_attempt_two_builds_and_the_build_completes()
+ {
+    let e1 = EvaluationId::now_v7();
+    let case = Case::start(chain(e1)).await;
+
+    case.assigned(e1, B, false).await;
+    case.build_started(B).await;
+    case.build_output(B, true).await;
+    case.build_completed(B).await;
+    case.close_assignment(B).await;
+
+    let b = case.sb(B).await;
+    assert_eq!(
+        (b.status, b.substituted),
+        (BuildStatus::FailedTransient, true),
+        "after 1: sb(B)"
+    );
+    case.zero_drift("step 1").await;
+
+    case.advance_clock(B).await;
+    case.requeue().await;
+    case.assigned(e1, B, false).await;
+    case.build_started(B).await;
+    case.build_output(B, false).await;
+    case.commit_nar(with_references(nar(B_OUT, "b"), &[(B_OUT, "b")]))
+        .await;
+    case.build_completed(B).await;
+
+    let b = case.sb(B).await;
+    assert_eq!(
+        (b.status, b.substituted),
+        (BuildStatus::Completed, false),
+        "after 2: sb(B)"
+    );
+    let outcomes: Vec<AttemptOutcome> = case
+        .attempts(B)
+        .await
+        .into_iter()
+        .map(|attempt| attempt.outcome)
+        .collect();
+    assert_eq!(
+        outcomes,
+        vec![AttemptOutcome::Failed, AttemptOutcome::Built],
+        "after 2: attempts(B).outcome"
+    );
+    case.zero_drift("step 2").await;
+    case.finish().await;
+}

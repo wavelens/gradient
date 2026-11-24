@@ -642,12 +642,12 @@ async fn build_output(
     info!(%build_id, output_count = outputs.len(), "build outputs recorded");
     report_missing_artefacts(ctx, derivation_id, &missing).await?;
 
-    if substituted {
+    if shared_build.substituted != substituted {
         let mut active = shared_build.into_active_model();
-        active.substituted = Set(true);
+        active.substituted = Set(substituted);
         active.updated_at = Set(now());
         if let Err(e) = active.update(&ctx.worker_db).await {
-            warn!(%build_id, error = %e, "failed to record shared build as substituted");
+            warn!(%build_id, error = %e, "failed to write the substituted flag of the shared build to the database");
         }
     }
 
