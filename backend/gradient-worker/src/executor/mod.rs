@@ -529,16 +529,15 @@ impl JobExecutor {
             gc_handles.push(self.gcroots.add(path).await);
         }
         let reported = realised_outputs(&realised).await;
-        let (metrics, substituted) = self
-            .locally_built_unuploaded_derivations
-            .report_for_outputs_already_in_store(&build.drv_path);
+        let (metrics, substituted) = match build.kind {
+            BuildSpecKind::Build => self
+                .locally_built_unuploaded_derivations
+                .report_for_outputs_already_in_store(&build.drv_path),
+            BuildSpecKind::Substitute | BuildSpecKind::Download => (None, true),
+        };
         updater
             .report_build_output(build.build_id.clone(), reported, metrics, substituted)
             .await?;
-        if !substituted {
-            self.locally_built_unuploaded_derivations
-                .record_built_derivation(&build.drv_path, None);
-        }
         Ok(realised
             .into_iter()
             .map(|(_, store_path)| compress::OutputNar {

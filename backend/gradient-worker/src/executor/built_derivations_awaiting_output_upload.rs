@@ -41,9 +41,9 @@ impl UnreportedBuildMetricsByDerivationPath {
     ) -> (Option<BuildMetrics>, bool) {
         self.entries
             .lock()
-            .iter()
+            .iter_mut()
             .find(|(path, _)| path == drv_path)
-            .map_or((None, true), |(_, metrics)| (metrics.clone(), false))
+            .map_or((None, true), |(_, metrics)| (metrics.take(), false))
     }
 
     pub(crate) fn remove_derivation_with_uploaded_outputs(&self, drv_path: &str) {
@@ -72,6 +72,10 @@ mod tests {
         assert_eq!(
             memory.report_for_outputs_already_in_store(DRV),
             (Some(metrics()), false)
+        );
+        assert_eq!(
+            memory.report_for_outputs_already_in_store(DRV),
+            (None, false)
         );
     }
 
