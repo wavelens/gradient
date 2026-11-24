@@ -125,10 +125,31 @@ describe('TaskSettingsComponent - access gating', () => {
     expect(findByText(fixture.nativeElement, 'transfer ownership')).toBeNull();
   });
 
-  it('explains why the name is locked and points to the display name', () => {
+  it('says the name is part of the URL and points to the rename in the Danger Zone', () => {
     const fixture = setup({ managed: false, canEdit: true, canTrigger: true });
     const field = (fixture.nativeElement as HTMLElement).querySelector('#task-name')?.closest('gr-form-field');
-    expect(field?.textContent).toContain('Edit the Display Name instead.');
+    expect(field?.textContent).toContain('Rename the name in the Danger Zone.');
+  });
+
+  it('keeps Rename visible but disabled when managed', () => {
+    const fixture = setup({ managed: true, canEdit: true, canTrigger: true });
+    const rename = (fixture.nativeElement as HTMLElement).querySelector<HTMLButtonElement>('app-rename-url-name button');
+    expect(rename?.disabled).toBe(true);
+    expect((fixture.nativeElement as HTMLElement).textContent).toContain('state file');
+  });
+
+  it('renames through the task PATCH and opens the settings under the new name', () => {
+    const updateTask = vi.fn(() => of('ok'));
+    const fixture = setup({ managed: false, canEdit: true }, undefined, updateTask);
+    const navigate = vi.spyOn(TestBed.inject(Router), 'navigateByUrl').mockResolvedValue(true);
+    const component = fixture.componentInstance as unknown as {
+      renameTask: (name: string) => unknown;
+      afterRenameRememberDisplayNameForBreadcrumbsAndNavigateToNewSettingsUrl: (name: string) => void;
+    };
+    component.renameTask('renamed');
+    component.afterRenameRememberDisplayNameForBreadcrumbsAndNavigateToNewSettingsUrl('renamed');
+    expect(updateTask).toHaveBeenCalledWith('acme', 'demo', { name: 'renamed' });
+    expect(String(navigate.mock.calls[0][0])).toBe('/project/acme/task/renamed/settings');
   });
 
   it('describes the active status by what triggers do', () => {

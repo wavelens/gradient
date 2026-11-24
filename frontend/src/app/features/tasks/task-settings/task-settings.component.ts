@@ -32,7 +32,7 @@ import {
 } from '@gradient/ui/ui';
 import { EntityNameComponent, LabelHelpComponent, entityToPickerOption, formatEntityLabel } from '@shared/ui';
 import { AccessService, WritableDirective, ManagedDisableDirective, SettingsAccessStateBadgeComponent } from '@shared/access';
-import { NameFieldsComponent, fieldChecks, injectRevealFirstInvalid, maxDisplayNameCharacterCount, nameAvailability, splitLines, unsavedChanges } from '@shared/forms';
+import { NameFieldsComponent, RenameUrlNameComponent, fieldChecks, injectRevealFirstInvalid, maxDisplayNameCharacterCount, nameAvailability, splitLines, unsavedChanges } from '@shared/forms';
 import { wildcardError } from '../wildcard-error';
 import { RESERVED_TASK_NAMES } from '../connect-repository/connect-repository.component';
 import { CanComponentDeactivate } from '@core/guards/unsaved-changes.guard';
@@ -81,6 +81,7 @@ interface TaskForm {
     RowComponent,
     SubmitDirective,
     NameFieldsComponent,
+    RenameUrlNameComponent,
   ],
   templateUrl: './task-settings.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,
@@ -178,8 +179,20 @@ export class TaskSettingsComponent implements OnInit, CanComponentDeactivate {
       : null;
   }
 
+  protected taskNameAvailability = nameAvailability(
+    (name) => this.tasksService.checkTaskNameAvailable(this.projectName, name),
+    RESERVED_TASK_NAMES,
+  );
+  protected renameTask = (name: string) => this.tasksService.updateTask(this.projectName, this.taskName, { name });
+
   canDeactivate(): boolean | Observable<boolean> {
     return this.unsaved.canLeave();
+  }
+
+  afterRenameRememberDisplayNameForBreadcrumbsAndNavigateToNewSettingsUrl(name: string): void {
+    const displayName = this.task()?.display_name;
+    if (displayName) this.crumbs.rememberTask(this.projectName, name, displayName);
+    this.router.navigateByUrl(links.taskPage(this.projectName, name, 'settings'), { replaceUrl: true });
   }
 
   concurrencyOptions: { label: string; value: ConcurrencyPolicy; disabled?: boolean }[] = [
