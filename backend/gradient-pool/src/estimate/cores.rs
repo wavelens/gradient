@@ -25,10 +25,16 @@ pub struct CoreChoice {
     pub fit: RamFit,
 }
 
-/// A build that fits no step in the estimate gets a pass for now. RAM proportional to core count
-/// picks the start point. An out-of-memory kill lowers the step from there. A build still too
-/// large for all workers the project can use takes at most the total RAM of the largest worker.
-/// Smaller workers leave it to that one.
+/// Builds keep the largest core step that can fit in the total RAM of this worker or in the total
+/// RAM of the largest worker the project can use. Builds with predicted RAM above the total RAM of
+/// this worker wait for that larger worker at that step. The build can wait for that RAM at a step
+/// that can fit after release of the RAM reserved for assigned jobs. Only a worker with no
+/// reservations can shrink the build to the largest step that can fit right now.
+///
+/// Builds that match no step in the estimate get RAM proportional to core count. That RAM can pick
+/// the starting point. OOM kills lower the step from there. Upper limits for builds that stay too
+/// large even on all workers the project can use come from the total RAM of the largest worker.
+/// Smaller workers leave the build to that one machine.
 pub fn choose_cores(
     worker: &WorkerMetricsView,
     max_cores: Option<u32>,
@@ -38,10 +44,43 @@ pub fn choose_cores(
 ) -> CoreChoice {
     let full = max_cores.map_or(worker.full_cores(), |cap| cap.min(worker.full_cores()));
     let steps = core_steps(full);
-    let estimated = largest_fitting(worker, &steps, unmeasured_mb, &need_at);
-    if estimated.fit != RamFit::DoesNotFit {
-        return estimated;
+    let core_choice_for_core_count = |cores: u32| {
+        let need = need_at(cores);
+        CoreChoice {
+            cores,
+            need,
+            fit: worker.ram_fit(need.reserved_mb(unmeasured_mb)),
+        }
+    };
+    let ceiling_mb = worker
+        .ram_total_mb
+        .max(largest_usable_worker_ram_mb.unwrap_or(0));
+    let target = steps.iter().position(|&cores| {
+        ceiling_mb == 0 || need_at(cores).reserved_mb(unmeasured_mb) <= ceiling_mb
+    });
+    if let Some(target) = target {
+        let choice = core_choice_for_core_count(steps[target]);
+        if worker.ram_total_mb > 0 && choice.need.reserved_mb(unmeasured_mb) > worker.ram_total_mb {
+            return CoreChoice {
+                fit: RamFit::WaitsForLargerWorker,
+                ..choice
+            };
+        }
+        if choice.fit != RamFit::DoesNotFit {
+            return choice;
+        }
+        let smaller: Vec<CoreChoice> = steps[target + 1..]
+            .iter()
+            .map(|&cores| core_choice_for_core_count(cores))
+            .collect();
+        return smaller
+            .iter()
+            .find(|c| c.fit == RamFit::Fits)
+            .or(smaller.last())
+            .copied()
+            .unwrap_or(choice);
     }
+    let estimated = largest_fitting(worker, &steps, unmeasured_mb, &need_at);
     let RamNeed::Predicted(at_full) = need_at(full) else {
         return estimated;
     };
@@ -133,9 +172,67 @@ mod tests {
     }
 
     #[test]
-    fn a_step_that_fits_now_wins_over_a_larger_one_after_a_wait() {
+    fn largest_step_that_fits_worker_total_ram_waits_for_reserved_ram_instead_of_starting_with_fewer_cores()
+     {
         let busy = worker(128_000, 50_000, 70_000);
         let choice = choose_cores(&busy, None, 0, None, linear(1_000));
+        assert_eq!(
+            (choice.cores, choice.fit),
+            (64, RamFit::FitsOnceRamIsReleased)
+        );
+    }
+
+    fn predicted_build_ram_from_four_core_ram_scaled_by_sqrt_core_count(
+        mb_at_four_cores: u64,
+    ) -> impl Fn(u32) -> RamNeed {
+        move |cores| {
+            RamNeed::Predicted(mb_at_four_cores * (u64::from(cores) * 1_000_000).isqrt() / 2_000)
+        }
+    }
+
+    #[test]
+    fn test_eight_core_build_waits_for_reserved_ram_instead_of_shrinking_to_four_cores() {
+        let busy = WorkerMetricsView {
+            cpu_count: 12,
+            ram_total_mb: 32_087,
+            ram_free_mb: Some(21_900),
+            ram_reserved_mb: 145,
+            ..WorkerMetricsView::default()
+        };
+        for largest_usable_worker_ram_mb in [Some(32_087), None] {
+            let choice = choose_cores(
+                &busy,
+                None,
+                0,
+                largest_usable_worker_ram_mb,
+                predicted_build_ram_from_four_core_ram_scaled_by_sqrt_core_count(20_400),
+            );
+            assert_eq!(
+                (choice.cores, choice.fit),
+                (8, RamFit::FitsOnceRamIsReleased)
+            );
+        }
+    }
+
+    #[test]
+    fn build_waits_for_larger_worker_at_largest_core_step() {
+        let choice = choose_cores(
+            &worker(32_000, 32_000, 0),
+            None,
+            0,
+            Some(64_000),
+            linear(800),
+        );
+        assert_eq!(
+            (choice.cores, choice.fit),
+            (64, RamFit::WaitsForLargerWorker)
+        );
+    }
+
+    #[test]
+    fn test_worker_with_too_little_free_ram_and_no_released_reservations_shrinks_build_to_largest_fitting_core_step()
+     {
+        let choice = choose_cores(&worker(128_000, 50_000, 0), None, 0, None, linear(1_000));
         assert_eq!((choice.cores, choice.fit), (43, RamFit::Fits));
     }
 

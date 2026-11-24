@@ -117,11 +117,15 @@ flowchart LR
 
 `choose_cores` can pick the core count per candidate worker. The steps start at the worker's `build_cores`, else its CPU count, and each step is `min(c - 1, ceil(2c / 3))` down to 1.
 
-| Fit of a step | Result |
+Target step: largest where predicted RAM can fit the larger of worker's `ram_total_mb` and `largest_usable_worker_ram_mb`. Build can keep it and wait, not use fewer cores.
+
+| Target step | Result |
 |---|---|
-| Some step fits `ram_available_mb` now | The largest such step |
-| No step fits now, some fits once RAM is released | The largest such step, and the build waits for the worker |
-| No step fits | RAM proportional to cores picks the step. Kills take the steps down from there |
+| Fits `ram_available_mb` now | The target step |
+| Fits once RAM is released | The target step and the build waits for the worker |
+| Above the worker's `ram_total_mb` | The target step and the build waits for the larger worker |
+| Short on a worker without reservations | The largest smaller step that fits now, else 1 core |
+| No target step | RAM proportional to cores picks the step. Kills take the steps down from there |
 | Not even 1 proportional core fits | Largest usable worker takes the build with a RAM cap at total RAM. Smaller workers cannot fit the build |
 
 - `EstimatedTimeRule` can score the build time at the chosen cores.
