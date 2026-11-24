@@ -248,7 +248,7 @@ pub enum EvalCachePullOutcome {
     Miss,
     #[proto(removed(38))]
     Presigned {
-        url: RedactedPresignedS3Url,
+        url: UrlWithSecretQuery,
     },
     #[proto(removed(38))]
     Inline {
@@ -270,7 +270,7 @@ pub struct SegmentFetch {
 
 #[derive(Proto, Debug, Clone, PartialEq)]
 pub enum SegmentSource {
-    Presigned { url: RedactedPresignedS3Url },
+    Presigned { url: UrlWithSecretQuery },
     Inline { size_bytes: u64 },
 }
 
@@ -319,35 +319,35 @@ pub enum QueryMode {
 
 /// The query string of a presigned URL can grant access to the object until expiry of the URL. The Debug output is the URL without the query, user information and fragment. This type has no Display. The wire encoding is the same as for String, so peers on older versions can read this field unchanged.
 #[derive(Clone, PartialEq, Eq)]
-pub struct RedactedPresignedS3Url(String);
+pub struct UrlWithSecretQuery(String);
 
-impl RedactedPresignedS3Url {
-    pub fn as_presigned_url_with_secret_query(&self) -> &str {
+impl UrlWithSecretQuery {
+    pub fn as_full_url_with_access_credential_query(&self) -> &str {
         &self.0
     }
 }
 
-impl From<String> for RedactedPresignedS3Url {
+impl From<String> for UrlWithSecretQuery {
     fn from(url: String) -> Self {
         Self(url)
     }
 }
 
-impl From<&str> for RedactedPresignedS3Url {
+impl From<&str> for UrlWithSecretQuery {
     fn from(url: &str) -> Self {
         Self(url.to_owned())
     }
 }
 
-impl std::fmt::Debug for RedactedPresignedS3Url {
+impl std::fmt::Debug for UrlWithSecretQuery {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_tuple("RedactedPresignedS3Url")
+        f.debug_tuple("UrlWithSecretQuery")
             .field(&gradient_util::http_base_url::presigned_url_without_signature_credential_user_info_and_fragment_for_error_and_log_messages_or_placeholder(&self.0))
             .finish()
     }
 }
 
-impl Proto for RedactedPresignedS3Url {
+impl Proto for UrlWithSecretQuery {
     fn encode(
         &self,
         version: u16,
@@ -372,7 +372,7 @@ impl Proto for RedactedPresignedS3Url {
 pub struct PresignedMultipart {
     pub upload_id: String,
     pub part_size: u64,
-    pub part_urls: Vec<RedactedPresignedS3Url>,
+    pub part_urls: Vec<UrlWithSecretQuery>,
 }
 
 impl std::fmt::Debug for PresignedMultipart {
@@ -417,7 +417,7 @@ pub enum UploadObject {
 pub enum GrantTarget {
     Skip,
     Passthrough { resume_offset: u64 },
-    Put { url: RedactedPresignedS3Url },
+    Put { url: UrlWithSecretQuery },
     Multipart(PresignedMultipart),
 }
 
@@ -458,7 +458,7 @@ pub struct CachedPath {
     pub cached: bool,
     pub file_size: Option<u64>,
     pub nar_size: Option<u64>,
-    pub url: Option<RedactedPresignedS3Url>,
+    pub url: Option<UrlWithSecretQuery>,
     pub nar_hash: Option<String>,
     pub file_hash: Option<String>,
     pub references: Option<Vec<String>>,

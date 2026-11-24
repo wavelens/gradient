@@ -345,7 +345,7 @@ impl NarStore {
         method: reqwest::Method,
         path: &Path,
         expires_in: std::time::Duration,
-    ) -> Result<Option<gradient_wire::types::RedactedPresignedS3Url>> {
+    ) -> Result<Option<gradient_wire::types::UrlWithSecretQuery>> {
         use object_store::signer::Signer as _;
 
         let Some(signer) = &self.s3_signer else {
@@ -541,7 +541,7 @@ impl NarStore {
         &self,
         hash: &str,
         expires_in: std::time::Duration,
-    ) -> Result<Option<gradient_wire::types::RedactedPresignedS3Url>> {
+    ) -> Result<Option<gradient_wire::types::UrlWithSecretQuery>> {
         self.presign_object(reqwest::Method::GET, &self.object_path(hash), expires_in)
             .await
     }
@@ -730,7 +730,7 @@ impl NarStore {
         &self,
         key: &str,
         expires_in: std::time::Duration,
-    ) -> Result<Option<gradient_wire::types::RedactedPresignedS3Url>> {
+    ) -> Result<Option<gradient_wire::types::UrlWithSecretQuery>> {
         self.presign_object(reqwest::Method::GET, &self.eval_cache_path(key), expires_in)
             .await
     }
@@ -739,7 +739,7 @@ impl NarStore {
         &self,
         key: &str,
         expires_in: std::time::Duration,
-    ) -> Result<Option<gradient_wire::types::RedactedPresignedS3Url>> {
+    ) -> Result<Option<gradient_wire::types::UrlWithSecretQuery>> {
         self.presign_object(reqwest::Method::PUT, &self.eval_cache_path(key), expires_in)
             .await
     }
@@ -1090,10 +1090,10 @@ impl NarStore {
 pub enum StorageTarget {
     Passthrough,
     Put {
-        url: gradient_wire::types::RedactedPresignedS3Url,
+        url: gradient_wire::types::UrlWithSecretQuery,
     },
     PresignedPutToTemporaryUploadObject {
-        url: gradient_wire::types::RedactedPresignedS3Url,
+        url: gradient_wire::types::UrlWithSecretQuery,
         temporary_nar_storage_key: String,
     },
     Multipart {
@@ -1253,10 +1253,9 @@ mod tests {
             panic!("{target:?}")
         };
         assert!(
-            grant
-                .part_urls
-                .iter()
-                .all(|url| !url.as_presigned_url_with_secret_query().contains("/nars/")),
+            grant.part_urls.iter().all(|url| !url
+                .as_full_url_with_access_credential_query()
+                .contains("/nars/")),
             "{:?}",
             grant.part_urls.first()
         );
@@ -1291,7 +1290,8 @@ mod tests {
             "{temporary_nar_storage_key}"
         );
         assert!(
-            !url.as_presigned_url_with_secret_query().contains("/nars/"),
+            !url.as_full_url_with_access_credential_query()
+                .contains("/nars/"),
             "{url:?}"
         );
         let blob = store
@@ -1333,7 +1333,7 @@ mod tests {
                 panic!("{target:?}")
             };
             assert!(
-                url.as_presigned_url_with_secret_query()
+                url.as_full_url_with_access_credential_query()
                     .contains("X-Amz-Signature=")
             );
             let printed = format!("{target:?}");
@@ -1363,7 +1363,7 @@ mod tests {
         let StorageTarget::PresignedPutToTemporaryUploadObject { url, .. } = &target else {
             panic!("{target:?}")
         };
-        let expires = reqwest::Url::parse(url.as_presigned_url_with_secret_query())
+        let expires = reqwest::Url::parse(url.as_full_url_with_access_credential_query())
             .unwrap()
             .query_pairs()
             .find(|(name, _)| name == "X-Amz-Expires")

@@ -1042,7 +1042,7 @@ mod tests {
         assert!(cp.cached);
         assert_eq!(
             cp.url.as_ref().map(
-                gradient_wire::types::RedactedPresignedS3Url::as_presigned_url_with_secret_query
+                gradient_wire::types::UrlWithSecretQuery::as_full_url_with_access_credential_query
             ),
             Some("https://upstream.example/nar/abc.nar.xz")
         );
@@ -1116,7 +1116,7 @@ mod tests {
         );
         assert_eq!(
             cp.url.as_ref().map(
-                gradient_wire::types::RedactedPresignedS3Url::as_presigned_url_with_secret_query
+                gradient_wire::types::UrlWithSecretQuery::as_full_url_with_access_credential_query
             ),
             Some("https://up.example/nar/x.nar.xz")
         );
@@ -1219,7 +1219,7 @@ mod tests {
             .expect("verified");
         assert_eq!(
             cp.url.as_ref().map(
-                gradient_wire::types::RedactedPresignedS3Url::as_presigned_url_with_secret_query
+                gradient_wire::types::UrlWithSecretQuery::as_full_url_with_access_credential_query
             ),
             Some("https://up.example/nar/x.nar.xz")
         );

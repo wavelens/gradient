@@ -6,7 +6,7 @@
 
 use anyhow::{Context, Result};
 use bytes::Bytes;
-use gradient_wire::types::{CompletedMultipart, PresignedMultipart, RedactedPresignedS3Url};
+use gradient_wire::types::{CompletedMultipart, PresignedMultipart, UrlWithSecretQuery};
 use tokio::task::JoinSet;
 
 const MAX_INFLIGHT_PARTS: usize = 2;
@@ -77,8 +77,8 @@ impl PartSink for PartUploader<'_> {
     }
 }
 
-async fn put_part(url: RedactedPresignedS3Url, body: Bytes) -> Result<String> {
-    crate::object_put::put_object(url.as_presigned_url_with_secret_query(), body, None)
+async fn put_part(url: UrlWithSecretQuery, body: Bytes) -> Result<String> {
+    crate::object_put::put_object(url.as_full_url_with_access_credential_query(), body, None)
         .await?
         .context("multipart part response carried no ETag")
 }

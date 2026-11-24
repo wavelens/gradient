@@ -342,7 +342,7 @@ async fn send_nar(
         GrantTarget::Put { url } => {
             debug!(store_path, "presigned NAR upload");
             let (compressed, meta) = pack_compress(nar, threads, nar_read).await?;
-            http_put(url.as_presigned_url_with_secret_query(), compressed).await?;
+            http_put(url.as_full_url_with_access_credential_query(), compressed).await?;
             Ok((meta, None))
         }
         GrantTarget::Multipart(grant) => {

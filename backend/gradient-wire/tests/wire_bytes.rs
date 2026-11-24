@@ -95,7 +95,7 @@ fn assert_same_bytes_and_readable_by_new_type<
 }
 
 #[test]
-fn redacted_presigned_s3_url_wire_messages_encode_same_bytes_at_every_supported_protocol_version() {
+fn url_with_secret_query_wire_messages_encode_same_bytes_at_every_supported_protocol_version() {
     let url = "https://s3.example.com/bucket/key?X-Amz-Credential=AKIA&X-Amz-Signature=abc";
     let part_urls = || vec![url.to_owned(), format!("{url}&partNumber=2")];
 

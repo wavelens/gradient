@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use crate::types::{CachedPath, RedactedPresignedS3Url};
+use crate::types::{CachedPath, UrlWithSecretQuery};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum CachedPathInfo<'a> {
@@ -16,7 +16,7 @@ pub enum CachedPathInfo<'a> {
     /// them `None`.
     Cached {
         path: &'a str,
-        download_url: Option<&'a RedactedPresignedS3Url>,
+        download_url: Option<&'a UrlWithSecretQuery>,
         file_size: Option<u64>,
         nar_size: Option<u64>,
         nar_hash: Option<&'a str>,
@@ -110,7 +110,7 @@ mod tests {
             } => {
                 assert_eq!(path, "/nix/store/bbbb-pkg");
                 assert_eq!(
-                    download_url.map(RedactedPresignedS3Url::as_presigned_url_with_secret_query),
+                    download_url.map(UrlWithSecretQuery::as_full_url_with_access_credential_query),
                     Some("https://s3.example.com/get-url")
                 );
                 assert_eq!(file_size, Some(1024));

@@ -37,8 +37,8 @@ use crate::proto::progress::{
 use gradient_wire::traits::{EvalProgressSink, InputProgressSink, JobReporter};
 use gradient_wire::types::{
     BuildProgressPhase, BuildStage, EvalShardOutcome, EvalShardSpec, FinishedShard, GrantTarget,
-    ImportOutcome, InputOutcome, Realisation, RedactedPresignedS3Url, SegmentFetch, SegmentSource,
-    UploadMetadata, UploadObject,
+    ImportOutcome, InputOutcome, Realisation, SegmentFetch, SegmentSource, UploadMetadata,
+    UploadObject, UrlWithSecretQuery,
 };
 use gradient_worker_client::connection::reconnecting::ReconnectingWriter;
 use gradient_worker_client::nar_recv::{NarPayload, NarReceiver, NarUnavailable};
@@ -213,11 +213,11 @@ async fn inline_segment(pending: &mut PendingPull, size_bytes: u64) -> Result<Ve
     Ok(bytes)
 }
 
-async fn download_segment(url: &RedactedPresignedS3Url) -> Result<Vec<u8>> {
+async fn download_segment(url: &UrlWithSecretQuery) -> Result<Vec<u8>> {
     let presigned_url_without_query_string =
-        presigned_url_without_signature_credential_user_info_and_fragment_for_error_and_log_messages_or_placeholder(url.as_presigned_url_with_secret_query());
+        presigned_url_without_signature_credential_user_info_and_fragment_for_error_and_log_messages_or_placeholder(url.as_full_url_with_access_credential_query());
     Ok(gradient_worker_client::http::download_client()
-        .get(url.as_presigned_url_with_secret_query())
+        .get(url.as_full_url_with_access_credential_query())
         .timeout(gradient_util::http::DEFAULT_TIMEOUT)
         .send()
         .await
@@ -420,12 +420,12 @@ impl JobUpdater {
                 passthrough_blob(&self.uploads, request_id, bytes, resume_offset).await
             }
             GrantTarget::Put { url } => {
-                gradient_worker_client::object_put::put_object(url.as_presigned_url_with_secret_query(), bytes.clone(), None)
+                gradient_worker_client::object_put::put_object(url.as_full_url_with_access_credential_query(), bytes.clone(), None)
                     .await
                     .with_context(|| {
                         format!(
                             "eval-cache PUT {}",
-                            presigned_url_without_signature_credential_user_info_and_fragment_for_error_and_log_messages_or_placeholder(url.as_presigned_url_with_secret_query())
+                            presigned_url_without_signature_credential_user_info_and_fragment_for_error_and_log_messages_or_placeholder(url.as_full_url_with_access_credential_query())
                         )
                     })?;
                 Ok(())

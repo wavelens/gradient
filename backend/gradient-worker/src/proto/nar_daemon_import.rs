@@ -63,7 +63,7 @@ impl<'a> NarImporter<'a> {
             self.meta
                 .url
                 .as_ref()
-                .map(|url| url.as_presigned_url_with_secret_query().to_owned()),
+                .map(|url| url.as_full_url_with_access_credential_query().to_owned()),
         ));
         self.verify_and_import(&nar).await?;
         debug!(%self.store_path, bytes = compressed_len, "imported NAR into local store");
@@ -202,7 +202,7 @@ pub(crate) async fn holds_claimed_nar(compressed: &NarPayload, cp: &CachedPath) 
         compressed.clone(),
         cp.url
             .as_ref()
-            .map(|url| url.as_presigned_url_with_secret_query().to_owned()),
+            .map(|url| url.as_full_url_with_access_credential_query().to_owned()),
     );
     let nar_size = cp.nar_size;
     let claimed = cp

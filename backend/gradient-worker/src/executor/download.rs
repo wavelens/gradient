@@ -204,7 +204,7 @@ impl DownloadIo for JobUpdaterIo<'_> {
             resolve_compression(&compressed, entry
                 .url
                 .as_ref()
-                .map(gradient_wire::types::RedactedPresignedS3Url::as_presigned_url_with_secret_query)),
+                .map(gradient_wire::types::UrlWithSecretQuery::as_full_url_with_access_credential_query)),
         )?;
         gradient_derivation::parse_drv(&extract_single_file_from_nar(&nar).await?)
     }
