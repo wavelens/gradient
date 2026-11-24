@@ -560,6 +560,11 @@ assert end_reasons(kept) == ["completed"], json.dumps(kept)
 lines = job_log("long-keep").splitlines()
 uneven = [n for n in range(1, 151) if lines.count(f"tick {n}") != 1]
 assert not uneven, f"ticks missing or repeated after the replay: {uneven}"
+metrics = wait_for(
+    "long-keep records usage metrics",
+    lambda: (m := api("GET", f"exec/{JOBS['long-keep']}/metrics"))["points"] and m,
+)
+assert metrics["ram_max_bytes"] > 0, json.dumps(metrics)
 
 lost = wait_status("lost", "completed")
 assert end_reasons(lost) == ["lost", "completed"], json.dumps(lost)
