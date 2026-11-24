@@ -23,6 +23,10 @@ const TOP_ATERM: &[u8] = include_bytes!("../../gradient-ssh/testdata/input-addre
 const TOP_PATH: &str = include_str!("../../gradient-ssh/testdata/input-addressed-top.drv.path");
 const GO_MODULES_ATERM: &[u8] = include_bytes!("../../gradient-ssh/testdata/go-modules.drv");
 const GO_MODULES_PATH: &str = include_str!("../../gradient-ssh/testdata/go-modules.drv.path");
+const STRUCTURED_ATTRS_FLOATS_ATERM: &[u8] =
+    include_bytes!("../../gradient-ssh/testdata/structured-attrs-floats.drv");
+const STRUCTURED_ATTRS_FLOATS_PATH: &str =
+    include_str!("../../gradient-ssh/testdata/structured-attrs-floats.drv.path");
 
 fn parse_derivation_with_store_path_into_pair(path: &str, text: &[u8]) -> (StorePath, Derivation) {
     let path = StorePath::from_base_path(path.trim().trim_start_matches("/nix/store/"))
@@ -85,6 +89,19 @@ fn test_real_input_addressed_dep_and_top_pass_recomputed_output_path_check() {
 
     check_input_addressed_output_paths(
         &HashMap::from([(dep_path, dep), (top_path, top)]),
+        &HashMap::new(),
+    )
+    .expect("derivation files from Nix pass the output path check");
+}
+
+#[test]
+fn test_nix_written_derivation_with_structured_attrs_floats_passes_input_addressed_output_path_check()
+ {
+    check_input_addressed_output_paths(
+        &HashMap::from([parse_derivation_with_store_path_into_pair(
+            STRUCTURED_ATTRS_FLOATS_PATH,
+            STRUCTURED_ATTRS_FLOATS_ATERM,
+        )]),
         &HashMap::new(),
     )
     .expect("derivation files from Nix pass the output path check");
