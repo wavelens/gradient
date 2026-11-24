@@ -112,14 +112,24 @@ pub fn presigned_url_without_signature_credential_user_info_and_fragment_for_err
 pub fn remove_user_name_and_password_from_urls_in_error_text(text: &str) -> String {
     text.split_inclusive(char::is_whitespace)
         .map(|word| {
-            let url =
-                word.trim_matches(|c: char| c.is_whitespace() || "'\"<>()[]{},;:".contains(c));
+            let url = word[find_url_scheme_start_index(word)..]
+                .trim_matches(|c: char| c.is_whitespace() || "'\"<>()[]{},;:".contains(c));
             match upstream_cache_url_for_display_without_username_password_query_and_fragment(url) {
                 Some(shown) if shown.had_removed_url_parts => word.replacen(url, &shown.url, 1),
                 _ => word.to_owned(),
             }
         })
         .collect()
+}
+
+fn find_url_scheme_start_index(word: &str) -> usize {
+    word.find("://").map_or(0, |separator| {
+        word[..separator]
+            .char_indices()
+            .rev()
+            .find(|&(_, c)| !(c.is_ascii_alphanumeric() || "+-.".contains(c)))
+            .map_or(0, |(index, c)| index + c.len_utf8())
+    })
 }
 
 pub fn urls_differ_in_scheme_host_or_port(first: &str, second: &str) -> bool {
@@ -186,6 +196,39 @@ mod tests {
             remove_user_name_and_password_from_urls_in_error_text(text),
             "failed to fetch 'https://host/path': unexpected http status code: 401"
         );
+    }
+
+    #[test]
+    fn test_remove_presigned_query_from_wrapped_urls_keeps_surrounding_punctuation() {
+        let url = "https://host/bucket/key?X-Amz-Credential=AKIAEXAMPLE%2F20260101&X-Amz-Signature=abc123";
+        for (text, expected) in [
+            (
+                format!("error sending request for url ({url})"),
+                "error sending request for url (https://host/bucket/key)",
+            ),
+            (
+                format!("PUT {url}, retrying"),
+                "PUT https://host/bucket/key, retrying",
+            ),
+            (
+                format!("{url}: timed out"),
+                "https://host/bucket/key: timed out",
+            ),
+            (
+                format!("failed \"{url}\""),
+                "failed \"https://host/bucket/key\"",
+            ),
+            (format!("('{url}')"), "('https://host/bucket/key')"),
+            (format!("url={url};"), "url=https://host/bucket/key;"),
+            (
+                format!("{{\"url\":\"{url}\"}}"),
+                "{\"url\":\"https://host/bucket/key\"}",
+            ),
+            (format!("«{url} »"), "«https://host/bucket/key »"),
+        ] {
+            let scrubbed = remove_user_name_and_password_from_urls_in_error_text(&text);
+            assert_eq!(scrubbed, expected, "{text}");
+        }
     }
 
     #[test]

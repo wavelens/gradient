@@ -9,7 +9,10 @@
 //! column affinity is converting each value back on insert.
 
 use crate::redact::Redactor;
-use gradient_util::http_base_url::upstream_cache_url_for_display_without_username_password_query_and_fragment;
+use gradient_util::http_base_url::{
+    remove_user_name_and_password_from_urls_in_error_text,
+    upstream_cache_url_for_display_without_username_password_query_and_fragment,
+};
 
 pub type Row = Vec<Option<String>>;
 
@@ -33,6 +36,13 @@ pub fn redact_value(
         ("evaluation", "started_by") => r.identity(&v, "user"),
         ("commit", "author") | ("commit", "author_name") => r.identity(&v, "user"),
         ("commit", "message") => r.text(&v),
+        ("build_attempt", "failure_message")
+        | ("exec_job", "message")
+        | ("exec_job_attempt", "message")
+        | ("exec_job_continuation", "message")
+        | ("evaluation_message", "message") => {
+            r.text(&remove_user_name_and_password_from_urls_in_error_text(&v))
+        }
         ("derivation", "name") | ("derivation", "pname") => r.package(&v),
         ("derivation_output", "package") | ("cached_path", "package") => r.package(&v),
         ("derivation_metric", "input_pnames") => r.package_list(&v),

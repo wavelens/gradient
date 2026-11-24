@@ -738,7 +738,7 @@ async fn build_completed(
         .await?;
     if !missing_from_store.is_empty() {
         let paths = missing_from_store.join(", ");
-        let error = policy::truncate_failure_message(&format!(
+        let error = policy::strip_url_credentials_and_truncate_failure_message(&format!(
             "The build reported completion. These required outputs have no stored copy: {paths}"
         ));
         build_failed(
@@ -978,7 +978,9 @@ async fn build_failed(
             derivation_build,
             policy::attempt_outcome(kind),
             policy::attempt_reason_for(kind, outcome, out_of_memory),
-            Some(policy::truncate_failure_message(error)),
+            Some(policy::strip_url_credentials_and_truncate_failure_message(
+                error,
+            )),
         )
         .await
     {
