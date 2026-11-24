@@ -4,6 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::Duration;
 
 use gradient_wire::guest::AgentToWorker;
@@ -47,14 +49,14 @@ struct OneSecondCpuMemoryDiskUsageSample {
 }
 
 struct ExecMetricsWindowAccumulator {
-    next_window_number: u32,
+    next_resource_usage_window_sequence_number: Arc<AtomicU32>,
     current_window_one_second_samples: Vec<OneSecondCpuMemoryDiskUsageSample>,
 }
 
 impl ExecMetricsWindowAccumulator {
-    fn new() -> Self {
+    fn new(next_resource_usage_window_sequence_number: Arc<AtomicU32>) -> Self {
         Self {
-            next_window_number: 0,
+            next_resource_usage_window_sequence_number,
             current_window_one_second_samples: Vec::new(),
         }
     }
@@ -68,10 +70,10 @@ impl ExecMetricsWindowAccumulator {
         let latest_window_sample = *window_samples.last()?;
         let sample_count_in_window = window_samples.len();
 
-        let sequence = self.next_window_number;
-        self.next_window_number += 1;
         Some(ExecMetrics {
-            sequence,
+            sequence: self
+                .next_resource_usage_window_sequence_number
+                .fetch_add(1, Ordering::SeqCst),
             window_ms,
             cpu_avg: window_samples.iter().map(|s| s.cpus_in_use).sum::<f32>()
                 / sample_count_in_window as f32,
@@ -100,8 +102,10 @@ impl ExecMetricsWindowAccumulator {
 pub async fn sample_and_send_exec_metrics_windows_until_shutdown(
     mut progress: watch::Receiver<Progress>,
     outgoing: mpsc::Sender<AgentToWorker>,
+    next_resource_usage_window_sequence_number: Arc<AtomicU32>,
 ) {
-    let mut exec_metrics_window_accumulator = ExecMetricsWindowAccumulator::new();
+    let mut exec_metrics_window_accumulator =
+        ExecMetricsWindowAccumulator::new(next_resource_usage_window_sequence_number);
     let mut previous_cpu_tick_counters_reading = read_proc_stat_cpu_tick_counters();
     let mut usage_window_start_instant = Instant::now();
     let mut ticks_in_current_window = 0;
@@ -141,7 +145,9 @@ pub async fn sample_and_send_exec_metrics_windows_until_shutdown(
     let window_ms =
         u32::try_from(usage_window_start_instant.elapsed().as_millis()).unwrap_or(u32::MAX);
     if let Some(window) = exec_metrics_window_accumulator.take_window(window_ms) {
-        let _ = outgoing.try_send(AgentToWorker::ResourceUsageWindow(window));
+        let _ = outgoing
+            .send(AgentToWorker::ResourceUsageWindow(window))
+            .await;
     }
 }
 
@@ -232,6 +238,9 @@ fn read_meminfo_bytes_for_key(meminfo: &str, key: &str) -> Option<u64> {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+    use std::sync::atomic::AtomicU32;
+
     use super::{
         AggregateCpuTickCountersWithOnlineCpuCount, ExecMetricsWindowAccumulator,
         OneSecondCpuMemoryDiskUsageSample, parse_cpu_tick_counters_from_proc_stat,
@@ -283,7 +292,8 @@ mod tests {
 
     #[test]
     fn a_window_reports_average_and_peak() {
-        let mut exec_metrics_window_accumulator = ExecMetricsWindowAccumulator::new();
+        let mut exec_metrics_window_accumulator =
+            ExecMetricsWindowAccumulator::new(Arc::new(AtomicU32::new(0)));
         assert_eq!(exec_metrics_window_accumulator.take_window(10_000), None);
 
         for (cpus_in_use, ram_used_bytes) in [(0.5, 100), (1.5, 300), (1.0, 200)] {
