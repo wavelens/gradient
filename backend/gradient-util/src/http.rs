@@ -74,6 +74,83 @@ pub fn idle_timed_download_builder(idle: Duration) -> reqwest::ClientBuilder {
         .read_timeout(idle)
 }
 
+const UPLOAD_BODY_SLICE_SIZE_BYTES: usize = 256 * 1024;
+
+pub fn body_from_byte_chunks_with_handed_byte_count_watch(
+    chunks: Vec<bytes::Bytes>,
+) -> (reqwest::Body, tokio::sync::watch::Receiver<usize>) {
+    let (handed_byte_count_sender, handed_byte_count) = tokio::sync::watch::channel(0);
+    let mut handed = 0;
+    let slices = chunks
+        .into_iter()
+        .flat_map(|chunk| {
+            let len = chunk.len();
+            (0..len)
+                .step_by(UPLOAD_BODY_SLICE_SIZE_BYTES)
+                .map(move |start| {
+                    chunk.slice(start..(start + UPLOAD_BODY_SLICE_SIZE_BYTES).min(len))
+                })
+        })
+        .map(move |slice| {
+            handed += slice.len();
+            handed_byte_count_sender.send_replace(handed);
+            Ok::<_, std::convert::Infallible>(slice)
+        });
+
+    (
+        reqwest::Body::wrap_stream(futures::stream::iter(slices)),
+        handed_byte_count,
+    )
+}
+
+pub async fn wait_for_no_progress_for_stall_window(
+    stall_window: Duration,
+    mut handed_byte_count: tokio::sync::watch::Receiver<usize>,
+) {
+    let mut deadline = tokio::time::Instant::now() + stall_window;
+    while let Ok(Ok(())) = tokio::time::timeout_at(deadline, handed_byte_count.changed()).await {
+        deadline = tokio::time::Instant::now() + stall_window;
+    }
+    tokio::time::sleep_until(deadline).await;
+}
+
+#[cfg(any(test, feature = "test-functions"))]
+pub fn start_http_peer_that_handles_one_request(
+    handle: impl FnOnce(std::net::TcpStream, String, Vec<u8>) + Send + 'static,
+) -> String {
+    use std::io::Read as _;
+
+    let socket =
+        socket2::Socket::new(socket2::Domain::IPV4, socket2::Type::STREAM, None).expect("socket");
+    socket
+        .set_recv_buffer_size(256 << 10)
+        .expect("receive buffer");
+    socket
+        .bind(&std::net::SocketAddr::from(([127, 0, 0, 1], 0)).into())
+        .expect("bind");
+    socket.listen(1).expect("listen");
+    let listener = std::net::TcpListener::from(socket);
+    let addr = listener.local_addr().expect("local addr");
+    std::thread::spawn(move || {
+        let (mut stream, _) = listener.accept().expect("accept");
+        let mut received = Vec::new();
+        let mut buf = [0u8; 4096];
+        let head_end = loop {
+            let n = stream.read(&mut buf).expect("read the request head");
+            assert!(n > 0, "connection closed before the request head ended");
+            received.extend_from_slice(&buf[..n]);
+            if let Some(end) = received.windows(4).position(|w| w == b"\r\n\r\n") {
+                break end + 4;
+            }
+        };
+        let body_start = received.split_off(head_end);
+        let head = String::from_utf8_lossy(&received).to_ascii_lowercase();
+        handle(stream, head, body_start);
+    });
+
+    format!("http://{addr}/")
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HttpProtocolSelection {
     Negotiated,

@@ -18,6 +18,7 @@ pub mod nar;
 pub mod nar_extract;
 pub mod partial;
 pub mod passthrough;
+mod s3_http_transport_with_stall_failure;
 pub mod sgr;
 pub mod source_nar;
 mod timed;

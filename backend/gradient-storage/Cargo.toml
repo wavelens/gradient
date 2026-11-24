@@ -34,6 +34,10 @@ harmonia-store-content-address = { workspace = true }
 harmonia-store-path            = { workspace = true }
 harmonia-utils-hash            = { workspace = true }
 hex                            = { workspace = true }
+http                           = { workspace = true }
+http-body                      = { workspace = true }
+http-body-util                 = { workspace = true }
+hyper                          = { workspace = true }
 object_store                   = { workspace = true }
 reqwest                        = { workspace = true }
 rkyv                           = { workspace = true }
@@ -50,6 +54,7 @@ async-compression = { workspace = true }
 tar               = { workspace = true }
 
 [dev-dependencies]
+gradient-util = { workspace = true, features = ["test-functions"] }
 gradient-wire = { workspace = true, features = ["testing"] }
 tokio         = { workspace = true, features = ["macros", "rt"] }
 wiremock      = { workspace = true }

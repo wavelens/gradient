@@ -8,10 +8,11 @@ use std::time::Duration;
 
 use anyhow::Result;
 use bytes::Bytes;
+use gradient_util::http::{
+    body_from_byte_chunks_with_handed_byte_count_watch, wait_for_no_progress_for_stall_window,
+};
 use gradient_wire::constants::WRITE_STALL_TIMEOUT;
 use reqwest::header::{CONTENT_LENGTH, CONTENT_TYPE, ETAG, HeaderMap, RETRY_AFTER};
-use tokio::sync::watch;
-use tokio::time::Instant;
 
 pub struct Backoff {
     pub attempts: u32,
@@ -31,8 +32,6 @@ impl Backoff {
         ceiling.mul_f64(rand::random_range(0.5..=1.0))
     }
 }
-
-const UPLOAD_BODY_SLICE_SIZE_BYTES: usize = 256 * 1024;
 
 const OBJECT_STORE_BACKOFF: Backoff = Backoff {
     attempts: 6,
@@ -99,18 +98,12 @@ async fn try_put(
     write_stall_timeout: Duration,
 ) -> std::result::Result<Option<String>, PutError> {
     let total = body.len();
-    let (body_bytes_uploaded_watch_sender, body_bytes_uploaded_watch) = watch::channel(0);
-    let slices = (0..total)
-        .step_by(UPLOAD_BODY_SLICE_SIZE_BYTES)
-        .map(move |start| {
-            let end = (start + UPLOAD_BODY_SLICE_SIZE_BYTES).min(total);
-            body_bytes_uploaded_watch_sender.send_replace(end);
-            Ok::<_, std::convert::Infallible>(body.slice(start..end))
-        });
+    let (upload_body, body_bytes_uploaded_watch) =
+        body_from_byte_chunks_with_handed_byte_count_watch(vec![body]);
     let mut request = crate::http::presigned_object_upload_client()
         .put(url)
         .header(CONTENT_LENGTH, total)
-        .body(reqwest::Body::wrap_stream(futures::stream::iter(slices)));
+        .body(upload_body);
     if let Some(content_type) = content_type {
         request = request.header(CONTENT_TYPE, content_type);
     }
@@ -160,19 +153,6 @@ async fn try_put(
     )
 }
 
-async fn wait_for_no_progress_for_stall_window(
-    write_stall_timeout: Duration,
-    mut body_bytes_uploaded_watch: watch::Receiver<usize>,
-) {
-    let mut deadline = Instant::now() + write_stall_timeout;
-    while let Ok(Ok(())) =
-        tokio::time::timeout_at(deadline, body_bytes_uploaded_watch.changed()).await
-    {
-        deadline = Instant::now() + write_stall_timeout;
-    }
-    tokio::time::sleep_until(deadline).await;
-}
-
 fn retry_after(headers: &HeaderMap) -> Option<Duration> {
     headers
         .get(RETRY_AFTER)?
@@ -187,6 +167,7 @@ fn retry_after(headers: &HeaderMap) -> Option<Duration> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use gradient_util::http::start_http_peer_that_handles_one_request;
     use wiremock::matchers::method;
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
@@ -210,42 +191,6 @@ mod tests {
 
     fn build_upload_body_of_length_with_repeating_byte_pattern(len: usize) -> Bytes {
         Bytes::from((0..=250u8).collect::<Vec<u8>>().repeat(len.div_ceil(251))).slice(..len)
-    }
-
-    fn start_http_peer_that_handles_one_request(
-        handle: impl FnOnce(std::net::TcpStream, String, Vec<u8>) + Send + 'static,
-    ) -> String {
-        use std::io::Read as _;
-
-        let socket = socket2::Socket::new(socket2::Domain::IPV4, socket2::Type::STREAM, None)
-            .expect("socket");
-        socket
-            .set_recv_buffer_size(256 << 10)
-            .expect("receive buffer");
-        socket
-            .bind(&std::net::SocketAddr::from(([127, 0, 0, 1], 0)).into())
-            .expect("bind");
-        socket.listen(1).expect("listen");
-        let listener = std::net::TcpListener::from(socket);
-        let addr = listener.local_addr().expect("local addr");
-        std::thread::spawn(move || {
-            let (mut stream, _) = listener.accept().expect("accept");
-            let mut received = Vec::new();
-            let mut buf = [0u8; 4096];
-            let head_end = loop {
-                let n = stream.read(&mut buf).expect("read the request head");
-                assert!(n > 0, "connection closed before the request head ended");
-                received.extend_from_slice(&buf[..n]);
-                if let Some(end) = received.windows(4).position(|w| w == b"\r\n\r\n") {
-                    break end + 4;
-                }
-            };
-            let body_start = received.split_off(head_end);
-            let head = String::from_utf8_lossy(&received).to_ascii_lowercase();
-            handle(stream, head, body_start);
-        });
-
-        format!("http://{addr}/")
     }
 
     fn read_request_body_from_tcp_stream_until_total_byte_count(

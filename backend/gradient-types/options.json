@@ -1479,7 +1479,7 @@
     "flag": "s3-read-timeout-secs",
     "env": "GRADIENT_S3_READ_TIMEOUT_SECS",
     "type": "u64",
-    "description": "Seconds an S3 response can stall before failing the request. Received chunks reset the\ntimer, and large NARs keep streaming as long as they make progress.",
+    "description": "The number of seconds that pass without progress before an S3 request can fail. Bytes of\nthe request body that were sent, response headers and response data that was received all\ncount as progress. Uploads and downloads of any size continue when progress is present.",
     "default": "60",
     "values": []
   },
@@ -1499,7 +1499,7 @@
     "flag": "s3-retry-timeout-secs",
     "env": "GRADIENT_S3_RETRY_TIMEOUT_SECS",
     "type": "u64",
-    "description": "Seconds after the first attempt past which no S3 retries start. Keep it above\n`(maxRetries + 1) * readTimeoutSecs` to still retry requests that fail on the read\ntimeout. Keep it below 5 minutes as well, since retries reuse the original credentials.",
+    "description": "S3 retries no longer start after this many seconds from the first attempt. Set a value\ngreater than `(maxRetries + 1) * readTimeoutSecs` to keep retrying requests that fail due\nto lack of progress. Retries reuse the original credentials. Keep this value below 5\nminutes as well.",
     "default": "250",
     "values": []
   },
