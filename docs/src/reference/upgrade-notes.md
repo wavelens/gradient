@@ -798,6 +798,7 @@ The checks in [Uploads](#uploads) apply to uploads from all workers.
 
 ### Build Estimates and Memory
 
+- Estimates of peak RAM for a build now leave out page cache. Workers that use `worker.build.cgroup` sample RAM the kernel cannot reclaim every 2 seconds. Builds that handle many files, such as the kernel, get lower estimates and more cores. Old, too-high samples drop out of the estimate as new builds arrive. The newest 20 samples per package remain. No action needed.
 - Builds with predicted RAM above the RAM of all workers the project can use no longer fail with reason `not enough resources`.
 - Builds that fit no worker even at 1 core with RAM proportional to cores wait for the largest connected worker that the project can use. They run there. Smaller workers reject them.
 - These builds no longer fail before an out-of-memory kill. Kills at 1 core end the build with the text below.

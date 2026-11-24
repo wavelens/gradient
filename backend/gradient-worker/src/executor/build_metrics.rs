@@ -54,24 +54,36 @@ pub struct BuildHost {
 
 pub(super) static RUNNING_BUILDS: RunningBuilds = RunningBuilds::new();
 
+struct RunningBuildPeakUnreclaimableRam {
+    job_id: String,
+    max_unreclaimable_memory_mb: Option<u64>,
+}
+
 pub(super) struct RunningBuilds {
     count: AtomicU32,
-    job_of_drv_hash: Mutex<BTreeMap<String, String>>,
+    job_id_and_sampled_peak_ram_by_derivation_hash:
+        Mutex<BTreeMap<String, RunningBuildPeakUnreclaimableRam>>,
 }
 
 impl RunningBuilds {
     const fn new() -> Self {
         Self {
             count: AtomicU32::new(0),
-            job_of_drv_hash: Mutex::new(BTreeMap::new()),
+            job_id_and_sampled_peak_ram_by_derivation_hash: Mutex::new(BTreeMap::new()),
         }
     }
 
     pub(super) fn start(&self, job_id: &str, drv_path: &str) -> RunningBuild<'_> {
         let drv_hash = drv_hash(drv_path).to_owned();
-        self.job_of_drv_hash
+        self.job_id_and_sampled_peak_ram_by_derivation_hash
             .lock()
-            .insert(drv_hash.clone(), job_id.to_owned());
+            .insert(
+                drv_hash.clone(),
+                RunningBuildPeakUnreclaimableRam {
+                    job_id: job_id.to_owned(),
+                    max_unreclaimable_memory_mb: None,
+                },
+            );
         RunningBuild {
             others: self.count.fetch_add(1, Ordering::Relaxed),
             drv_hash,
@@ -80,24 +92,52 @@ impl RunningBuilds {
     }
 
     /// The daemon names the cgroup of a build `nix-build@<derivation hash>-<build user>`.
-    fn peak_ram_mb(&self, daemon_cgroup: &Path) -> Option<Vec<(String, u64)>> {
-        let job_of_drv_hash = self.job_of_drv_hash.lock().clone();
-        let mut peaks: HashMap<String, u64> = HashMap::new();
-        for cgroup in std::fs::read_dir(daemon_cgroup).ok()?.flatten() {
+    fn raise_max_unreclaimable_ram_from_nix_build_child_cgroups(&self, daemon_cgroup: &Path) {
+        let Ok(cgroups) = std::fs::read_dir(daemon_cgroup) else {
+            return;
+        };
+        let mut unreclaimable_ram_mb_by_derivation_hash: HashMap<String, u64> = HashMap::new();
+        for cgroup in cgroups.flatten() {
             let name = cgroup.file_name();
-            let job_id = name
+            let Some(hash) = name
                 .to_str()
                 .and_then(|name| name.strip_prefix("nix-build@"))
-                .and_then(|build| job_of_drv_hash.get(drv_hash(build)));
-            if let Some(job_id) = job_id
-                && let Some(bytes) = memory_peak(&cgroup.path())
-            {
-                let peak = peaks.entry(job_id.clone()).or_default();
-                *peak = (*peak).max(bytes / BYTES_PER_MB);
+                .map(drv_hash)
+                .filter(|hash| {
+                    self.job_id_and_sampled_peak_ram_by_derivation_hash
+                        .lock()
+                        .contains_key(*hash)
+                })
+            else {
+                continue;
+            };
+            if let Ok(memory_stat) = std::fs::read_to_string(cgroup.path().join("memory.stat")) {
+                let mb = parse_cgroup_memory_stat_unreclaimable_bytes(&memory_stat) / BYTES_PER_MB;
+                let peak = unreclaimable_ram_mb_by_derivation_hash
+                    .entry(hash.to_owned())
+                    .or_default();
+                *peak = (*peak).max(mb);
             }
         }
 
-        Some(peaks.into_iter().collect())
+        let mut builds = self.job_id_and_sampled_peak_ram_by_derivation_hash.lock();
+        for (hash, mb) in unreclaimable_ram_mb_by_derivation_hash {
+            if let Some(build) = builds.get_mut(&hash) {
+                build.max_unreclaimable_memory_mb = Some(
+                    build
+                        .max_unreclaimable_memory_mb
+                        .map_or(mb, |peak| peak.max(mb)),
+                );
+            }
+        }
+    }
+
+    fn peak_ram_mb(&self) -> Vec<(String, u64)> {
+        self.job_id_and_sampled_peak_ram_by_derivation_hash
+            .lock()
+            .values()
+            .filter_map(|build| Some((build.job_id.clone(), build.max_unreclaimable_memory_mb?)))
+            .collect()
     }
 }
 
@@ -106,18 +146,53 @@ fn drv_hash(drv_path: &str) -> &str {
     base.split('-').next().unwrap_or(base)
 }
 
-fn memory_peak(cgroup: &Path) -> Option<u64> {
-    std::fs::read_to_string(cgroup.join("memory.peak"))
-        .ok()?
-        .trim()
-        .parse()
-        .ok()
+fn parse_cgroup_memory_stat_unreclaimable_bytes(memory_stat: &str) -> u64 {
+    let memory_stat_bytes_by_key: HashMap<&str, u64> = memory_stat
+        .lines()
+        .filter_map(|line| {
+            let (key, value) = line.split_once(' ')?;
+            Some((key, value.trim().parse().ok()?))
+        })
+        .collect();
+    let memory_stat_key_byte_or_zero =
+        |key: &str| memory_stat_bytes_by_key.get(key).copied().unwrap_or(0);
+    if memory_stat_bytes_by_key.contains_key("kernel") {
+        (memory_stat_key_byte_or_zero("anon")
+            + memory_stat_key_byte_or_zero("shmem")
+            + memory_stat_key_byte_or_zero("kernel")
+            + memory_stat_key_byte_or_zero("sock"))
+        .saturating_sub(memory_stat_key_byte_or_zero("slab_reclaimable"))
+    } else {
+        [
+            "anon",
+            "shmem",
+            "slab_unreclaimable",
+            "kernel_stack",
+            "pagetables",
+            "percpu",
+            "sock",
+        ]
+        .into_iter()
+        .map(memory_stat_key_byte_or_zero)
+        .sum()
+    }
+}
+
+pub(crate) fn sample_running_build_unreclaimable_ram_maxima_from_nix_daemon_cgroup(
+    daemon_cgroup: &Path,
+) {
+    RUNNING_BUILDS.raise_max_unreclaimable_ram_from_nix_build_child_cgroups(daemon_cgroup);
+}
+
+pub(crate) fn worker_has_any_running_build() -> bool {
+    RUNNING_BUILDS.count.load(Ordering::Relaxed) > 0
 }
 
 pub(crate) fn peak_ram_of_running_builds(
     daemon_cgroup: Option<&Path>,
 ) -> Option<Vec<(String, u64)>> {
-    RUNNING_BUILDS.peak_ram_mb(daemon_cgroup?)
+    daemon_cgroup.filter(|cgroup| cgroup.is_dir())?;
+    Some(RUNNING_BUILDS.peak_ram_mb())
 }
 
 pub(super) struct RunningBuild<'a> {
@@ -126,10 +201,23 @@ pub(super) struct RunningBuild<'a> {
     builds: &'a RunningBuilds,
 }
 
+impl RunningBuild<'_> {
+    fn largest_sampled_unreclaimable_ram_mb(&self) -> Option<u64> {
+        self.builds
+            .job_id_and_sampled_peak_ram_by_derivation_hash
+            .lock()
+            .get(&self.drv_hash)
+            .and_then(|build| build.max_unreclaimable_memory_mb)
+    }
+}
+
 impl Drop for RunningBuild<'_> {
     fn drop(&mut self) {
         self.builds.count.fetch_sub(1, Ordering::Relaxed);
-        self.builds.job_of_drv_hash.lock().remove(&self.drv_hash);
+        self.builds
+            .job_id_and_sampled_peak_ram_by_derivation_hash
+            .lock()
+            .remove(&self.drv_hash);
     }
 }
 
@@ -146,7 +234,12 @@ pub(super) fn build_metrics(
         concurrent_builds: Some(running.others),
         build_cores: Some(cores),
         cpu_core_score: Some(host.cpu_core_score),
-        ..metrics_from(usage, build_time_ms, cpu_count)
+        ..metrics_from(
+            usage,
+            build_time_ms,
+            cpu_count,
+            running.largest_sampled_unreclaimable_ram_mb(),
+        )
     }
 }
 
@@ -163,7 +256,12 @@ fn observe_disk_speed(usage: ResourceUsage, build_time_ms: u64) {
     }
 }
 
-fn metrics_from(usage: ResourceUsage, build_time_ms: u64, cpu_count: u32) -> BuildMetrics {
+fn metrics_from(
+    usage: ResourceUsage,
+    build_time_ms: u64,
+    cpu_count: u32,
+    max_sampled_unreclaimable_ram_mb: Option<u64>,
+) -> BuildMetrics {
     let cpu_time_ms = usage.cpu_usec.map(|u| u / 1000);
     let avg_cpu_pct = match cpu_time_ms {
         Some(cpu_ms) if build_time_ms > 0 && cpu_count > 0 => {
@@ -173,7 +271,8 @@ fn metrics_from(usage: ResourceUsage, build_time_ms: u64, cpu_count: u32) -> Bui
     };
 
     BuildMetrics {
-        peak_ram_mb: usage.memory_peak.map(|b| b / BYTES_PER_MB),
+        peak_ram_mb: max_sampled_unreclaimable_ram_mb
+            .or(usage.memory_peak.map(|b| b / BYTES_PER_MB)),
         cpu_time_ms,
         avg_cpu_pct,
         disk_read_bytes: usage.io_read_bytes,
@@ -204,7 +303,7 @@ mod tests {
 
     #[test]
     fn a_daemon_without_resource_usage_leaves_only_the_build_time() {
-        let m = metrics_from(ResourceUsage::default(), 5_000, 4);
+        let m = metrics_from(ResourceUsage::default(), 5_000, 4, None);
         assert_eq!(
             m,
             BuildMetrics {
@@ -224,7 +323,7 @@ mod tests {
             oom_kills: Some(1),
         };
         assert_eq!(
-            metrics_from(usage, 4_000, 4),
+            metrics_from(usage, 4_000, 4, None),
             BuildMetrics {
                 peak_ram_mb: Some(3),
                 cpu_time_ms: Some(8_000),
@@ -244,7 +343,7 @@ mod tests {
             oom_kills: Some(0),
             ..Default::default()
         };
-        assert!(!metrics_from(usage, 1_000, 4).oom_killed);
+        assert!(!metrics_from(usage, 1_000, 4, None).oom_killed);
     }
 
     #[test]
@@ -259,27 +358,62 @@ mod tests {
     }
 
     #[test]
-    fn a_running_build_reports_the_peak_memory_of_its_cgroup() {
+    fn test_parse_cgroup_memory_stat_unreclaimable_bytes_counts_kernel_minus_slab_reclaimable_and_ignores_file()
+     {
+        let stat = "anon 1000\nfile 900000\nkernel 300\nkernel_stack 40\nslab 120\n\
+                    slab_reclaimable 100\nslab_unreclaimable 20\nshmem 50\nsock 3\nfile_dirty 7\n";
+        assert_eq!(parse_cgroup_memory_stat_unreclaimable_bytes(stat), 1253);
+    }
+
+    #[test]
+    fn parse_cgroup_memory_stat_unreclaimable_bytes_without_kernel_key() {
+        let stat = "anon 1000\nfile 900000\nkernel_stack 40\npagetables 30\npercpu 5\n\
+                    sock 3\nshmem 50\nslab_reclaimable 100\nslab_unreclaimable 20\n";
+        assert_eq!(parse_cgroup_memory_stat_unreclaimable_bytes(stat), 1148);
+        assert_eq!(
+            parse_cgroup_memory_stat_unreclaimable_bytes("anon 7\nfile 9\n"),
+            7
+        );
+        assert_eq!(parse_cgroup_memory_stat_unreclaimable_bytes(""), 0);
+    }
+
+    #[test]
+    fn running_build_peak_unreclaimable_memory_keeps_highest_sample_after_memory_stat_drop_and_ignores_unknown_derivation_hash_cgroups()
+     {
         let daemon = tempfile::TempDir::new().unwrap();
-        let cgroup = |name: &str, peak_bytes: u64| {
+        let cgroup = |name: &str, anon_bytes: u64| {
             let dir = daemon.path().join(name);
-            std::fs::create_dir(&dir).unwrap();
-            std::fs::write(dir.join("memory.peak"), format!("{peak_bytes}\n")).unwrap();
+            std::fs::create_dir_all(&dir).unwrap();
+            let stat = format!("anon {anon_bytes}\nfile {}\n", 50 * BYTES_PER_MB);
+            std::fs::write(dir.join("memory.stat"), stat).unwrap();
         };
-        cgroup("nix-build@aaaa-30001", 3 * BYTES_PER_MB);
-        cgroup("nix-build@bbbb-30002", 7 * BYTES_PER_MB);
-        cgroup("nix-daemon", 9 * BYTES_PER_MB);
+        cgroup("nix-build@aaaa-nixbld1", 7 * BYTES_PER_MB);
+        cgroup("nix-build@bbbb-nixbld2", 9 * BYTES_PER_MB);
+        cgroup("nix-daemon", 11 * BYTES_PER_MB);
 
         let builds = RunningBuilds::new();
         let running = builds.start("job-1", "/nix/store/aaaa-hello-2.12.drv");
-        assert_eq!(
-            builds.peak_ram_mb(daemon.path()),
-            Some(vec![("job-1".to_owned(), 3)])
-        );
+        assert_eq!(builds.peak_ram_mb(), vec![]);
+
+        builds.raise_max_unreclaimable_ram_from_nix_build_child_cgroups(daemon.path());
+        cgroup("nix-build@aaaa-nixbld1", 3 * BYTES_PER_MB);
+        builds.raise_max_unreclaimable_ram_from_nix_build_child_cgroups(daemon.path());
+        assert_eq!(builds.peak_ram_mb(), vec![("job-1".to_owned(), 7)]);
+        assert_eq!(running.largest_sampled_unreclaimable_ram_mb(), Some(7));
 
         drop(running);
-        assert_eq!(builds.peak_ram_mb(daemon.path()), Some(vec![]));
-        assert_eq!(builds.peak_ram_mb(&daemon.path().join("missing")), None);
+        assert_eq!(builds.peak_ram_mb(), vec![]);
+    }
+
+    #[test]
+    fn final_build_metrics_use_unreclaimable_peak_over_daemon_peak_and_keep_daemon_value_without_samples()
+     {
+        let usage = ResourceUsage {
+            memory_peak: Some(40 * BYTES_PER_MB),
+            ..Default::default()
+        };
+        assert_eq!(metrics_from(usage, 1_000, 4, Some(6)).peak_ram_mb, Some(6));
+        assert_eq!(metrics_from(usage, 1_000, 4, None).peak_ram_mb, Some(40));
     }
 
     #[test]
@@ -297,7 +431,7 @@ mod tests {
             cpu_usec: Some(1_000_000),
             ..Default::default()
         };
-        assert_eq!(metrics_from(usage, 0, 4).avg_cpu_pct, None);
-        assert_eq!(metrics_from(usage, 1_000, 0).avg_cpu_pct, None);
+        assert_eq!(metrics_from(usage, 0, 4, None).avg_cpu_pct, None);
+        assert_eq!(metrics_from(usage, 1_000, 0, None).avg_cpu_pct, None);
     }
 }

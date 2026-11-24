@@ -56,7 +56,11 @@ use gradient_worker_client::nar;
 
 pub use abort::AbortSignal;
 pub use build_metrics::BuildHost;
-pub(crate) use build_metrics::peak_ram_of_running_builds;
+pub(crate) use build_metrics::{
+    peak_ram_of_running_builds,
+    sample_running_build_unreclaimable_ram_maxima_from_nix_daemon_cgroup,
+    worker_has_any_running_build,
+};
 use built_derivations_awaiting_output_upload::UnreportedBuildMetricsByDerivationPath;
 pub use eval::WorkerEvaluator;
 
