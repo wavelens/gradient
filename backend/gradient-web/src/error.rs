@@ -124,7 +124,7 @@ pub enum WebError {
     #[error("Data Inconsistency: {0}")]
     DataInconsistency(String),
     #[error(transparent)]
-    Internal(#[from] AnyhowError),
+    Internal(AnyhowError),
 }
 
 pub type WebResult<T> = Result<T, WebError>;
@@ -173,7 +173,52 @@ impl WebError {
 
 impl From<DbErr> for WebError {
     fn from(err: DbErr) -> Self {
-        Self::Internal(AnyhowError::new(err))
+        convert_anyhow_error_to_web_error_with_check_violation_conflict(AnyhowError::new(err))
+    }
+}
+
+impl From<AnyhowError> for WebError {
+    fn from(err: AnyhowError) -> Self {
+        convert_anyhow_error_to_web_error_with_check_violation_conflict(err)
+    }
+}
+
+pub(crate) fn convert_anyhow_error_to_web_error_with_check_violation_conflict(
+    err: AnyhowError,
+) -> WebError {
+    let conflict_message = err
+        .chain()
+        .find_map(|cause| cause.downcast_ref::<DbErr>())
+        .and_then(check_violation)
+        .and_then(|db_err| match db_err.constraint() {
+            None => Some(db_err.message().to_owned()),
+            Some(name) => {
+                tracing::warn!(
+                    constraint = name,
+                    database_message = db_err.message(),
+                    "A named check constraint in the database rejected a write -> server bug, request can turn into an internal error"
+                );
+                None
+            }
+        });
+    match conflict_message {
+        Some(message) => WebError::Conflict(ErrorCode::CONFLICT, message),
+        None => WebError::Internal(err),
+    }
+}
+
+fn check_violation(err: &DbErr) -> Option<&dyn sqlx::error::DatabaseError> {
+    let sqlx_err = match err {
+        DbErr::Query(RuntimeErr::SqlxError(e)) | DbErr::Exec(RuntimeErr::SqlxError(e)) => {
+            e.as_ref()
+        }
+        _ => return None,
+    };
+    match sqlx_err {
+        sqlx::Error::Database(db_err) if db_err.code().as_deref() == Some("23514") => {
+            Some(db_err.as_ref())
+        }
+        _ => None,
     }
 }
 
@@ -482,5 +527,103 @@ mod tests {
         let err = DbErr::Custom("boom".into());
         let mapped = WebError::from_db_err(err, Resource::Project);
         assert!(matches!(mapped, WebError::Internal(_)));
+    }
+
+    #[derive(Debug)]
+    struct FixedSqlStateDatabaseError {
+        code: &'static str,
+        message: &'static str,
+        constraint: Option<&'static str>,
+    }
+
+    impl fmt::Display for FixedSqlStateDatabaseError {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            f.write_str(self.message)
+        }
+    }
+
+    impl std::error::Error for FixedSqlStateDatabaseError {}
+
+    impl sqlx::error::DatabaseError for FixedSqlStateDatabaseError {
+        fn message(&self) -> &str {
+            self.message
+        }
+
+        fn code(&self) -> Option<std::borrow::Cow<'_, str>> {
+            Some(std::borrow::Cow::Borrowed(self.code))
+        }
+
+        fn constraint(&self) -> Option<&str> {
+            self.constraint
+        }
+
+        fn as_error(&self) -> &(dyn std::error::Error + Send + Sync + 'static) {
+            self
+        }
+
+        fn as_error_mut(&mut self) -> &mut (dyn std::error::Error + Send + Sync + 'static) {
+            self
+        }
+
+        fn into_error(self: Box<Self>) -> Box<dyn std::error::Error + Send + Sync + 'static> {
+            self
+        }
+
+        fn kind(&self) -> sqlx::error::ErrorKind {
+            sqlx::error::ErrorKind::CheckViolation
+        }
+    }
+
+    fn build_exec_error_with_sqlstate_23514_message_and_optional_constraint(
+        message: &'static str,
+        constraint: Option<&'static str>,
+    ) -> DbErr {
+        DbErr::Exec(RuntimeErr::SqlxError(std::sync::Arc::new(
+            sqlx::Error::Database(Box::new(FixedSqlStateDatabaseError {
+                code: "23514",
+                message,
+                constraint,
+            })),
+        )))
+    }
+
+    #[test]
+    fn trigger_check_violation_returns_conflict_with_database_message() {
+        let mapped = WebError::from(
+            build_exec_error_with_sqlstate_23514_message_and_optional_constraint(
+                "user u reached the limit of 1 caches",
+                None,
+            ),
+        );
+        assert_eq!(mapped.status(), StatusCode::CONFLICT);
+        assert_eq!(
+            mapped.public_message(),
+            "user u reached the limit of 1 caches"
+        );
+    }
+
+    #[test]
+    fn check_violation_with_constraint_name_maps_to_internal_server_error() {
+        let mapped = WebError::from(
+            build_exec_error_with_sqlstate_23514_message_and_optional_constraint(
+                "new row violates check constraint",
+                Some("chk-webhook-scope"),
+            ),
+        );
+        assert_eq!(mapped.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    }
+
+    #[test]
+    fn check_violation_in_anyhow_with_context_becomes_409() {
+        let db_err = build_exec_error_with_sqlstate_23514_message_and_optional_constraint(
+            "user u reached the limit of 1 caches",
+            None,
+        );
+        let mapped = WebError::from(
+            anyhow::Error::new(db_err)
+                .context("insert cache")
+                .context("create cache"),
+        );
+        assert_eq!(mapped.status(), StatusCode::CONFLICT);
     }
 }
