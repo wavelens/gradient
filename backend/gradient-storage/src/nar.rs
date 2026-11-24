@@ -606,10 +606,18 @@ impl NarStore {
         }
     }
 
-    async fn presigned_temporary_nar_upload(&self, hash: &str) -> Result<Option<StorageTarget>> {
+    async fn presigned_temporary_nar_upload(
+        &self,
+        hash: &str,
+        nar_size: u64,
+    ) -> Result<Option<StorageTarget>> {
         let upload = self.temporary_upload_object_path_for_store_path_hash(hash);
         Ok(self
-            .presign_object(reqwest::Method::PUT, &upload, PRESIGN_TTL)
+            .presign_object(
+                reqwest::Method::PUT,
+                &upload,
+                crate::multipart::presigned_nar_upload_and_lease_duration(nar_size),
+            )
             .await?
             .map(|url| StorageTarget::PresignedPutToTemporaryUploadObject {
                 url,
@@ -1093,10 +1101,11 @@ pub enum StorageTarget {
 pub fn upload_lease(target: &StorageTarget, size: u64) -> Option<std::time::Duration> {
     match target {
         StorageTarget::Passthrough => None,
-        StorageTarget::Put { .. } | StorageTarget::PresignedPutToTemporaryUploadObject { .. } => {
-            Some(PRESIGN_TTL)
-        }
-        StorageTarget::Multipart { .. } => Some(crate::multipart::part_ttl(size)),
+        StorageTarget::Put { .. } => Some(PRESIGN_TTL),
+        StorageTarget::PresignedPutToTemporaryUploadObject { .. }
+        | StorageTarget::Multipart { .. } => Some(
+            crate::multipart::presigned_nar_upload_and_lease_duration(size),
+        ),
     }
 }
 
@@ -1113,7 +1122,7 @@ impl NarStore {
                 .await?
                 .ok_or_else(missing),
             ObjectKey::Nar(hash) => self
-                .presigned_temporary_nar_upload(hash)
+                .presigned_temporary_nar_upload(hash, size)
                 .await?
                 .ok_or_else(missing),
             ObjectKey::EvalCache(key) => self
@@ -1287,6 +1296,65 @@ mod tests {
                 .unwrap(),
             StorageTarget::Passthrough
         );
+    }
+
+    async fn request_nar_upload_target_for_single_presigned_put_and_return_lease_and_expiry_durations(
+        nar_size: u64,
+    ) -> (std::time::Duration, std::time::Duration) {
+        let store = NarStore::s3(
+            "bucket",
+            "us-east-1",
+            Some("http://127.0.0.1:1"),
+            Some("key"),
+            Some("secret"),
+            "",
+            false,
+            S3Timeouts::default(),
+        )
+        .unwrap();
+        let target = store
+            .upload_target(&ObjectKey::Nar("a".repeat(32)), nar_size)
+            .await
+            .unwrap();
+        let StorageTarget::PresignedPutToTemporaryUploadObject { url, .. } = &target else {
+            panic!("{target:?}")
+        };
+        let expires = reqwest::Url::parse(url)
+            .unwrap()
+            .query_pairs()
+            .find(|(name, _)| name == "X-Amz-Expires")
+            .and_then(|(_, seconds)| seconds.parse().ok())
+            .map(std::time::Duration::from_secs)
+            .unwrap_or_else(|| panic!("{url}"));
+        (upload_lease(&target, nar_size).unwrap(), expires)
+    }
+
+    #[tokio::test]
+    async fn one_gib_nar_upload_at_minimum_write_throughput_fits_inside_lease_and_presigned_url_expiry()
+     {
+        let transfer = std::time::Duration::from_secs(
+            MULTIPART_NAR_BYTES / MIN_WRITE_THROUGHPUT_BYTES_PER_SEC,
+        );
+        let (lease, expires) =
+            request_nar_upload_target_for_single_presigned_put_and_return_lease_and_expiry_durations(
+                MULTIPART_NAR_BYTES,
+            )
+            .await;
+        assert!(lease >= transfer, "{lease:?} < {transfer:?}");
+        assert!(expires >= transfer, "{expires:?} < {transfer:?}");
+    }
+
+    #[tokio::test]
+    async fn tiny_nar_single_presigned_put_upload_lease_and_presigned_url_expire_after_presign_ttl()
+    {
+        let about_presign_ttl = PRESIGN_TTL..=PRESIGN_TTL + std::time::Duration::from_secs(60);
+        let (lease, expires) =
+            request_nar_upload_target_for_single_presigned_put_and_return_lease_and_expiry_durations(
+                1024,
+            )
+            .await;
+        assert!(about_presign_ttl.contains(&lease), "{lease:?}");
+        assert!(about_presign_ttl.contains(&expires), "{expires:?}");
     }
 
     fn local_store() -> (TempDir, NarStore) {

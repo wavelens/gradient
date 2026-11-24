@@ -43,7 +43,7 @@ fn compressed_bound(nar_size: u64) -> u64 {
     nar_size.saturating_add(nar_size / 128).saturating_add(MIB)
 }
 
-pub(crate) fn part_ttl(nar_size: u64) -> Duration {
+pub(crate) fn presigned_nar_upload_and_lease_duration(nar_size: u64) -> Duration {
     let transfer = Duration::from_secs(
         compressed_bound(nar_size) / crate::nar::MIN_WRITE_THROUGHPUT_BYTES_PER_SEC,
     );
@@ -71,7 +71,15 @@ pub(crate) async fn presign(
         .await
         .context("create multipart upload")?;
     let layout = layout(nar_size);
-    match sign_parts(s3, path, &upload_id, layout.part_count, part_ttl(nar_size)).await {
+    match sign_parts(
+        s3,
+        path,
+        &upload_id,
+        layout.part_count,
+        presigned_nar_upload_and_lease_duration(nar_size),
+    )
+    .await
+    {
         Ok(part_urls) => Ok(PresignedMultipart {
             upload_id,
             part_size: layout.part_size,
@@ -173,10 +181,18 @@ mod tests {
     }
 
     #[test]
-    fn part_ttl_scales_with_size_and_caps_at_the_sigv4_limit() {
-        assert!(part_ttl(GIB) > gradient_wire::constants::PRESIGN_TTL);
-        assert!(part_ttl(100 * GIB) > part_ttl(GIB));
-        assert_eq!(part_ttl(1024 * 1024 * GIB), MAX_SIGV4_TTL);
+    fn presigned_nar_upload_and_lease_duration_scales_with_size_and_caps_at_the_sigv4_limit() {
+        assert!(
+            presigned_nar_upload_and_lease_duration(GIB) > gradient_wire::constants::PRESIGN_TTL
+        );
+        assert!(
+            presigned_nar_upload_and_lease_duration(100 * GIB)
+                > presigned_nar_upload_and_lease_duration(GIB)
+        );
+        assert_eq!(
+            presigned_nar_upload_and_lease_duration(1024 * 1024 * GIB),
+            MAX_SIGV4_TTL
+        );
     }
 
     fn leaked_stats() -> &'static MinuteStats {
