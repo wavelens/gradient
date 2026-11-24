@@ -7,8 +7,13 @@
 mod commit;
 mod table;
 
+use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
+use gradient_db::caches::capacity::{
+    build_upload_refusal_message_from_full_writable_cache_names,
+    project_writable_cache_names_if_all_over_storage_limit,
+};
 use gradient_db::scheduling::assignment_record::exec_job_of_key;
 use gradient_storage::admission::{AdmissionSession, Admitted, ObjectKey};
 use gradient_storage::eval_cache_segment::{
@@ -39,6 +44,7 @@ pub(super) struct UploadSession {
     pub partials: PartialStore,
     pub retain_up_to: u64,
     pub idle_lease: Duration,
+    pub first_nar_upload_storage_limit_check_by_job_id: HashMap<String, Option<String>>,
 }
 
 pub(super) fn nar_key(store_path: &str) -> Option<String> {
@@ -138,6 +144,13 @@ impl InboundContext<'_> {
                 }
             }
         };
+        if matches!(key, ObjectKey::Nar(_))
+            && let Some(outcome) = self
+                .check_project_storage_limit_on_first_upload(&job_id, project, uploads)
+                .await
+        {
+            return self.settle(request_id, outcome).await;
+        }
         let priority = gradient_wire::messages::is_small_upload(size);
         let queued = Queued {
             job_id,
@@ -445,7 +458,44 @@ impl InboundContext<'_> {
         }
     }
 
+    async fn check_project_storage_limit_on_first_upload(
+        &self,
+        job_id: &str,
+        project: ProjectId,
+        uploads: &mut UploadSession,
+    ) -> Option<UploadOutcome> {
+        let checks = &mut uploads.first_nar_upload_storage_limit_check_by_job_id;
+        if let Some(reason) = checks.get(job_id) {
+            return reason
+                .clone()
+                .map(|reason| UploadOutcome::Rejected { reason });
+        }
+        let db = &self.handles.db;
+        let full = project_writable_cache_names_if_all_over_storage_limit(
+            &db.worker_db,
+            project,
+            db.config.cache.max_storage_gb,
+        )
+        .await;
+        let reason = match full {
+            Ok(full) => full
+                .as_deref()
+                .map(build_upload_refusal_message_from_full_writable_cache_names),
+            Err(e) => {
+                warn!(peer_id = %self.peer_id, %project, error = %e, "Storage limit check failed");
+                return Some(UploadOutcome::Retry {
+                    reason: "Failed to check the storage limit for the project caches. Retry the upload.".into(),
+                });
+            }
+        };
+        checks.insert(job_id.to_owned(), reason.clone());
+        reason.map(|reason| UploadOutcome::Rejected { reason })
+    }
+
     pub(super) async fn forget_uploads(&mut self, job_id: &str, uploads: &mut UploadSession) {
+        uploads
+            .first_nar_upload_storage_limit_check_by_job_id
+            .remove(job_id);
         for (id, granted) in uploads.table.forget_job(job_id) {
             uploads.admission.cancel(id);
             if let Some(granted) = granted {
@@ -535,10 +585,57 @@ mod tests {
         }
     }
 
+    fn mock_database_with_no_project_cache_subscriptions() -> sea_orm::MockDatabase {
+        mock_db().append_query_results([Vec::<gradient_entity::project_cache::Model>::new()])
+    }
+
     fn unknown_path() -> sea_orm::DatabaseConnection {
-        mock_db()
+        mock_database_with_no_project_cache_subscriptions()
             .append_query_results([Vec::<MCachedPath>::new()])
             .into_connection()
+    }
+
+    #[tokio::test]
+    async fn test_worker_job_nar_upload_rejected_when_all_project_caches_over_storage_limit_and_cache_check_runs_once_per_job()
+     {
+        use gradient_entity::project_cache::CacheSubscriptionMode;
+        let full = gradient_entity::cache::Model {
+            max_storage_gb: 1,
+            ..gradient_fixtures::rows::cache()
+        };
+        let db = mock_db()
+            .append_query_results([vec![gradient_fixtures::rows::project_cache_link(
+                gradient_types::ids::ProjectCacheId::now_v7(),
+                ProjectId::now_v7(),
+                full.id,
+                CacheSubscriptionMode::ReadWrite,
+            )]])
+            .append_query_results([vec![full.clone()]])
+            .append_query_results([[std::collections::BTreeMap::from([(
+                "total".to_owned(),
+                sea_orm::Value::BigInt(Some(2 * 1024 * 1024 * 1024)),
+            )])]])
+            .into_connection();
+        let state = test_state(db.clone());
+        let (mut session, mut sent, _admitted) = TestSession::new(&state).await;
+        let (mut ctx, uploads) = session.split();
+
+        for (request_id, c) in [(1, 'a'), (2, 'b')] {
+            ctx.on_upload_request(JOB.into(), request_id, nar(c), SMALL_UPLOAD_BYTES, uploads)
+                .await;
+            let ServerMessage::UploadCommitted {
+                outcome: UploadOutcome::Rejected { reason },
+                ..
+            } = decode(sent.try_recv().unwrap())
+            else {
+                panic!("request {request_id} is rejected");
+            };
+            assert!(reason.contains(&full.name), "{reason}");
+        }
+
+        assert_eq!(state.memory.upload_admission.in_flight(), 0);
+        let log = db.into_transaction_log();
+        assert_eq!(log.len(), 3, "{log:?}");
     }
 
     #[tokio::test]
@@ -553,7 +650,7 @@ mod tests {
             ..Default::default()
         };
         let state = test_state(
-            mock_db()
+            mock_database_with_no_project_cache_subscriptions()
                 .append_query_results([vec![stored]])
                 .into_connection(),
         );
@@ -574,7 +671,8 @@ mod tests {
 
     #[tokio::test]
     async fn a_small_request_is_granted_without_a_cache_index_lookup() {
-        let state = test_state(empty_db());
+        let state =
+            test_state(mock_database_with_no_project_cache_subscriptions().into_connection());
         let (mut session, mut sent, mut admitted) = TestSession::new(&state).await;
         let (mut ctx, uploads) = session.split();
         ctx.on_upload_request(JOB.into(), 1, nar('s'), SMALL_UPLOAD_BYTES, uploads)
@@ -647,7 +745,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_build_job_upload_of_other_derivation_output_path_is_allowed() {
-        let state = test_state(empty_db());
+        let state =
+            test_state(mock_database_with_no_project_cache_subscriptions().into_connection());
         let (mut session, mut sent, mut admitted) = TestSession::new(&state).await;
         let own = format!("/nix/store/{}-own", "a".repeat(32));
         let other = format!("/nix/store/{}-other", "b".repeat(32));
@@ -678,7 +777,8 @@ mod tests {
 
     #[tokio::test]
     async fn build_job_upload_requests_for_its_own_derivation_output_paths_are_granted() {
-        let state = test_state(empty_db());
+        let state =
+            test_state(mock_database_with_no_project_cache_subscriptions().into_connection());
         let (mut session, mut sent, mut admitted) = TestSession::new(&state).await;
         let out = format!("/nix/store/{}-out", "a".repeat(32));
         let dev = format!("/nix/store/{}-dev", "d".repeat(32));

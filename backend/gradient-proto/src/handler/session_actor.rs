@@ -633,6 +633,7 @@ fn open_uploads(
         partials: gradient_storage::PartialStore::new(config.server.nar_partial_dir())?,
         retain_up_to: config.nar.small_bytes,
         idle_lease: Duration::from_secs(config.upload.lease_idle_secs.get()),
+        first_nar_upload_storage_limit_check_by_job_id: Default::default(),
     };
     let forward = myself.clone();
     shutdown.spawn(async move {

@@ -4,7 +4,7 @@
  */
 
 use super::admit::{admit, admit_nar};
-use super::refusal::{CacheRefusal, ensure_cache_enabled};
+use super::refusal::{CacheRefusal, ensure_cache_enabled, refuse_upload_if_no_storage_space_left};
 use crate::api_spec::{Binary, CachePath};
 use crate::audit::Audit;
 use crate::authorization::RateLimitBucketOwner;
@@ -55,7 +55,7 @@ pub struct NarUploadForm {
     operation_id = "uploadCacheNar",
     tag = "caches",
     summary = "Upload a NAR to a cache",
-    description = "Uploads a single NAR (its bytes plus narinfo metadata) to this cache.\nRequires `writeStore`. The server validates the byte length against the\ndeclared `file_size`, stores the blob, records the cached path, and\nenqueues a signature for this cache. Re-uploading an existing store path\nreuses the cached path and only adds this cache's signature.\n\nThe route's body limit is `GRADIENT_NAR_MAX_UPLOAD_SIZE` (default 512 MiB).\nThe bundled reverse proxy additionally caps each request body at 100 MiB,\nso NARs above that must use the chunked endpoints\n(`PUT .../nars/{hash}/chunk` + `POST .../nars/{hash}/finalize`).",
+    description = "Uploads a single NAR (its bytes plus narinfo metadata) to this cache.\nRequires `writeStore`. The server validates the byte length against the\ndeclared `file_size`, stores the blob, records the cached path, and\nenqueues a signature for this cache. Re-uploading an existing store path\nreuses the cached path and only adds this cache's signature.\n\nThe route's body limit is `GRADIENT_NAR_MAX_UPLOAD_SIZE` (default 512 MiB).\nThe bundled reverse proxy additionally caps each request body at 100 MiB,\nso NARs above that must use the chunked endpoints\n(`PUT .../nars/{hash}/chunk` + `POST .../nars/{hash}/finalize`).\n\nThe server can reject the upload with 409 when remaining storage for the cache or instance is less than 10 MiB.",
     params(CachePath),
     request_body(content = NarUploadForm, content_type = "multipart/form-data"),
     responses((status = CREATED, description = "NAR stored", body = StoredNar), WebError)
@@ -69,6 +69,12 @@ pub async fn nars_upload(
     mut multipart: Multipart,
 ) -> WebResult<impl IntoResponse> {
     let cache = ensure_cache_enabled(cache)?;
+    refuse_upload_if_no_storage_space_left(
+        &state.web_db,
+        &cache,
+        state.config.cache.max_storage_gb,
+    )
+    .await?;
     let max = u64::try_from(state.config.nar.max_upload_size.get()).unwrap_or(u64::MAX);
     let declared = headers
         .get(header::CONTENT_LENGTH)
@@ -398,7 +404,7 @@ fn parse_upload_path_to_store_hash(segment: &str, mapper: &StorePathMapper) -> W
     operation_id = "uploadCacheNarChunk",
     tag = "caches",
     summary = "Append a chunk of a NAR being uploaded",
-    description = "Appends one slice of a NAR to a server-side `.partial` staging file,\none per `(cache, hash)`. Used to upload NARs larger than the reverse\nproxy's per-request body limit by splitting them across several requests.\nRequires `writeStore`. `offset == 0` starts fresh (truncating any stale\npartial); otherwise the chunk is appended only when `offset` equals the\nbytes already staged. The response's `received` is authoritative: the\nclient sets its next offset to it (resending if it did not advance) and\ncalls `POST .../finalize` once `received` equals the NAR size.",
+    description = "Appends one slice of a NAR to a server-side `.partial` staging file,\none per `(cache, hash)`. Used to upload NARs larger than the reverse\nproxy's per-request body limit by splitting them across several requests.\nRequires `writeStore`. `offset == 0` starts fresh (truncating any stale\npartial); otherwise the chunk is appended only when `offset` equals the\nbytes already staged. The response's `received` is authoritative: the\nclient sets its next offset to it (resending if it did not advance) and\ncalls `POST .../finalize` once `received` equals the NAR size.\n\nChunks with `offset == 0` start an upload. The API can return 409 with free storage on the cache or instance under 10 MiB. Checks cover only the first chunk, so later chunks of an upload in progress can complete the upload.",
     params(CachePath, ("hash" = String, Path), NarChunkQuery),
     request_body(content = Binary, content_type = "application/octet-stream"),
     responses((status = OK, description = "Chunk staged", body = ChunkReceived), WebError)
@@ -410,6 +416,14 @@ pub async fn nar_chunk(
     body: Bytes,
 ) -> WebResult<impl IntoResponse> {
     let cache = ensure_cache_enabled(cache)?;
+    if offset == 0 {
+        refuse_upload_if_no_storage_space_left(
+            &state.web_db,
+            &cache,
+            state.config.cache.max_storage_gb,
+        )
+        .await?;
+    }
     let store_hash = parse_upload_path_to_store_hash(
         &params.param::<String>("hash")?,
         &state.cache_mapper(cache.id),

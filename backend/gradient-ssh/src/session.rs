@@ -49,6 +49,7 @@ pub struct Session {
     pub closed: CancellationToken,
     pub target: Option<GatewayTarget>,
     pub allows_project_credentials_and_privileged_actions: bool,
+    pub storage_limit_refusal_reason: tokio::sync::OnceCell<Option<String>>,
 }
 
 impl Session {
@@ -71,6 +72,7 @@ impl Session {
             mapper,
             target: None,
             allows_project_credentials_and_privileged_actions,
+            storage_limit_refusal_reason: tokio::sync::OnceCell::new(),
         })
     }
 

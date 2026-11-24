@@ -1900,6 +1900,7 @@ pub(in crate::handler) mod fixture {
                 .unwrap(),
             retain_up_to: 0,
             idle_lease: Duration::from_secs(300),
+            first_nar_upload_storage_limit_check_by_job_id: Default::default(),
         };
         (uploads, admitted)
     }

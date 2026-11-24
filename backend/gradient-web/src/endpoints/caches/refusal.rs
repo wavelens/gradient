@@ -107,6 +107,30 @@ pub(crate) enum CacheRefusal {
         gradient_db::caches::upstream::MAX_UPSTREAM_CACHE_COUNT
     )]
     MaximumUpstreamCacheCountReached,
+    #[error(
+        "Cache {cache} is over the storage limit. Remove stored paths before an upload, or raise the storage limit."
+    )]
+    CacheStorageLimitReachedForUpload { cache: String },
+}
+
+pub(crate) async fn refuse_upload_if_no_storage_space_left(
+    db: &impl sea_orm::ConnectionTrait,
+    cache: &MCache,
+    instance_limit_gb: u32,
+) -> WebResult<()> {
+    if gradient_db::caches::capacity::storage_limits_leave_less_than_required_free_space_for_upload(
+        db,
+        cache,
+        instance_limit_gb,
+    )
+    .await?
+    {
+        return Err(CacheRefusal::CacheStorageLimitReachedForUpload {
+            cache: cache.name.clone(),
+        }
+        .into());
+    }
+    Ok(())
 }
 
 impl Refusal for CacheRefusal {
@@ -120,6 +144,7 @@ impl Refusal for CacheRefusal {
             | Self::MaximumUpstreamCacheCountReached => RefusalStatus::Forbidden,
             Self::SignaturePending | Self::NotRecorded(_) => RefusalStatus::NotFound,
             Self::NarTooLarge { .. } => RefusalStatus::PayloadTooLarge,
+            Self::CacheStorageLimitReachedForUpload { .. } => RefusalStatus::Conflict,
             Self::ConnectionCapacityReached | Self::TooManyConnectionsFromIp => {
                 RefusalStatus::ServiceUnavailable
             }

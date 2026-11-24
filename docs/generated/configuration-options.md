@@ -40,7 +40,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 | Option | Type | Default | Env | Description |
 |---|---|---|---|---|
 | `cache.debugIndexIntervalSecs` | positive int | `300` | `GRADIENT_CACHE_DEBUG_INDEX_INTERVAL_SECS` | Seconds between passes of the DWARF build ID index backfill. Uploads enter the index immediately. Only paths cached before the index existed or interrupted by a restart need the pass. |
-| `cache.maxStorageGb` | unsigned int | `0` | `GRADIENT_CACHE_MAX_STORAGE_GB` | Instance-wide limit on cached NAR storage in GB. New evaluations wait while every writable cache of a project has less than 10 MiB left. Set it to `0` to disable the limit. Per-cache limits still apply. |
+| `cache.maxStorageGb` | unsigned int | `0` | `GRADIENT_CACHE_MAX_STORAGE_GB` | Storage limit (GB) for NAR files across the whole instance. Uploads to any cache fail with less than 10 MiB free. New evaluations for all projects wait. Per-cache limits still apply. Use `0` to disable this limit. |
 | `cache.signSweepIntervalSecs` | positive int | `3600` | `GRADIENT_CACHE_SIGN_SWEEP_INTERVAL_SECS` | Seconds between passes that sign unsigned cache entries. Uploads receive a signature at once. Only three kinds of rows need this pass. They are subscription placeholders, unsigned leftovers and published dependency outputs. The cache publishes dependency outputs every 300 seconds and on every wake. |
 | `cache.upstreamQueryConcurrency` | positive int | `32` | `GRADIENT_CACHE_UPSTREAM_QUERY_CONCURRENCY` | Maximum simultaneous narinfo requests to upstream caches across the server. |
 

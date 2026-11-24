@@ -16,9 +16,9 @@ pub struct CacheArgs {
     #[arg(default_value = "32")]
     pub upstream_query_concurrency: NonZeroUsize,
 
-    /// Instance-wide limit on cached NAR storage in GB. New evaluations wait while every
-    /// writable cache of a project has less than 10 MiB left. Set it to `0` to disable the
-    /// limit. Per-cache limits still apply.
+    /// Storage limit (GB) for NAR files across the whole instance. Uploads to any cache fail with
+    /// less than 10 MiB free. New evaluations for all projects wait. Per-cache limits still apply.
+    /// Use `0` to disable this limit.
     #[arg(default_value_t = 0)]
     pub max_storage_gb: u32,
 

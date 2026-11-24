@@ -4441,6 +4441,8 @@ paths:
         The bundled reverse proxy additionally caps each request body at 100 MiB,
         so NARs above that must use the chunked endpoints
         (`PUT .../nars/{hash}/chunk` + `POST .../nars/{hash}/finalize`).
+
+        The server can reject the upload with 409 when remaining storage for the cache or instance is less than 10 MiB.
       operationId: uploadCacheNar
       parameters:
       - name: cache
@@ -4635,6 +4637,8 @@ paths:
         bytes already staged. The response's `received` is authoritative: the
         client sets its next offset to it (resending if it did not advance) and
         calls `POST .../finalize` once `received` equals the NAR size.
+
+        Chunks with `offset == 0` start an upload. The API can return 409 with free storage on the cache or instance under 10 MiB. Checks cover only the first chunk, so later chunks of an upload in progress can complete the upload.
       operationId: uploadCacheNarChunk
       parameters:
       - name: cache
