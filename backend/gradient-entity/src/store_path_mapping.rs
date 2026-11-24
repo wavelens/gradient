@@ -10,7 +10,9 @@ use std::sync::Arc;
 use futures::future::BoxFuture;
 
 use crate::ids::{CacheId, ProjectId};
-use crate::store_path::{OriginalStorePath, STORE_DIR, StoreHash, StorePath, StorePathError};
+use crate::store_path::{
+    OriginalStorePath, STORE_DIR, STORE_HASH_LENGTH, StoreHash, StorePath, StorePathError,
+};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum MappingContext {
@@ -163,6 +165,23 @@ impl StorePathMapper {
         Ok(parts.join(&self.mapping.outbound(self.context, hash)))
     }
 
+    pub fn rewrite_stored_store_paths_in_text_to_outbound(&self, text: &str) -> String {
+        let mut rewritten = String::with_capacity(text.len());
+        let mut rest = text;
+        while let Some(index) = rest.find(STORE_DIR) {
+            let (before, after_store_prefix) = rest.split_at(index + STORE_DIR.len());
+            rewritten.push_str(before);
+            rest = after_store_prefix;
+            if let Some(hash) = store_hash_from_text_after_store_prefix(rest) {
+                rewritten.push('/');
+                rewritten.push_str(self.mapping.outbound(self.context, hash).as_str());
+                rest = &rest[1 + STORE_HASH_LENGTH..];
+            }
+        }
+        rewritten.push_str(rest);
+        rewritten
+    }
+
     pub fn inbound_if_store_path(&self, text: &str) -> Result<String, StorePathError> {
         match text.starts_with(STORE_DIR) {
             true => self.map_and_validate_build_product_path(text),
@@ -180,6 +199,15 @@ impl StorePathMapper {
     pub fn inbound_prefix(&self, prefix: &str) -> Option<String> {
         self.mapping.inbound_prefix(self.context, prefix)
     }
+}
+
+fn store_hash_from_text_after_store_prefix(text: &str) -> Option<StoreHash> {
+    let base_name = text.strip_prefix('/')?;
+    let hash = base_name.get(..STORE_HASH_LENGTH)?;
+    if !base_name[STORE_HASH_LENGTH..].starts_with('-') {
+        return None;
+    }
+    StoreHash::parse(hash).ok()
 }
 
 fn is_acceptable_sub_path_segment(segment: &str) -> bool {
@@ -332,6 +360,20 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(identity.context(), MappingContext::Project(project));
+    }
+
+    #[test]
+    fn rewrite_stored_store_paths_in_free_text_to_original_leaves_other_text_unchanged() {
+        let mapper = StorePathMapper::for_cache(Arc::new(RotatedHashMapping), CacheId::nil());
+        let text = format!(
+            "closure of /nix/store/{EXAMPLE_STORED_HASH}-a.drv^out needs /nix/store/{EXAMPLE_STORED_HASH}-b, see /nix/store/short-c"
+        );
+        assert_eq!(
+            mapper.rewrite_stored_store_paths_in_text_to_outbound(&text),
+            format!(
+                "closure of /nix/store/{EXAMPLE_ORIGINAL_HASH}-a.drv^out needs /nix/store/{EXAMPLE_ORIGINAL_HASH}-b, see /nix/store/short-c"
+            )
+        );
     }
 
     #[test]
