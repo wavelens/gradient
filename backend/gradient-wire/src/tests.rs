@@ -769,6 +769,65 @@ fn a_guest_shutdown_needs_the_sixth_guest_version() {
 }
 
 #[test]
+fn a_resource_usage_window_needs_the_twelfth_guest_version() {
+    use crate::codec::{from_bytes, to_bytes};
+    use crate::exec::ExecMetrics;
+    use crate::guest::{
+        AgentToWorker, GUEST_PROTO_VERSIONS, GUEST_USAGE_WINDOW_MESSAGE_AGENT_TO_WORKER_SINCE,
+    };
+
+    let since = GUEST_USAGE_WINDOW_MESSAGE_AGENT_TO_WORKER_SINCE;
+    assert_eq!(since, 12);
+    assert!(GUEST_PROTO_VERSIONS.contains(&since));
+    let message = AgentToWorker::ResourceUsageWindow(ExecMetrics {
+        sequence: 3,
+        window_ms: 10_000,
+        cpu_avg: 1.5,
+        cpu_max: 1.75,
+        ram_avg_bytes: 100,
+        ram_max_bytes: 200,
+        ram_total_bytes: 400,
+        disk_max_bytes: 50,
+        disk_total_bytes: 500,
+    });
+    assert_eq!(
+        from_bytes::<AgentToWorker>(to_bytes(&message, since).unwrap(), since).unwrap(),
+        message
+    );
+    assert!(to_bytes(&message, since - 1).is_err());
+}
+
+#[test]
+fn exec_metrics_cross_the_wire_since_version_68() {
+    use crate::codec::{from_bytes, to_bytes};
+    use crate::exec::ExecMetrics;
+    use crate::messages::ClientMessage;
+
+    let since = 68;
+    let message = ClientMessage::ExecMetrics {
+        job_id: "job".into(),
+        metrics: ExecMetrics {
+            sequence: 1,
+            window_ms: 10_000,
+            cpu_avg: 0.5,
+            cpu_max: 2.0,
+            ram_avg_bytes: 1,
+            ram_max_bytes: 2,
+            ram_total_bytes: 3,
+            disk_max_bytes: 4,
+            disk_total_bytes: 5,
+        },
+    };
+    assert_eq!(
+        from_bytes::<ClientMessage>(to_bytes(&message, since).unwrap(), since).unwrap(),
+        message
+    );
+    assert!(to_bytes(&message, since - 1).is_err());
+    assert_eq!(message.job_id(), Some("job"));
+    assert_eq!(message.variant_name(), "ExecMetrics");
+}
+
+#[test]
 fn guest_output_flow_control_needs_protocol_60_older_peers_skip_allowance() {
     use crate::codec::{from_bytes, to_bytes};
     use crate::messages::{GuestChannelKind, ServerMessage};

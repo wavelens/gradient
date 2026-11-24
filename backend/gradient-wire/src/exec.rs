@@ -30,6 +30,19 @@ use crate::port_ranges::PortRanges;
 use serde::{Deserialize as SerdeDeserialize, Serialize as SerdeSerialize};
 use uuid::Uuid;
 
+#[derive(Proto, Debug, Clone, PartialEq)]
+pub struct ExecMetrics {
+    pub sequence: u32,
+    pub window_ms: u32,
+    pub cpu_avg: f32,
+    pub cpu_max: f32,
+    pub ram_avg_bytes: u64,
+    pub ram_max_bytes: u64,
+    pub ram_total_bytes: u64,
+    pub disk_max_bytes: u64,
+    pub disk_total_bytes: u64,
+}
+
 #[derive(
     Proto,
     SerdeSerialize,

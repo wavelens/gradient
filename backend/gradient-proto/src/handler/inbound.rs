@@ -732,6 +732,7 @@ impl<'a> InboundContext<'a> {
                 .await;
                 true
             }
+            ClientMessage::ExecMetrics { .. } => true,
         }
     }
 

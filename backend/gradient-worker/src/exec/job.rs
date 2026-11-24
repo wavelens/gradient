@@ -701,6 +701,7 @@ async fn forward<R: ExecReport>(
         }
         AgentToWorker::JobSecrets { .. } => debug!("job secrets from the guest agent dropped"),
         AgentToWorker::GuestShutdown => debug!("guest shutdown after the program end dropped"),
+        AgentToWorker::ResourceUsageWindow(_) => {}
         AgentToWorker::UploadStart { upload_id, .. }
         | AgentToWorker::UploadChunk { upload_id, .. }
         | AgentToWorker::UploadEnd { upload_id } => {

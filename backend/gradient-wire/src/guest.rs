@@ -18,9 +18,10 @@ use tokio_util::codec::{Framed, LengthDelimitedCodec};
 
 use crate::codec::agreement::{agree, version_frame};
 use crate::codec::{Proto, from_bytes, to_bytes};
+use crate::exec::ExecMetrics;
 use crate::types::GuestChannelKind;
 
-pub const GUEST_PROTO_VERSIONS: RangeInclusive<u16> = 1..=11;
+pub const GUEST_PROTO_VERSIONS: RangeInclusive<u16> = 1..=12;
 pub const GUEST_CHANNELS_AGENT_SINCE: u16 = 2;
 pub const GUEST_JOB_SECRETS_SINCE: u16 = 2;
 pub const GUEST_UPLOADS_SINCE: u16 = 3;
@@ -30,6 +31,7 @@ pub const GUEST_CONSOLE_RESIZE_SINCE: u16 = 8;
 pub const GUEST_CHANNEL_OUTPUT_FLOW_CONTROL_AGENT_SINCE: u16 = 9;
 pub const GUEST_PREPARE_TAP_LEASED_IPV4_ADDRESS_SINCE: u16 = 10;
 pub const GUEST_IPV6_NETWORK_CONFIGURATION_SINCE: u16 = 11;
+pub const GUEST_USAGE_WINDOW_MESSAGE_AGENT_TO_WORKER_SINCE: u16 = 12;
 pub const AGENT_VSOCK_PORT: u32 = 7000;
 pub const GUEST_STORE_VSOCK_PORT: u32 = 7001;
 pub const AGENT_RELAY_PORT_BASE: u32 = 7100;
@@ -213,6 +215,8 @@ pub enum AgentToWorker {
     },
     #[proto(6)]
     GuestShutdown,
+    #[proto(12)]
+    ResourceUsageWindow(ExecMetrics),
 }
 
 #[derive(Proto, Debug, Clone, PartialEq)]

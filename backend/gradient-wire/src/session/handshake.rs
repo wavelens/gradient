@@ -720,7 +720,7 @@ mod tests {
         assert!(failed);
         assert_eq!(
             refusal.as_deref(),
-            Some("no shared protocol version: ours 67..=67, peer 66..=66")
+            Some("no shared protocol version: ours 67..=68, peer 66..=66")
         );
     }
 
