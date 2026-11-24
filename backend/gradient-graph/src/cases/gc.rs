@@ -11,7 +11,7 @@ use gradient_db::cached_paths::{
     clear_cache_claim_pin_for_cached_path_hashes,
     set_claim_pin_timestamp_and_user_for_cached_path_hashes,
 };
-use gradient_db::caches::capacity::cache_used_bytes;
+use gradient_db::caches::capacity::sum_file_sizes_for_cache;
 use gradient_db::maintenance::gc::scan_deletable_path_hashes;
 use gradient_entity::build::BuildStatus;
 use gradient_entity::build_attempt::{self, AttemptOutcome};
@@ -562,7 +562,7 @@ async fn c12_unused_claim_deleted_shared_path_kept_until_last_claim() {
         case.insert_cache_claim(hash, c2, None, Some(fetched_at))
             .await;
     }
-    let used = |cache| cache_used_bytes(&case.ctx.worker_db, cache);
+    let used = |cache| sum_file_sizes_for_cache(&case.ctx.worker_db, cache);
     let shared = used(c2).await.expect("usage of C2");
     assert_eq!(
         used(c1).await.expect("usage of C1"),

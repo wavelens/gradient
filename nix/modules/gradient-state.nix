@@ -1095,8 +1095,11 @@
         type = types.ints.unsigned;
         default = 0;
         description = ''
-          Storage limit of the cache in GB. New evaluations wait while every writable cache
-          of a project has less than 10 MiB left. `0` disables the limit.
+          Storage limit for the cache (GB). Only stored NAR files count toward the limit. New
+          evaluations of a project wait while free space across all writable caches in that
+          project is below 10 MiB. Builds for the project can't upload outputs at the same time.
+          Uploads to this cache fail when free space is less than the upload size plus 10 MiB.
+          Use `0` to disable the limit.
         '';
       };
 

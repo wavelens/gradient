@@ -59,6 +59,9 @@ pub async fn stage(
         "copying into {} needs TriggerEvaluation",
         session.project.name
     );
+    if let Some(reason) = session_upload_refusal_reason(session, info.nar_size).await? {
+        anyhow::bail!("{reason}");
+    }
 
     if let Some(known) =
         find_verified_cached_path_with_existing_nar_for_upload(session, info).await?
@@ -123,6 +126,24 @@ pub async fn stage(
         verified,
         permit: claim,
     }))
+}
+
+async fn session_upload_refusal_reason(
+    session: &Session,
+    nar_size: u64,
+) -> anyhow::Result<Option<String>> {
+    let db = &session.handles.db;
+    Ok(session
+        .upload_storage
+        .lock()
+        .await
+        .admit_upload_to_project_writable_caches(
+            &db.web_db,
+            session.project.id,
+            db.config.cache.max_storage_gb,
+            nar_size,
+        )
+        .await?)
 }
 
 pub async fn commit(
@@ -381,9 +402,54 @@ mod tests {
         StoredPathInfo::inbound(&mapper, &client).expect("stored info")
     }
 
+    fn mock_database_with_no_project_cache_subscriptions() -> sea_orm::MockDatabase {
+        mock_db().append_query_results([Vec::<gradient_entity::project_cache::Model>::new()])
+    }
+
+    #[tokio::test]
+    async fn refuse_ssh_ng_staging_when_nar_size_plus_headroom_exceeds_free_cache_space() {
+        use gradient_entity::project_cache::CacheSubscriptionMode;
+        let full = gradient_entity::cache::Model {
+            max_storage_gb: 1,
+            ..gradient_fixtures::rows::cache()
+        };
+        let free = gradient_db::caches::capacity::STORAGE_HEADROOM_BYTES
+            + i64::try_from(info(NAR).nar_size).unwrap()
+            - 1;
+        let db = mock_db()
+            .append_query_results([vec![gradient_fixtures::rows::project_cache_link(
+                gradient_types::ids::ProjectCacheId::now_v7(),
+                gradient_fixtures::rows::project().id,
+                full.id,
+                CacheSubscriptionMode::ReadWrite,
+            )]])
+            .append_query_results([vec![full.clone()]])
+            .append_query_results([[std::collections::BTreeMap::from([(
+                "total".to_owned(),
+                sea_orm::Value::BigInt(Some(1024 * 1024 * 1024 - free)),
+            )])]])
+            .into_connection();
+        let session = session(db.clone(), mask_from(&[Permission::TriggerEvaluation])).await;
+
+        let e = stage(&session, &info(NAR), NAR)
+            .await
+            .err()
+            .expect("the NAR does not fit");
+
+        assert!(e.to_string().contains(&full.name), "{e}");
+        let stats = session.handles.upload_admission.stats();
+        assert_eq!((stats.in_flight, stats.granted_total), (0, 0));
+        let log = db.into_transaction_log();
+        assert_eq!(
+            log.len(),
+            3,
+            "Storage limit checks only, no cached path lookup: {log:?}"
+        );
+    }
+
     #[tokio::test]
     async fn a_nar_with_a_wrong_hash_is_rejected_before_any_row() {
-        let db = mock_db()
+        let db = mock_database_with_no_project_cache_subscriptions()
             .append_query_results([Vec::<MCachedPath>::new(), Vec::new()])
             .into_connection();
         let session = session(db.clone(), mask_from(&[Permission::TriggerEvaluation])).await;
@@ -400,7 +466,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_nar_shorter_than_announced_is_rejected() {
-        let db = mock_db()
+        let db = mock_database_with_no_project_cache_subscriptions()
             .append_query_results([Vec::<MCachedPath>::new(), Vec::new()])
             .into_connection();
         let session = session(db, mask_from(&[Permission::TriggerEvaluation])).await;
@@ -426,7 +492,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_stream_longer_than_announced_stops_early() {
-        let db = mock_db()
+        let db = mock_database_with_no_project_cache_subscriptions()
             .append_query_results([Vec::<MCachedPath>::new(), Vec::new()])
             .into_connection();
         let session = session(db, mask_from(&[Permission::TriggerEvaluation])).await;
@@ -447,7 +513,7 @@ mod tests {
             file_hash: "sha256-x".into(),
             ..Default::default()
         };
-        let db = mock_db()
+        let db = mock_database_with_no_project_cache_subscriptions()
             .append_query_results([vec![existing.clone()], vec![existing]])
             .into_connection();
         let session = session(db.clone(), mask_from(&[Permission::TriggerEvaluation])).await;
@@ -464,8 +530,8 @@ mod tests {
         let log = db.into_transaction_log();
         assert_eq!(
             log.len(),
-            2,
-            "The database received only two queries. Both queries looked up the cached path before and after the upload turn. Project uploads name the project as the producer and don't query the cache. The queries are {log:?}."
+            3,
+            "The database received three queries. The first was a check of the storage limit for the session. Two lookups of cached paths followed, one before the upload turn and one after. A project upload can specify the project as producer and doesn't query the cache. The queries are {log:?}."
         );
     }
 
@@ -480,7 +546,7 @@ mod tests {
             file_hash: "sha256-x".into(),
             ..Default::default()
         };
-        let db = mock_db()
+        let db = mock_database_with_no_project_cache_subscriptions()
             .append_query_results([vec![existing.clone()], vec![existing]])
             .into_connection();
         let session = session(db.clone(), mask_from(&[Permission::TriggerEvaluation])).await;
@@ -492,7 +558,11 @@ mod tests {
 
         assert!(e.to_string().contains("NAR hash"), "{e}");
         let log = db.into_transaction_log();
-        assert_eq!(log.len(), 2, "Two lookups only, no signatures: {log:?}");
+        assert_eq!(
+            log.len(),
+            3,
+            "No signature. Only a check of the storage limit and two reads: {log:?}"
+        );
     }
 
     #[tokio::test]
@@ -505,7 +575,7 @@ mod tests {
             file_hash: "sha256-x".into(),
             ..Default::default()
         };
-        let db = mock_db()
+        let db = mock_database_with_no_project_cache_subscriptions()
             .append_query_results([vec![existing.clone()], vec![existing]])
             .append_query_results([
                 Vec::<std::collections::BTreeMap<String, sea_orm::Value>>::new(),
@@ -551,7 +621,7 @@ mod tests {
             server_computed_hashes_and_sizes: true,
             ..Default::default()
         };
-        let db = mock_db()
+        let db = mock_database_with_no_project_cache_subscriptions()
             .append_query_results([Vec::new(), vec![stored_by_holder]])
             .into_connection();
         let session = session(db, mask_from(&[Permission::TriggerEvaluation])).await;
@@ -605,7 +675,7 @@ mod tests {
             server_computed_hashes_and_sizes: true,
             ..Default::default()
         };
-        let db = mock_db()
+        let db = mock_database_with_no_project_cache_subscriptions()
             .append_query_results([vec![existing.clone()], vec![existing]])
             .into_connection();
         let upload_admission = UploadAdmission::new(Limits {
@@ -654,7 +724,11 @@ mod tests {
             "The other upload is still the only upload in flight."
         );
         let log = db.into_transaction_log();
-        assert_eq!(log.len(), 2, "Two lookups only, no signatures: {log:?}");
+        assert_eq!(
+            log.len(),
+            3,
+            "No signature. Only a check of the storage limit and two reads: {log:?}"
+        );
     }
 
     const OTHER_ORIGINAL_HASH: &str = "abcdfghijklmnpqrsvwxyz0123456789";
@@ -725,7 +799,7 @@ mod tests {
     }
 
     fn mock_database_with_no_cached_path_and_no_producer_cache() -> DatabaseConnection {
-        mock_db()
+        mock_database_with_no_project_cache_subscriptions()
             .append_query_results([Vec::<MCachedPath>::new(), Vec::new()])
             .append_query_results([
                 Vec::<std::collections::BTreeMap<String, sea_orm::Value>>::new(),
@@ -736,7 +810,7 @@ mod tests {
     #[tokio::test]
     async fn an_ssh_upload_with_a_claimed_reference_that_does_not_occur_in_the_nar_is_rejected_before_any_store_or_record()
      {
-        let db = mock_db()
+        let db = mock_database_with_no_project_cache_subscriptions()
             .append_query_results([Vec::<MCachedPath>::new(), Vec::new()])
             .into_connection();
         let session = session(db.clone(), mask_from(&[Permission::TriggerEvaluation])).await;
@@ -764,7 +838,11 @@ mod tests {
             0
         );
         let log = db.into_transaction_log();
-        assert_eq!(log.len(), 2, "Only two lookups, no records: {log:?}");
+        assert_eq!(
+            log.len(),
+            3,
+            "No records with only a check of the storage limit and two lookups: {log:?}"
+        );
     }
 
     #[tokio::test]
@@ -858,7 +936,11 @@ mod tests {
             0
         );
         let log = db.into_transaction_log();
-        assert_eq!(log.len(), 2, "Only two lookups, no records: {log:?}");
+        assert_eq!(
+            log.len(),
+            3,
+            "No records with only a check of the storage limit and two lookups: {log:?}"
+        );
     }
 
     fn test_derivation_with_changed_system_and_real_paths() -> (Vec<u8>, String, String) {
@@ -875,7 +957,7 @@ mod tests {
     #[tokio::test]
     async fn ssh_upload_rejects_drv_with_altered_text_stating_original_content_address_and_stores_nothing()
      {
-        let db = mock_db()
+        let db = mock_database_with_no_project_cache_subscriptions()
             .append_query_results([Vec::<MCachedPath>::new(), Vec::new()])
             .into_connection();
         let session = session(db.clone(), mask_from(&[Permission::TriggerEvaluation])).await;
@@ -905,7 +987,7 @@ mod tests {
     #[tokio::test]
     async fn test_ssh_upload_rejects_drv_without_content_address_when_path_does_not_follow_from_text()
      {
-        let db = mock_db()
+        let db = mock_database_with_no_project_cache_subscriptions()
             .append_query_results([Vec::<MCachedPath>::new(), Vec::new()])
             .into_connection();
         let session = session(db.clone(), mask_from(&[Permission::TriggerEvaluation])).await;
@@ -929,7 +1011,7 @@ mod tests {
     #[tokio::test]
     async fn ssh_upload_rejects_fixed_output_path_with_mismatched_content_address_hash_and_stores_nothing()
      {
-        let db = mock_db()
+        let db = mock_database_with_no_project_cache_subscriptions()
             .append_query_results([Vec::<MCachedPath>::new(), Vec::new()])
             .into_connection();
         let session = session(db.clone(), mask_from(&[Permission::TriggerEvaluation])).await;

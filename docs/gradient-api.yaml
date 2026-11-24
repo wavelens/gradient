@@ -4441,6 +4441,8 @@ paths:
         The bundled reverse proxy additionally caps each request body at 100 MiB,
         so NARs above that must use the chunked endpoints
         (`PUT .../nars/{hash}/chunk` + `POST .../nars/{hash}/finalize`).
+
+        Declared `file_size` plus 10 MiB over free storage on the cache or instance -> 409 upload rejection from the server.
       operationId: uploadCacheNar
       parameters:
       - name: cache
@@ -4635,6 +4637,8 @@ paths:
         bytes already staged. The response's `received` is authoritative: the
         client sets its next offset to it (resending if it did not advance) and
         calls `POST .../finalize` once `received` equals the NAR size.
+
+        The chunk with `offset == 0` can start an upload. The API can return 409 when free storage on the cache or instance is under 10 MiB. Only the first chunk is subject to the check, so later chunks of an upload in progress can complete. Calls to `POST .../finalize` compare the declared `file_size` with free storage again.
       operationId: uploadCacheNarChunk
       parameters:
       - name: cache
@@ -4688,6 +4692,8 @@ paths:
         Validates the fully staged NAR against its narinfo (the staged byte
         length must equal `file_size`), imports it exactly like the single-shot
         upload, and drops the `.partial`. Requires `writeStore`.
+
+        Finalize requests fail with 409 when the declared `file_size` plus 10 MiB go over free storage of the cache or the instance.
       operationId: finalizeCacheNarUpload
       parameters:
       - name: cache

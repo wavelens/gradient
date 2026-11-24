@@ -7,6 +7,7 @@
 use crate::gateway_user::GatewayTarget;
 use gradient_core::ServerState;
 use gradient_db::DbContext;
+use gradient_db::caches::capacity::FreeBytesForUploads;
 use gradient_graph::Graph;
 use gradient_scheduler::Scheduler;
 use gradient_storage::admission::UploadAdmission;
@@ -49,6 +50,7 @@ pub struct Session {
     pub closed: CancellationToken,
     pub target: Option<GatewayTarget>,
     pub allows_project_credentials_and_privileged_actions: bool,
+    pub upload_storage: tokio::sync::Mutex<FreeBytesForUploads>,
 }
 
 impl Session {
@@ -71,6 +73,7 @@ impl Session {
             mapper,
             target: None,
             allows_project_credentials_and_privileged_actions,
+            upload_storage: Default::default(),
         })
     }
 

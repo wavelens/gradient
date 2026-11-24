@@ -50,7 +50,7 @@ Public projects and caches also appear in lists of projects and caches, search, 
 |---|---|
 | Priority | Advertised to Nix clients in `nix-cache-info`. Lower values win, default `10` |
 | Local Priority | Priority for clients from `services.gradient.http.localIps`. Empty: same as **Priority** |
-| Max Storage (GB) | New evaluations wait while all writable caches for the project are below 10 MiB. A path counts toward every cache that holds it and leaves a cache's usage once that cache has not fetched it for `gc.narTtlHours`. `0` is unlimited. This field's value for the instance-wide limit `cache.maxStorageGb` is **Instance limit**. |
+| Max Storage (GB) | New evaluations wait while all writable caches in the project have less than 10 MiB free. Uploads from a build, ssh-ng, gRPC, or the API fail when free space in the cache is below the upload size plus 10 MiB. Only stored NAR files count. Paths count against all caches with the path. Caches drop a path from usage after `gc.narTtlHours` without a fetch of that path. `0` is unlimited. The value of this field relative to the instance-wide limit `cache.maxStorageGb` is **Instance limit**. |
 | Pull-Through | Nix clients receive paths from the [upstream caches](../concepts/caches.md#pull-through) through the cache. Unchecked: only paths the cache holds |
 | Visibility | Public caches hand out paths without credentials |
 | Signing Key | Current public keys and their start dates, plus retired keys. Use **Rotate Key** to make a new key pair. See [Signing Key](../concepts/caches.md#signing-key). |

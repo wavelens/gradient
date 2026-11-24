@@ -214,6 +214,79 @@ async fn cache_admin_can_reactivate_disabled_cache() {
 }
 
 #[tokio::test]
+async fn cache_upload_free_storage_checks_single_shot_and_finalize_with_10_mib_reserve_and_first_chunk_only_below_10_mib()
+ {
+    const HEADROOM: i64 = 10 * 1024 * 1024;
+    let hash = "a".repeat(32);
+    let cache_path = format!("/api/v1/caches/{}/nars", cache().name);
+    let narinfo = serde_json::json!({
+        "store_path": format!("/nix/store/{hash}-hello"),
+        "file_hash": format!("sha256:{}", "b".repeat(52)),
+        "file_size": 3,
+        "nar_size": 3,
+        "nar_hash": format!("sha256:{}", "c".repeat(52)),
+    });
+    for (route, free, refused) in [
+        ("nars", HEADROOM + 2, true),
+        ("finalize", HEADROOM + 2, true),
+        ("chunk?offset=0", HEADROOM - 1, true),
+        ("chunk?offset=0", HEADROOM + 2, false),
+        ("chunk?offset=3", HEADROOM - 1, false),
+    ] {
+        let base = tempfile::TempDir::new().unwrap();
+        let base_dir = base.path().to_path_buf();
+        let (db, auth) = signed_in();
+        let db = db
+            .append_query_results([vec![cache::Model {
+                max_storage_gb: 1,
+                ..cache()
+            }]])
+            .append_query_results([vec![cache_member(BASE_CACHE_ROLE_ADMIN_ID)]])
+            .append_query_results([vec![cache_admin_role()]])
+            .append_query_results([[std::collections::BTreeMap::from([(
+                "total".to_owned(),
+                sea_orm::Value::BigInt(Some(1024 * 1024 * 1024 - free)),
+            )])]]);
+        let server = TestState::new()
+            .web_db(db.into_connection())
+            .config(move |config| config.server.base_dir = base_dir)
+            .server();
+        let request = match route {
+            "nars" => server.post(&cache_path).multipart(
+                MultipartForm::new()
+                    .add_part("narinfo", Part::text(narinfo.to_string()))
+                    .add_part("nar", Part::bytes(vec![1u8, 2, 3])),
+            ),
+            "finalize" => server
+                .post(&format!("{cache_path}/{hash}/finalize"))
+                .json(&narinfo),
+            chunk => server
+                .put(&format!("{cache_path}/{hash}/{chunk}"))
+                .bytes(vec![1u8, 2, 3].into()),
+        };
+
+        let response = request.add_header("authorization", auth).await;
+
+        if refused {
+            response.assert_status(StatusCode::CONFLICT);
+            let body: serde_json::Value = serde_json::from_slice(response.as_bytes()).unwrap();
+            assert_eq!(body["code"], "conflict", "{route}: {body}");
+            let message = body["message"].as_str().unwrap_or_default();
+            assert!(message.contains(&cache().name), "{route}: {message}");
+            let partial_dir = base.path().join("nar-upload-partial");
+            assert!(
+                std::fs::read_dir(&partial_dir)
+                    .map(|entries| entries.count() == 0)
+                    .unwrap_or(true),
+                "{route}"
+            );
+        } else {
+            response.assert_status_ok();
+        }
+    }
+}
+
+#[tokio::test]
 async fn upload_unauthenticated_returns_403() {
     let state = public_cache_empty_nars().await;
     let server = TestServer::new(create_router(Arc::clone(&state)).expect("router"));
