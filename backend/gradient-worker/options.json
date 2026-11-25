@@ -318,9 +318,9 @@
     "field": "max_connections",
     "flag": "nix-daemon-max-connections",
     "env": "GRADIENT_WORKER_NIX_DAEMON_MAX_CONNECTIONS",
-    "type": "NonZeroUsize",
-    "description": "Maximum connections to the local Nix daemon. Each build holds one for its whole run\nplus up to 8 for parallel NAR imports. The rest is headroom for path checks.",
-    "default": "32",
+    "type": "Option<NonZeroUsize>",
+    "description": "Maximum number of connections to the local Nix daemon. The value for an unset option is\n9 x {option}`services.gradient.worker.build.maxConcurrent` + 16 if\n{option}`services.gradient.worker.capabilities.build` is on and 16 otherwise. A build can\nkeep one connection open for the whole run and open up to 8 more for parallel NAR imports.\nShort path lookups use up to 32 connections at once. The idle connections in the pool set\nthe upper limit.",
+    "default": null,
     "values": []
   },
   {

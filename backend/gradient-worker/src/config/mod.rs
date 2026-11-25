@@ -102,6 +102,17 @@ impl WorkerConfig {
             .unwrap_or_else(gradient_eval::pool::default_workers)
     }
 
+    pub fn nix_daemon_max_connections(&self) -> NonZeroUsize {
+        self.nix_daemon.max_connections.unwrap_or_else(|| {
+            let builds = if self.capabilities.build {
+                self.build.max_concurrent.get() as usize
+            } else {
+                0
+            };
+            NonZeroUsize::new(builds * 9 + 16).expect("The sum of 16 and the product is not zero.")
+        })
+    }
+
     /// The two memory guards are alternatives, not layers: a free-RAM margin or a ceiling on the
     /// resident memory of the whole pool.
     pub fn memory_guard(&self) -> anyhow::Result<MemoryGuard> {
@@ -689,5 +700,24 @@ mod tests {
             config.memory_guard().expect("the margin"),
             MemoryGuard::MinFreeRam(512 * 1024 * 1024)
         );
+    }
+
+    #[test]
+    fn daemon_connection_pool_size_is_16_when_builds_disabled_and_unconfigured() {
+        let mut config = parse(&["--build-max-concurrent", "32"]).expect("defaults");
+        config.capabilities.build = false;
+        assert_eq!(config.nix_daemon_max_connections().get(), 16);
+    }
+
+    #[test]
+    fn daemon_connection_pool_size_is_build_limit_plus_16_unless_configured() {
+        let mut config = parse(&["--build-max-concurrent", "32"]).expect("defaults");
+        assert!(config.capabilities.build);
+        assert_eq!(config.nix_daemon_max_connections().get(), 304);
+
+        config.nix_daemon.max_connections = NonZeroUsize::new(40);
+        assert_eq!(config.nix_daemon_max_connections().get(), 40);
+        config.capabilities.build = false;
+        assert_eq!(config.nix_daemon_max_connections().get(), 40);
     }
 }

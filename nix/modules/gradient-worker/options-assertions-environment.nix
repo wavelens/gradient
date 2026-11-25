@@ -48,7 +48,6 @@
       [ "guestSupervisor" ]
       [ "system" "architectures" ]
       [ "system" "features" ]
-      [ "nixDaemon" "maxConnections" ]
       [ "nar" "chunkBytes" ]
       [ "log" "level" "default" ]
       [ "log" "level" "eval" ]
@@ -168,16 +167,6 @@ in {
           `recursive-nix`.
         '';
       };
-    };
-
-    nixDaemon.maxConnections = lib.mkOption {
-      type = lib.types.ints.positive;
-      default = cfg.build.maxConcurrent * 9 + 16;
-      defaultText = lib.literalExpression "config.services.gradient.worker.build.maxConcurrent * 9 + 16";
-      description = ''
-        Maximum connections to the local Nix daemon. Each build holds one for its whole run
-        plus up to 8 for parallel NAR imports. The rest is headroom for path checks.
-      '';
     };
 
     nar.chunkBytes = lib.mkOption {
