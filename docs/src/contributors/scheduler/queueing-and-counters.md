@@ -100,7 +100,7 @@ Follow each call with a `settle_need` call.
 
 - **Status transitions:** each entry into and exit from `BUILDS_ONCE_WANTED`, plus every move into `Aborted`, trigger the transition-effects emitter (`status/effects.rs`). An aborted job mark can change what an entry point wants. Retries leave `Aborted` inside `BUILDS_ONCE_WANTED` and call `update_and_settle_need` directly.
 - **Unchanged status:** `update_and_settle_need`, for events that move the needs-build mark without a status change.
-    - Batch import (new builder, new entry point, adopted runtime dependencies, upstream hit, probe answer)
+    - Batch import (new builder, new entry point, adopted runtime dependencies, upstream hit)
     - `demote_cached_output` and `lost_fetchability`
     - An exhausted substitution
     - New runtime dependencies from a NAR
@@ -124,6 +124,7 @@ Apply each needs-build move in `can_start::settle_need` in a fixed order.
 - Call `status::release_evaluation_need` to update the need below the entry points of an aborted evaluation, inside the abort transition. Every abort sends it: hard aborts after aborting the unshared builds, soft aborts and the stuck-evaluation recovery without touching builds.
 - `update_need` and `settle_need` are crate-private. Other crates call `update_and_settle_need` and every needs-build move can skip and thaw inline. The consistency check's `settle_skipped` acts as the table-wide backstop and reports `skipped_moves`.
 - The batch writer can call `gain_and_settle_need` instead. Its region walk will not enter a shared build already wanted. Its naming walk (`adopt_unnamed_below`) will stop at a shared build the evaluation already named. Both walks then cost about the batch's own rows, not the whole closure.
+- Probe responses (`mark_probed`) call `gain_and_update_and_settle_need`. Misses take `gain_need` because misses only add the mark below the build. Builds that become newly available in the cache take `update_need` because they can drop the mark. Both walks end with one `settle_need` call.
 - Writers of `Created` call `can_start::settle_created` on the rows they wrote. Unwanted rows go to `Skipped`, startable rows to `Queued`. The retire step, the batch writer, the thaws and the retries count as such writers.
 
 ## Evaluation Verdict

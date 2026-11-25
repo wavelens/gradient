@@ -18,6 +18,7 @@ use gradient_entity::build::BuildStatus;
 use gradient_entity::evaluation::EvaluationStatus;
 use gradient_types::DerivationId;
 use sea_orm::{ConnectionTrait, DatabaseTransaction, DbErr, QueryResult, TransactionTrait};
+use std::collections::HashSet;
 use std::sync::LazyLock;
 
 const IN_CANDIDATES: &str = "db.derivation = ANY($1::uuid[]) AND ";
@@ -535,6 +536,42 @@ where
 {
     let moved = gain_need(db, roots).await?;
     let changes = settle_batch_need(db, roots, &moved).await?;
+
+    Ok(SettledNeed { moved, changes })
+}
+
+pub async fn gain_and_update_and_settle_need<C>(
+    db: &C,
+    misses: &[DerivationId],
+    hits: &[DerivationId],
+) -> Result<SettledNeed, DbErr>
+where
+    C: ConnectionTrait + TransactionTrait<Transaction = DatabaseTransaction>,
+{
+    let updated = update_need(db, hits).await?;
+    let gained = gain_need(db, misses).await?;
+    let lost: HashSet<DerivationId> = updated.lost.iter().copied().collect();
+    let lost_then_gained: HashSet<DerivationId> = gained
+        .gained
+        .iter()
+        .filter(|d| lost.contains(d))
+        .copied()
+        .collect();
+    let moved = NeedMoved {
+        gained: updated
+            .gained
+            .into_iter()
+            .chain(gained.gained)
+            .filter(|d| !lost_then_gained.contains(d))
+            .collect(),
+        lost: updated
+            .lost
+            .into_iter()
+            .chain(gained.lost)
+            .filter(|d| !lost_then_gained.contains(d))
+            .collect(),
+    };
+    let changes = settle_need(db, &moved).await?;
 
     Ok(SettledNeed { moved, changes })
 }

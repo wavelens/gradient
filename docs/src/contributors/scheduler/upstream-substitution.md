@@ -70,6 +70,7 @@ A miss count as final only after every upstream cache answered with `404` or wit
 - **Needs build:** update the mark for touched shared builds and for builds newly available in a cache. Send the newly needed set back to the probe.
 
 `mark_probed` must set `probed = true` (`MARK_PROBED`) and update the needs-build marks. On a miss, the shared build remains a real build and from then on needs its build inputs.
+Misses follow the gain walk (`gain_need`). Builds that are newly available in the cache follow the full walk (`update_need`). Requested builds that already missed in an earlier probe still go through the substitution check. Our cache can now hold the needed outputs.
 
 ## Upstream Selection
 

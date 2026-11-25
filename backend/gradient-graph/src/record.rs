@@ -1651,6 +1651,7 @@ pub(crate) async fn mark_probed(
 
     let newly_cache_available =
         substitute_with_inputs(ctx, shared_builds, Found::HeldBeforeTheProbe).await?;
+    let hits: HashSet<DerivationId> = newly_cache_available.iter().copied().collect();
     answered.extend_from_slice(&newly_cache_available);
     answered.sort_unstable();
     answered.dedup();
@@ -1658,9 +1659,15 @@ pub(crate) async fn mark_probed(
     let mut changes = Vec::new();
     let mut gained_need = Vec::new();
     for chunk in answered.chunks(gradient_db::IN_CHUNK_SIZE) {
-        let settled = gradient_db::graph::can_start::update_and_settle_need(db, chunk)
-            .await
-            .context("settle what an answered shared build needs built")?;
+        let (chunk_hits, chunk_misses): (Vec<DerivationId>, Vec<DerivationId>) =
+            chunk.iter().partition(|d| hits.contains(d));
+        let settled = gradient_db::graph::can_start::gain_and_update_and_settle_need(
+            db,
+            &chunk_misses,
+            &chunk_hits,
+        )
+        .await
+        .context("settle what an answered shared build needs built")?;
         changes.extend(settled.changes);
         gained_need.extend_from_slice(&settled.moved.gained);
         changes.extend(
