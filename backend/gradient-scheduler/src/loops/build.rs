@@ -423,28 +423,21 @@ impl BuildAssignMaps {
                 map
             };
 
-        let consuming_derivation_dependency_output_hash_pairs_for_content_variant_size_lookup: Vec<
-            (DerivationId, String),
-        > = deps_by_drv
-            .iter()
-            .flat_map(|(drv_id, dep_drvs)| {
-                dep_drvs
-                    .iter()
-                    .filter_map(|dep_id| outputs_by_drv.get(dep_id))
-                    .flatten()
-                    .filter_map(move |o| Some((*drv_id, o.hash.clone()?)))
-            })
+        let direct_dependency_output_store_path_hashes: Vec<String> = outputs_by_drv
+            .values()
+            .flatten()
+            .filter_map(|o| o.hash.clone())
             .collect::<HashSet<_>>()
             .into_iter()
             .collect();
 
-        let trusted_cache_info_by_consuming_derivation_and_dependency_output_hash: HashMap<(DerivationId, String), CacheInfo> =
-            gradient_db::store_path_content_variant_reader_choice::find_best_ranked_stored_copy_in_any_cache_by_derivation_id_and_store_path_hash(db, &consuming_derivation_dependency_output_hash_pairs_for_content_variant_size_lookup)
+        let dependency_output_hash_to_best_ranked_cache_copy_file_and_nar_sizes: HashMap<String, CacheInfo> =
+            gradient_db::store_path_content_variant_reader_choice::get_best_ranked_stored_copy_in_any_cache_for_each_store_path_hash(db, &direct_dependency_output_store_path_hashes)
                 .await?
                 .into_iter()
-                .map(|(consumer, cp)| {
+                .map(|(hash, cp)| {
                     (
-                        consumer,
+                        hash,
                         CacheInfo {
                             file_size: cp.file_size.unwrap_or(0) as u64,
                             nar_size: cp.nar_size as u64,
@@ -472,8 +465,8 @@ impl BuildAssignMaps {
                         .hash
                         .as_ref()
                         .and_then(|h| {
-                            trusted_cache_info_by_consuming_derivation_and_dependency_output_hash
-                                .get(&(*drv_id, h.clone()))
+                            dependency_output_hash_to_best_ranked_cache_copy_file_and_nar_sizes
+                                .get(h)
                         })
                         .cloned();
                     paths.push(RequiredPath {
