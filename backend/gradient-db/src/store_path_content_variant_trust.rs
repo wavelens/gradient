@@ -2828,11 +2828,19 @@ ORDER BY selected_content_variant_for_signing.cache, selected_content_variant_fo
     async fn build_database_with_project_signing_cache_and_cached_paths(
         paths: &[(String, Vec<String>)],
     ) -> TestDatabaseWithProjectIdAndCacheId {
-        let cache = CacheId::now_v7();
-        let mut builder = shape()
-            .evaluation(EvaluationId::now_v7())
-            .into_cache(cache)
-            .keyed("signing-key");
+        build_database_with_project_signing_caches_and_cached_paths(&[CacheId::now_v7()], paths)
+            .await
+    }
+
+    async fn build_database_with_project_signing_caches_and_cached_paths(
+        caches: &[CacheId],
+        paths: &[(String, Vec<String>)],
+    ) -> TestDatabaseWithProjectIdAndCacheId {
+        let cache = caches[0];
+        let mut builder = shape().evaluation(EvaluationId::now_v7());
+        for signing_cache_id in caches {
+            builder = builder.into_cache(*signing_cache_id).keyed("signing-key");
+        }
         for (hash, references) in paths {
             let references: Vec<(&str, &str)> = references
                 .iter()
@@ -2920,14 +2928,19 @@ ORDER BY selected_content_variant_for_signing.cache, selected_content_variant_fo
     async fn read_sorted_cached_path_signature_store_path_reference_claims_for_cache(
         fixture: &TestDatabaseWithProjectIdAndCacheId,
     ) -> Vec<(String, bool)> {
-        fixture
-            .db
-            .texts(&format!(
-                "SELECT concat_ws('|', store_path_hash, reference_closure_established_at_cache_deletion_count IS NOT NULL) \
-                 FROM cached_path_signature WHERE cache = '{}' ORDER BY 1",
-                fixture.cache
-            ))
+        read_sorted_cached_path_signature_store_path_has_mark_for_cache(&fixture.db, fixture.cache)
             .await
+    }
+
+    async fn read_sorted_cached_path_signature_store_path_has_mark_for_cache(
+        db: &TestDatabase,
+        cache: CacheId,
+    ) -> Vec<(String, bool)> {
+        db.texts(&format!(
+            "SELECT concat_ws('|', store_path_hash, reference_closure_established_at_cache_deletion_count IS NOT NULL) \
+             FROM cached_path_signature WHERE cache = '{cache}' ORDER BY 1"
+        ))
+        .await
             .into_iter()
             .filter_map(|row| {
                 row.split_once('|')
@@ -3179,6 +3192,254 @@ ORDER BY selected_content_variant_for_signing.cache, selected_content_variant_fo
                 (0, 0.0)
             ),
             "The first push of A inserted rows for A, B and C. Deleting the row for C raised the cache deletion count. A push of N with a reference to A then walked A and B again and recreated the row for C. The push then set reference_closure_established_at_cache_deletion_count on all rows. The next identical push walked nothing."
+        );
+    }
+
+    #[tokio::test]
+    async fn deleting_x_cached_path_signature_in_cache_one_clears_reference_closure_marks_for_a_and_b_only_and_repush_walk_stops_at_y()
+     {
+        let [
+            top,
+            middle,
+            leaf,
+            store_path_hash_referenced_directly_by_top,
+            referenced_store_path_hash,
+        ] = ["a", "b", "c", "d", "f"].map(|c| c.repeat(32));
+        let signing_cache_id_that_keeps_marks_when_first_cache_row_is_deleted = CacheId::now_v7();
+        let fixture = build_database_with_project_signing_caches_and_cached_paths(
+            &[
+                CacheId::now_v7(),
+                signing_cache_id_that_keeps_marks_when_first_cache_row_is_deleted,
+            ],
+            &[
+                (
+                    top.clone(),
+                    vec![
+                        middle.clone(),
+                        store_path_hash_referenced_directly_by_top.clone(),
+                    ],
+                ),
+                (middle.clone(), vec![leaf.clone()]),
+                (leaf.clone(), vec![]),
+                (
+                    store_path_hash_referenced_directly_by_top.clone(),
+                    vec![referenced_store_path_hash.clone()],
+                ),
+                (referenced_store_path_hash.clone(), vec![]),
+            ],
+        )
+        .await;
+        let (first_inserted, _) =
+            explain_push_placeholder_insert_row_and_claim_cte_counts_for_project_store_path_hashes(
+                &fixture,
+                &[&top],
+            )
+            .await;
+        fixture
+            .db
+            .execute(&format!(
+                "DELETE FROM cached_path_signature WHERE store_path_hash = '{leaf}' AND cache = '{}'",
+                fixture.cache
+            ))
+            .await;
+        let first_cache_row_marks_after_delete =
+            read_sorted_cached_path_signature_store_path_reference_claims_for_cache(&fixture).await;
+        let second_cache_row_marks_after_first_cache_delete =
+            read_sorted_cached_path_signature_store_path_has_mark_for_cache(
+                &fixture.db,
+                signing_cache_id_that_keeps_marks_when_first_cache_row_is_deleted,
+            )
+            .await;
+        let repush_after_delete_inserted_rows_and_claim_cte_rows_walked =
+            explain_push_placeholder_insert_row_and_claim_cte_counts_for_project_store_path_hashes(
+                &fixture,
+                &[&top],
+            )
+            .await;
+        let first_cache_row_marks_after_repush_of_a =
+            read_sorted_cached_path_signature_store_path_reference_claims_for_cache(&fixture).await;
+        fixture.db.finish().await;
+        let fully_marked_cache_expected_store_path_hash_marks = vec![
+            (top.clone(), true),
+            (middle.clone(), true),
+            (leaf, true),
+            (store_path_hash_referenced_directly_by_top.clone(), true),
+            (referenced_store_path_hash.clone(), true),
+        ];
+        assert_eq!(
+            (
+                first_inserted,
+                first_cache_row_marks_after_delete,
+                second_cache_row_marks_after_first_cache_delete,
+                repush_after_delete_inserted_rows_and_claim_cte_rows_walked,
+                first_cache_row_marks_after_repush_of_a
+            ),
+            (
+                10,
+                vec![
+                    (top, false),
+                    (middle, false),
+                    (store_path_hash_referenced_directly_by_top, true),
+                    (referenced_store_path_hash, true)
+                ],
+                fully_marked_cache_expected_store_path_hash_marks.clone(),
+                (1, 4.0),
+                fully_marked_cache_expected_store_path_hash_marks
+            ),
+            "The deletion of the X row in cache 1 cleared the marks on A and B. Y and Z kept their marks. Every row in cache 2 kept its mark. The next push of A recreated the X row. That push visited A, B, X and Y, but not Z below the marked Y. That push marked every row in cache 1."
+        );
+    }
+
+    async fn wait_until_other_session_waits_on_lock_then_commit_transaction(
+        db: &TestDatabase,
+        transaction: sea_orm::DatabaseTransaction,
+    ) {
+        let lock_waits = format!(
+            "SELECT wait_event_type FROM pg_stat_activity WHERE datname = '{}' AND wait_event_type = 'Lock'",
+            db.name()
+        );
+        let mut polls = 0;
+        while db.texts(&lock_waits).await.is_empty() {
+            polls += 1;
+            assert!(
+                polls < 200,
+                "The second statement didn't wait for the lock that the first uncommitted transaction held."
+            );
+            tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+        }
+        transaction
+            .commit()
+            .await
+            .expect("Commit the first transaction.");
+    }
+
+    const TWO_CONNECTION_CONCURRENCY_TEST_TIMEOUT: std::time::Duration =
+        std::time::Duration::from_secs(30);
+
+    #[tokio::test]
+    async fn test_placeholder_insert_waiting_for_cache_deletion_commit_writes_null_marks() {
+        use sea_orm::TransactionTrait;
+
+        let [top, middle, unrelated] = ["a", "b", "c"].map(|c| c.repeat(32));
+        let fixture = build_database_with_project_signing_cache_and_cached_paths(&[
+            (top.clone(), vec![middle.clone()]),
+            (middle.clone(), vec![]),
+            (unrelated.clone(), vec![]),
+        ])
+        .await;
+        explain_push_placeholder_insert_row_and_claim_cte_counts_for_project_store_path_hashes(
+            &fixture,
+            &[&unrelated],
+        )
+        .await;
+        let connection = fixture.db.connection();
+        let transaction_holding_cache_deletion_count_lock_after_deleting_cached_path_signature =
+            connection
+                .begin()
+                .await
+                .expect("Begin the first transaction");
+        transaction_holding_cache_deletion_count_lock_after_deleting_cached_path_signature
+            .execute_unprepared(&format!(
+                "DELETE FROM cached_path_signature WHERE store_path_hash = '{unrelated}'"
+            ))
+            .await
+            .expect("Delete that row in the first transaction.");
+
+        let (placeholder_insert_while_delete_transaction_open_result, ()) = tokio::time::timeout(
+            TWO_CONNECTION_CONCURRENCY_TEST_TIMEOUT,
+            async {
+                tokio::join!(
+                    insert_unsigned_signature_placeholders_for_trusted_content_variants(
+                        &connection,
+                        fixture.project,
+                        std::slice::from_ref(&top),
+                    ),
+                    wait_until_other_session_waits_on_lock_then_commit_transaction(
+                        &fixture.db,
+                        transaction_holding_cache_deletion_count_lock_after_deleting_cached_path_signature,
+                    )
+                )
+            },
+        )
+        .await
+        .expect("The two statements completed before the timeout.");
+        placeholder_insert_while_delete_transaction_open_result
+            .expect("Placeholder insert statements run here.");
+
+        let cache_row_marks_after_concurrent_statements_finished =
+            read_sorted_cached_path_signature_store_path_reference_claims_for_cache(&fixture).await;
+        fixture.db.finish().await;
+        assert_eq!(
+            cache_row_marks_after_concurrent_statements_finished,
+            vec![(top, false), (middle, false)],
+            "The placeholder insert waited for an uncommitted delete. The scan began before the deletion count changed, so the insert wrote rows for A and B without marks."
+        );
+    }
+
+    #[tokio::test]
+    async fn delete_clears_marks_written_by_push_placeholder_insert_after_insert_commits() {
+        use sea_orm::TransactionTrait;
+
+        let [top, middle, leaf] = ["a", "b", "c"].map(|c| c.repeat(32));
+        let fixture = build_database_with_project_signing_cache_and_cached_paths(&[
+            (top.clone(), vec![middle.clone()]),
+            (middle.clone(), vec![leaf.clone()]),
+            (leaf.clone(), vec![]),
+        ])
+        .await;
+        explain_push_placeholder_insert_row_and_claim_cte_counts_for_project_store_path_hashes(
+            &fixture,
+            &[&leaf],
+        )
+        .await;
+        let connection = fixture.db.connection();
+        let transaction_after_push_placeholder_insert_and_marks_write = connection
+            .begin()
+            .await
+            .expect("Begin the first transaction");
+        insert_unsigned_signature_placeholders_for_trusted_content_variants(
+            &transaction_after_push_placeholder_insert_and_marks_write,
+            fixture.project,
+            std::slice::from_ref(&top),
+        )
+        .await
+        .expect("Placeholder insert statements run here.");
+        let store_path_hashes_marked_seen_in_uncommitted_push =
+            query_single_text_column_values_sorted_in_transaction(
+                &transaction_after_push_placeholder_insert_and_marks_write,
+                "SELECT store_path_hash AS row FROM cached_path_signature \
+                 WHERE reference_closure_established_at_cache_deletion_count IS NOT NULL"
+                    .to_owned(),
+                Vec::new(),
+            )
+            .await;
+        assert_eq!(
+            store_path_hashes_marked_seen_in_uncommitted_push,
+            vec![top.clone(), middle.clone(), leaf.clone()],
+            "The uncommitted placeholder insert marked A, B and X."
+        );
+
+        let delete_cached_path_signature_sql =
+            format!("DELETE FROM cached_path_signature WHERE store_path_hash = '{leaf}'");
+        tokio::time::timeout(TWO_CONNECTION_CONCURRENCY_TEST_TIMEOUT, async {
+            tokio::join!(
+                fixture.db.execute(&delete_cached_path_signature_sql),
+                wait_until_other_session_waits_on_lock_then_commit_transaction(
+                    &fixture.db,
+                    transaction_after_push_placeholder_insert_and_marks_write,
+                )
+            )
+        })
+        .await
+        .expect("The two statements completed before the timeout.");
+
+        let cache_row_marks_after_concurrent_statements_finished =
+            read_sorted_cached_path_signature_store_path_reference_claims_for_cache(&fixture).await;
+        fixture.db.finish().await;
+        assert_eq!(
+            cache_row_marks_after_concurrent_statements_finished,
+            vec![(top, false), (middle, false)],
+            "The deletion waited for an uncommitted insert of a placeholder. The insert committed. The deletion cleared the mark that the insert wrote to A and B."
         );
     }
 
