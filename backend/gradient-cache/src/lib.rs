@@ -17,6 +17,8 @@ mod eval_cache;
 #[cfg(feature = "server")]
 mod evaluations;
 #[cfg(feature = "server")]
+mod pushed_store_path_signature_placeholder_insert;
+#[cfg(feature = "server")]
 mod schedule;
 #[cfg(feature = "server")]
 mod signature_backfill_pass;

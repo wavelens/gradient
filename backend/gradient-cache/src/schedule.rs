@@ -6,6 +6,7 @@
 
 use crate::debug_index::DebugIndex;
 use crate::eval_cache::EvalCacheSweep;
+use crate::pushed_store_path_signature_placeholder_insert::PushedStorePathSignaturePlaceholderInsertPass;
 use crate::signature_backfill_pass::StartedSigningSubscriptionSignatureBackfillPass;
 use crate::signatures::{SignSweep, SignatureSweepPublishStartAndPendingWake};
 use crate::units::Step;
@@ -59,6 +60,16 @@ pub(crate) fn child_specs(state: &ServerState) -> Vec<ChildSpec> {
             period: secs(config.cache.sign_sweep_interval_secs),
             wake: Arc::clone(&state.wake.run_signature_backfill_now),
             signature_sweep_publish_round_database_context: state.db(),
+        }),
+        ChildSpec::pass(PushedStorePathSignaturePlaceholderInsertPass {
+            db: state.cache_db.clone(),
+            queued: state
+                .memory
+                .db
+                .store_path_hashes_awaiting_unsigned_signature_placeholder
+                .clone(),
+            period: secs(config.cache.sign_sweep_interval_secs),
+            wake: Arc::clone(&state.wake.run_signature_placeholder_insert_now),
         }),
         ChildSpec::pass(DebugIndex {
             db: state.worker_db.clone(),

@@ -238,6 +238,39 @@ pub async fn insert_unsigned_signature_placeholders_for_trusted_content_variants
         .rows_affected())
 }
 
+const SIGNATURE_PATH_BATCH: usize = 8000;
+
+/// A worker push can reply in milliseconds. This insert must walk the reference closure, so the insert can take minutes under load. Only one background pass can run this insert. A push reply doesn't wait for that pass. The pass can hold at most one pool connection. Pushes for the same project that arrive meanwhile merge into one deduplicated set. A burst of pushes can turn into a few statements.
+pub async fn insert_unsigned_signature_placeholders_for_queued_pushed_trusted_content_variants_by_project<
+    C: ConnectionTrait,
+>(
+    db: &C,
+    queued: &crate::AlreadyStoredPushCacheQueryStorePathHashesByProject,
+) -> u64 {
+    let mut inserted = 0;
+    for project in queued.list_projects_with_queued_store_path_hashes() {
+        let hashes: Vec<String> = queued
+            .take_queued_store_path_hashes(project)
+            .into_iter()
+            .collect();
+        for chunk in hashes.chunks(SIGNATURE_PATH_BATCH) {
+            match insert_unsigned_signature_placeholders_for_trusted_content_variants(
+                db, project, chunk,
+            )
+            .await
+            {
+                Ok(rows) => inserted += rows,
+                Err(error) => tracing::warn!(
+                    %project,
+                    %error,
+                    "Failed to insert cached_path_signature placeholder for pushed store path"
+                ),
+            }
+        }
+    }
+    inserted
+}
+
 pub async fn has_project_cache_subscription_for_stored_input_signing<C: ConnectionTrait>(
     db: &C,
 ) -> Result<bool, DbErr> {
@@ -2982,6 +3015,80 @@ ORDER BY selected_content_variant_for_signing.cache, selected_content_variant_fo
                 vec![(path, true), (reference, true)]
             ),
             "``reference_closure_established_at_cache_deletion_count`` can stay NULL for paths that don't store the reference. Pushes of that reference write one row for it on storage of the reference. Later pushes of that path set that column."
+        );
+    }
+
+    #[tokio::test]
+    async fn two_queued_pushes_for_one_project_run_one_placeholder_insert_with_merged_deduplicated_hashes()
+     {
+        use gradient_fixtures::mock::{exec_ok, mock_db, raw_statements};
+
+        let [first, second] = ["a", "b"].map(|c| c.repeat(32));
+        let queued = crate::AlreadyStoredPushCacheQueryStorePathHashesByProject::default();
+        let wake = tokio::sync::Notify::new();
+        let project = ProjectId::now_v7();
+        queued.enqueue_store_path_hashes_for_project(&wake, project, [first.clone()]);
+        queued.enqueue_store_path_hashes_for_project(
+            &wake,
+            project,
+            [first.clone(), second.clone()],
+        );
+        let db = mock_db().append_exec_results([exec_ok()]).into_connection();
+
+        let inserted =
+            insert_unsigned_signature_placeholders_for_queued_pushed_trusted_content_variants_by_project(
+                &db, &queued,
+            )
+            .await;
+
+        let statements = raw_statements(db.into_transaction_log());
+        let bound_values = format!("{:?}", statements.first().map(|s| &s.values));
+        assert_eq!(
+            (
+                inserted,
+                statements.len(),
+                bound_values.matches(&first).count(),
+                bound_values.matches(&second).count(),
+                queued.list_projects_with_queued_store_path_hashes(),
+            ),
+            (1, 1, 1, 1, Vec::new())
+        );
+    }
+
+    #[tokio::test]
+    async fn test_drain_pushed_store_path_hashes_inserts_unsigned_signature_placeholder_rows_for_every_queued_hash_and_leaves_queue_empty_with_real_database()
+     {
+        let [path, reference, unrelated] = ["j", "k", "l"].map(|c| c.repeat(32));
+        let fixture = build_database_with_project_signing_cache_and_cached_paths(&[
+            (path.clone(), vec![reference.clone()]),
+            (reference.clone(), vec![]),
+            (unrelated.clone(), vec![]),
+        ])
+        .await;
+        let queued = crate::AlreadyStoredPushCacheQueryStorePathHashesByProject::default();
+        let wake = tokio::sync::Notify::new();
+        queued.enqueue_store_path_hashes_for_project(&wake, fixture.project, [path.clone()]);
+        queued.enqueue_store_path_hashes_for_project(&wake, fixture.project, [path.clone()]);
+        let rows_before_pass =
+            read_sorted_cached_path_signature_store_path_reference_claims_for_cache(&fixture).await;
+
+        insert_unsigned_signature_placeholders_for_queued_pushed_trusted_content_variants_by_project(
+            &fixture.db.connection(),
+            &queued,
+        )
+        .await;
+
+        let rows_after_pass =
+            read_sorted_cached_path_signature_store_path_reference_claims_for_cache(&fixture).await;
+        let queue_after_pass = queued.list_projects_with_queued_store_path_hashes();
+        fixture.db.finish().await;
+        assert_eq!(
+            (rows_before_pass, rows_after_pass, queue_after_pass),
+            (
+                Vec::new(),
+                vec![(path, true), (reference, true)],
+                Vec::new()
+            )
         );
     }
 
