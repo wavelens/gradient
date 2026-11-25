@@ -73,8 +73,19 @@ static ADOPT_LIVE: LazyLock<String> = LazyLock::new(|| {
     )))
 });
 
-static ADOPT_EVAL: LazyLock<String> =
-    LazyLock::new(|| adopt_sql(&named_open("bj.evaluation = $1")));
+const ADOPTION_WALK_STOP_WHEN_EVALUATION_ALREADY_NAMES_DEPENDENCY_SQL: &str = "EXISTS (SELECT 1 FROM build_job x WHERE x.evaluation = c.evaluation AND x.derivation = e.dependency)";
+
+static ADOPT_EVAL: LazyLock<String> = LazyLock::new(|| {
+    format!(
+        "{cte} {insert}",
+        cte = open_closure_cte_until(
+            "pending",
+            &named_open("bj.evaluation = $1"),
+            ADOPTION_WALK_STOP_WHEN_EVALUATION_ALREADY_NAMES_DEPENDENCY_SQL,
+        ),
+        insert = adopt_insert(),
+    )
+});
 
 fn below_named_parents(parent_build_is_wanted: bool) -> String {
     format!(
@@ -121,8 +132,7 @@ static ADOPT_UNNAMED_BELOW: LazyLock<String> = LazyLock::new(|| {
         cte = open_closure_cte_until(
             "pending",
             &format!("{named_roots} UNION {}", below_named_parents(true)),
-            "EXISTS (SELECT 1 FROM build_job x \
-             WHERE x.evaluation = c.evaluation AND x.derivation = e.dependency)",
+            ADOPTION_WALK_STOP_WHEN_EVALUATION_ALREADY_NAMES_DEPENDENCY_SQL,
         ),
         insert = adopt_insert(),
     )
@@ -504,6 +514,13 @@ mod tests {
             "{sql}"
         );
         assert!(!sql.contains("FROM evaluation ev"), "{sql}");
+        assert!(
+            sql.contains(
+                "AND NOT (EXISTS (SELECT 1 FROM build_job x WHERE x.evaluation = c.evaluation \
+                 AND x.derivation = e.dependency)) OFFSET 0) s)"
+            ),
+            "Evaluation traversals stop at dependencies with an existing name from that evaluation. {sql}"
+        );
     }
 
     #[tokio::test]

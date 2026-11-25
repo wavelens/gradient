@@ -44,7 +44,7 @@ All steps share the transaction of the graph writer. Failures stop the pass at t
 | 1 | `promotion::requeue_failed_closure` | Resetting `FailedPermanent`, `Aborted`, `DependencyFailed`, `FailedTimeout` shared builds to `Created`, `attempt = 0` |
 | 2 | `promotion::repair_cached_shared_builds_for_eval`, then `can_start::advance_fetchable` | Shared builds with every output in the cache turn `Completed`. The counters of the builds needing them advance |
 | 3 | `promotion::repair_dependency_failed` | Failing every non-terminal shared build reachable from a lasting failure |
-| 4 | `reachability::adopt_pending_closure` | Inserting `build_job` rows for open shared builds reachable by the evaluation and named by nobody. Updating and settling the needs-build marks. Bumping `graph_version` |
+| 4 | `reachability::adopt_pending_closure` | Inserting `build_job` rows for open shared builds reachable by the evaluation and named by nobody. Updating and settling the needs-build marks. Bumping `graph_version`. Traversal can stop at a shared build that the evaluation already names, because that build can start its own traversal. |
 | 5 | `can_start::promote_closure` | Moving the closure to `Queued` |
 
 - Cache presence is the ground truth for "built" in step 2.

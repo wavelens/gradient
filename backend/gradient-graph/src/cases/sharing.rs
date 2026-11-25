@@ -4,16 +4,20 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use std::collections::BTreeSet;
+
 use gradient_entity::build::BuildStatus;
+use gradient_entity::build_job;
 use gradient_entity::derivation_dependency::EdgeKind;
 use gradient_entity::evaluation::EvaluationStatus;
 use gradient_entity::ids::EvaluationId;
 use gradient_fixtures::shape::shape;
 use gradient_wire::types::DiscoveredDerivation;
+use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 
 use super::{
-    A, A_OUT, B, B_OUT, Case, N, chain, chain_done, drv, nar, narinfo, with_attr, with_output,
-    with_references,
+    A, A_OUT, B, B_OUT, C, C_OUT, Case, D, D_OUT, N, chain, chain_done, drv, nar, narinfo,
+    with_attr, with_output, with_references,
 };
 use crate::messages::Transition;
 
@@ -259,5 +263,67 @@ async fn x05_a_later_evaluation_asks_the_probe_again_about_an_earlier_miss() {
         report.to_probe
     );
     case.zero_drift("step 1").await;
+    case.finish().await;
+}
+
+async fn delete_build_job_rows_for_derivation_paths_in_evaluation(
+    case: &Case,
+    evaluation: EvaluationId,
+    paths: &[&str],
+) {
+    build_job::Entity::delete_many()
+        .filter(build_job::Column::Evaluation.eq(evaluation))
+        .filter(build_job::Column::Derivation.is_in(case.ids(paths).await))
+        .exec(&case.db.connection())
+        .await
+        .expect("The test deleted the row from build_job.");
+}
+
+#[tokio::test]
+async fn x06_per_evaluation_adoption_names_open_shared_builds_b_and_d_when_walk_stops_at_named_c_and_c_starts_another_walk()
+ {
+    let e1 = EvaluationId::now_v7();
+    let case = Case::start(
+        shape()
+            .evaluation(e1)
+            .derivation(A)
+            .walked()
+            .entry_point("pkg.a")
+            .job()
+            .output(A_OUT)
+            .runtime_depends_on(B)
+            .derivation(B)
+            .walked()
+            .job()
+            .output(B_OUT)
+            .runtime_depends_on(C)
+            .derivation(C)
+            .walked()
+            .job()
+            .output(C_OUT)
+            .runtime_depends_on(D)
+            .derivation(D)
+            .walked()
+            .job()
+            .output(D_OUT),
+    )
+    .await;
+    delete_build_job_rows_for_derivation_paths_in_evaluation(&case, e1, &[B, D]).await;
+
+    let adopted = gradient_db::graph::reachability::adopt_pending_closure(&case.ctx.worker_db, e1)
+        .await
+        .expect("The adoption for the evaluation ran.");
+
+    let expected: BTreeSet<_> = case
+        .ids(&[B, D])
+        .await
+        .into_iter()
+        .map(|derivation| (e1, derivation))
+        .collect();
+    assert_eq!(
+        adopted.pairs.into_iter().collect::<BTreeSet<_>>(),
+        expected,
+        "After 1: adopted == [(E1, B), (E1, D)]"
+    );
     case.finish().await;
 }
