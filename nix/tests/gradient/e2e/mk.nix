@@ -2797,6 +2797,11 @@ pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
         "SELECT gen_random_uuid(), exec_job, id, 'gate', decode('00', 'hex'), started_at FROM exec_job_attempt;"
     )
     sql(
+        "INSERT INTO exec_job_metric (exec_job, attempt, sequence, received_at, window_ms, cpu_avg, cpu_max, "
+        "ram_avg_bytes, ram_max_bytes, ram_total_bytes, disk_max_bytes, disk_total_bytes) "
+        "SELECT exec_job, id, 0, started_at, 10000, 0, 0, 0, 0, 0, 0, 0 FROM exec_job_attempt;"
+    )
+    sql(
         "INSERT INTO exec_job_token (id, attempt, token_hash, project, task, expires_at, revoked, created_at) "
         "SELECT gen_random_uuid(), a.id, 'gate', t.project, t.id, a.started_at, true, a.started_at "
         "FROM exec_job_attempt a JOIN exec_job j ON j.id = a.exec_job "
