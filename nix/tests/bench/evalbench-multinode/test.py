@@ -9,6 +9,8 @@ from datetime import timedelta
 EVALUATED = {"Building", "Waiting", "Completed"}
 EVALUATION_STATUS_NAME_TO_DATABASE_VALUE = {"Building": 3, "Waiting": 4, "Completed": 5}
 EVAL_TIMEOUT = 900
+# Eval cache segment uploads add one compaction delivery to the queue, due after 15 minutes. Waiting for that delivery can leave each phase idle. Leased rows move next_attempt_at forward, so a filter on due time can skip deliveries that are still in progress.
+EVAL_CACHE_COMPACT_PENDING_DELIVERY_KIND = 7
 POSTGRES_LOG = "/var/lib/postgresql/18/log/postgresql.log"
 server_trace_directory = "/var/lib/gradient/trace"
 worker_trace_directory = "/var/lib/gradient-worker/trace"
@@ -374,6 +376,7 @@ def wait_until_delivered():
     deadline = time.monotonic() + EVAL_TIMEOUT
     while int(psql(
         "SELECT count(*) FROM pending_delivery WHERE delivered_at IS NULL AND failed_at IS NULL"
+        f" AND kind <> {EVAL_CACHE_COMPACT_PENDING_DELIVERY_KIND}"
     )):
         assert time.monotonic() < deadline, "the delivery queue of the previous run never drained"
         time.sleep(2)
