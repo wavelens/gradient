@@ -3642,6 +3642,7 @@ dependencies = [
  "gradient-wildcard",
  "gradient-wire",
  "gradient-worker-client",
+ "harmonia-daemon",
  "harmonia-file-nar",
  "harmonia-protocol",
  "harmonia-store-content-address",
