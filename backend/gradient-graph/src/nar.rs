@@ -8,6 +8,7 @@ use anyhow::Context as _;
 use gradient_db::store_path_content_variant_trust::{
     AllowedCache, caches_allowed_to_sign_committed_store_path_content_variant,
     get_project_build_output_cache_ids, get_project_sign_output_cache_ids,
+    lock_cache_deletion_counts_for_share_in_cache_id_order,
 };
 use gradient_db::{DbContext, WorkerDb};
 use gradient_entity::cached_path::join_sorted_deduplicated_references_with_spaces;
@@ -22,10 +23,10 @@ use gradient_types::*;
 use gradient_util::nix_hash::is_nix32_hash;
 use sea_orm::sea_query::{Alias, Expr, ExprTrait, LockType, OnConflict};
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, PaginatorTrait, QueryFilter,
-    QueryOrder, QuerySelect,
+    ActiveModelTrait, ColumnTrait, ConnectionTrait, EntityTrait, IntoActiveModel, PaginatorTrait,
+    QueryFilter, QueryOrder, QuerySelect, TransactionTrait,
 };
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use tracing::{debug, trace, warn};
 
 use crate::messages::{NarCommit, NarCommitContent, NarCommitted, StoredContentProducer};
@@ -741,17 +742,14 @@ async fn sign_into_caches(
             if signature.is_some() {
                 signed[i].push(cache);
             }
-            rows.push(
-                MCachedPathSignature {
-                    id: CachedPathSignatureId::now_v7(),
-                    cached_path,
-                    cache,
-                    signature,
-                    created_at: ts,
-                    ..Default::default()
-                }
-                .into_active_model(),
-            );
+            rows.push(MCachedPathSignature {
+                id: CachedPathSignatureId::now_v7(),
+                cached_path,
+                cache,
+                signature,
+                created_at: ts,
+                ..Default::default()
+            });
         }
     }
     insert_signatures(db, rows).await?;
@@ -836,13 +834,54 @@ pub(crate) async fn share_lock_caches_for_signing_and_read_signatures_of_unlocke
 
 pub(crate) async fn insert_signatures(
     db: &WorkerDb,
-    rows: Vec<ACachedPathSignature>,
+    mut rows: Vec<MCachedPathSignature>,
 ) -> anyhow::Result<()> {
     if rows.is_empty() {
         return Ok(());
     }
+    let caches_with_reference_closure_marks: Vec<CacheId> = rows
+        .iter()
+        .filter(|row| {
+            row.reference_closure_established_at_cache_deletion_count
+                .is_some()
+        })
+        .map(|row| row.cache)
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect();
+    if caches_with_reference_closure_marks.is_empty() {
+        return upsert_cached_path_signatures(db, rows).await;
+    }
 
-    ECachedPathSignature::insert_many(rows)
+    let tx = db
+        .begin()
+        .await
+        .context("Start a transaction to write the reference closure mark.")?;
+    let deletion_counts_by_cache_id = lock_cache_deletion_counts_for_share_in_cache_id_order(
+        &tx,
+        &caches_with_reference_closure_marks,
+    )
+    .await
+    .context("Lock the deletion count for caches that receive the reference closure's mark.")?;
+    for row in &mut rows {
+        if row.reference_closure_established_at_cache_deletion_count
+            != deletion_counts_by_cache_id.get(&row.cache).copied()
+        {
+            row.reference_closure_established_at_cache_deletion_count = None;
+        }
+    }
+    upsert_cached_path_signatures(&tx, rows).await?;
+    tx.commit()
+        .await
+        .context("Commit the transaction to write the mark for the reference closure.")?;
+    Ok(())
+}
+
+async fn upsert_cached_path_signatures<C: ConnectionTrait>(
+    db: &C,
+    rows: Vec<MCachedPathSignature>,
+) -> anyhow::Result<()> {
+    ECachedPathSignature::insert_many(rows.into_iter().map(IntoActiveModel::into_active_model))
         .on_conflict(
             OnConflict::columns([Alias::new("cache"), Alias::new("store_path_hash")])
                 .value(

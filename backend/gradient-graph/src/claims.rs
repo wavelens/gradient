@@ -19,7 +19,7 @@ use gradient_types::*;
 use gradient_util::nix_hash::normalize_nar_hash;
 use sea_orm::{
     AccessMode, ColumnTrait, ConnectionTrait, DatabaseTransaction, EntityTrait, FromQueryResult,
-    IntoActiveModel, QueryFilter, Statement, TransactionTrait, Value,
+    QueryFilter, Statement, TransactionTrait, Value,
 };
 use std::collections::{HashMap, HashSet};
 use std::time::{Duration, Instant};
@@ -355,18 +355,15 @@ pub(crate) async fn insert_signed_dependency_output_rows_in_graph_writer_transac
             &ctx.worker_db,
             still_publishable
                 .iter()
-                .map(|row| {
-                    MCachedPathSignature {
-                        id: CachedPathSignatureId::now_v7(),
-                        cached_path: row.cached_path,
-                        cache: row.cache,
-                        signature: row.signature.clone(),
-                        reference_closure_established_at_cache_deletion_count: row
-                            .reference_closure_established_at_cache_deletion_count,
-                        created_at,
-                        ..Default::default()
-                    }
-                    .into_active_model()
+                .map(|row| MCachedPathSignature {
+                    id: CachedPathSignatureId::now_v7(),
+                    cached_path: row.cached_path,
+                    cache: row.cache,
+                    signature: row.signature.clone(),
+                    reference_closure_established_at_cache_deletion_count: row
+                        .reference_closure_established_at_cache_deletion_count,
+                    created_at,
+                    ..Default::default()
                 })
                 .collect(),
         )
@@ -534,15 +531,7 @@ async fn insert_cached_path_signature_rows_for_claims_and_return_new_signature_c
     let newly_signed_cache_signature_row_count =
         rows.iter().filter(|row| row.signature.is_some()).count();
     for chunk in rows.chunks(INSERT_CHUNK) {
-        insert_signatures(
-            db,
-            chunk
-                .iter()
-                .cloned()
-                .map(IntoActiveModel::into_active_model)
-                .collect(),
-        )
-        .await?;
+        insert_signatures(db, chunk.to_vec()).await?;
     }
 
     Ok(newly_signed_cache_signature_row_count)
