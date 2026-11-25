@@ -195,7 +195,7 @@ pub(crate) async fn build_executor(
     config: &WorkerConfig,
     exec: Option<Arc<ExecHost>>,
 ) -> Result<JobExecutor> {
-    let store = LocalNixStore::connect(config.nix_daemon.max_connections.get())?;
+    let store = LocalNixStore::connect(config.nix_daemon_max_connections().get())?;
     let evaluator = WorkerEvaluator::new(
         config.fork_workers(),
         config.eval.max_rss.get(),

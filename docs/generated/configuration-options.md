@@ -472,7 +472,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 
 | Option | Type | Default | Env | Description |
 |---|---|---|---|---|
-| `worker.nixDaemon.maxConnections` | positive int | `worker.build.maxConcurrent * 9 + 16` | `GRADIENT_WORKER_NIX_DAEMON_MAX_CONNECTIONS` | Maximum connections to the local Nix daemon. Each build holds one for its whole run plus up to 8 for parallel NAR imports. The rest is headroom for path checks. |
+| `worker.nixDaemon.maxConnections` | null or (positive int) | `null` | `GRADIENT_WORKER_NIX_DAEMON_MAX_CONNECTIONS` | Maximum number of connections to the local Nix daemon. The value for an unset option is 9 x `worker.build.maxConcurrent` + 16 if `worker.capabilities.build` is on and 16 otherwise. A build can keep one connection open for the whole run and open up to 8 more for parallel NAR imports. Short path lookups use up to 32 connections at once. The idle connections in the pool set the upper limit. |
 
 ## `worker.packages`
 

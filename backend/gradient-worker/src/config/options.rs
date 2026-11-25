@@ -230,10 +230,13 @@ pub struct SystemArgs {
 #[config_group("nix_daemon", env = "worker_nix_daemon")]
 #[derive(Args, Debug, Clone)]
 pub struct NixDaemonArgs {
-    /// Maximum connections to the local Nix daemon. Each build holds one for its whole run
-    /// plus up to 8 for parallel NAR imports. The rest is headroom for path checks.
-    #[arg(default_value = "32")]
-    pub max_connections: NonZeroUsize,
+    /// Maximum number of connections to the local Nix daemon. The value for an unset option is
+    /// 9 x {option}`services.gradient.worker.build.maxConcurrent` + 16 if
+    /// {option}`services.gradient.worker.capabilities.build` is on and 16 otherwise. A build can
+    /// keep one connection open for the whole run and open up to 8 more for parallel NAR imports.
+    /// Short path lookups use up to 32 connections at once. The idle connections in the pool set
+    /// the upper limit.
+    pub max_connections: Option<NonZeroUsize>,
 }
 
 #[config_group("eval", env = "worker_eval")]
