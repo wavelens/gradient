@@ -7,7 +7,7 @@
 use crate::graph::walks::{ClosureDirection, dependency_closure_cte};
 use crate::store_path_content_variant_reader_choice::{
     StorePathContentVariantReader,
-    find_best_ranked_stored_copy_in_any_cache_by_derivation_id_and_store_path_hash,
+    get_best_ranked_stored_copy_in_any_cache_for_each_store_path_hash,
     get_trusted_content_variant_for_each_store_path_hash_for_project_shared_build_or_binary_cache,
 };
 use sea_orm::{
@@ -110,37 +110,61 @@ pub async fn output_sizes_by_drv<C: ConnectionTrait>(
     drv_ids: &[DerivationId],
 ) -> Result<HashMap<DerivationId, i64>, DbErr> {
     let outputs = load_derivation_outputs_for_derivation_ids_in_chunks(db, drv_ids).await?;
+    let copies =
+        get_trusted_content_variant_for_each_store_path_hash_for_project_shared_build_or_binary_cache(
+            db,
+            reader,
+            &distinct_output_hashes_without_nar_size(&outputs),
+        )
+        .await?;
 
-    let missing_hashes: Vec<String> = outputs
+    Ok(
+        sum_output_sizes_per_derivation_from_output_rows_and_copy_size_by_store_path_hash(
+            outputs, &copies,
+        ),
+    )
+}
+
+async fn output_sizes_by_drv_from_best_ranked_copy_in_any_cache<C: ConnectionTrait>(
+    db: &C,
+    drv_ids: &[DerivationId],
+) -> Result<HashMap<DerivationId, i64>, DbErr> {
+    let outputs = load_derivation_outputs_for_derivation_ids_in_chunks(db, drv_ids).await?;
+    let copies = get_best_ranked_stored_copy_in_any_cache_for_each_store_path_hash(
+        db,
+        &distinct_output_hashes_without_nar_size(&outputs),
+    )
+    .await?;
+
+    Ok(
+        sum_output_sizes_per_derivation_from_output_rows_and_copy_size_by_store_path_hash(
+            outputs, &copies,
+        ),
+    )
+}
+
+fn distinct_output_hashes_without_nar_size(outputs: &[MDerivationOutput]) -> Vec<String> {
+    outputs
         .iter()
         .filter(|o| o.nar_size.is_none())
         .filter_map(|o| o.hash.clone())
         .collect::<HashSet<_>>()
         .into_iter()
-        .collect();
+        .collect()
+}
 
-    let cached_size_by_hash: HashMap<String, i64> =
-        get_trusted_content_variant_for_each_store_path_hash_for_project_shared_build_or_binary_cache(
-            db,
-            reader,
-            &missing_hashes,
-        )
-        .await?
-        .into_iter()
-        .map(|(hash, variant)| (hash, variant.nar_size))
-        .collect();
-
+fn sum_output_sizes_per_derivation_from_output_rows_and_copy_size_by_store_path_hash(
+    outputs: Vec<MDerivationOutput>,
+    copies: &HashMap<String, MCachedPath>,
+) -> HashMap<DerivationId, i64> {
     let mut by_drv: HashMap<DerivationId, i64> = HashMap::new();
     for o in outputs {
-        if let Some(size) = o.nar_size.or_else(|| {
-            o.hash
-                .as_ref()
-                .and_then(|h| cached_size_by_hash.get(h).copied())
-        }) {
+        let copy_size = || Some(copies.get(o.hash.as_ref()?)?.nar_size);
+        if let Some(size) = o.nar_size.or_else(copy_size) {
             *by_drv.entry(o.derivation).or_insert(0) += size;
         }
     }
-    Ok(by_drv)
+    by_drv
 }
 
 async fn load_derivation_outputs_for_derivation_ids_in_chunks<C: ConnectionTrait>(
@@ -174,79 +198,73 @@ where
         .await?;
     walk.commit().await?;
 
-    let mut adjacency: HashMap<DerivationId, Vec<DerivationId>> = HashMap::new();
-    let mut reachable: HashSet<DerivationId> = roots.iter().copied().collect();
-    for edge in edges {
-        let (from, to) = (
-            DerivationId::new(edge.derivation),
-            DerivationId::new(edge.dependency),
-        );
-        adjacency.entry(from).or_default().push(to);
-        reachable.insert(from);
-        reachable.insert(to);
-    }
-
-    let closure_of_root: HashMap<DerivationId, HashSet<DerivationId>> = roots
-        .iter()
-        .map(|&root| {
-            let mut visited: HashSet<DerivationId> = HashSet::from([root]);
-            let mut stack = vec![root];
-            while let Some(node) = stack.pop() {
-                for &child in adjacency.get(&node).into_iter().flatten() {
-                    if visited.insert(child) {
-                        stack.push(child);
-                    }
-                }
-            }
-            (root, visited)
+    let edges: Vec<(DerivationId, DerivationId)> = edges
+        .into_iter()
+        .map(|edge| {
+            (
+                DerivationId::new(edge.derivation),
+                DerivationId::new(edge.dependency),
+            )
         })
         .collect();
-
-    let reachable: Vec<DerivationId> = reachable.into_iter().collect();
-    let mut outputs_by_drv: HashMap<DerivationId, Vec<MDerivationOutput>> = HashMap::new();
-    for output in load_derivation_outputs_for_derivation_ids_in_chunks(db, &reachable).await? {
-        outputs_by_drv
-            .entry(output.derivation)
-            .or_default()
-            .push(output);
-    }
-    let outputs_in = |closure: &HashSet<DerivationId>| -> Vec<&MDerivationOutput> {
-        closure
-            .iter()
-            .flat_map(|drv| outputs_by_drv.get(drv).into_iter().flatten())
-            .collect()
-    };
-
-    let wanted: Vec<(DerivationId, String)> = closure_of_root
+    let reachable: Vec<DerivationId> = roots
         .iter()
-        .flat_map(|(&root, closure)| {
-            outputs_in(closure)
-                .into_iter()
-                .filter(|o| o.nar_size.is_none())
-                .filter_map(move |o| o.hash.clone().map(|hash| (root, hash)))
-        })
+        .copied()
+        .chain(edges.iter().flat_map(|&(from, to)| [from, to]))
         .collect::<HashSet<_>>()
         .into_iter()
         .collect();
-    let consumed =
-        find_best_ranked_stored_copy_in_any_cache_by_derivation_id_and_store_path_hash(db, &wanted)
-            .await?;
+    let size_by_drv =
+        output_sizes_by_drv_from_best_ranked_copy_in_any_cache(db, &reachable).await?;
 
-    Ok(closure_of_root
+    Ok(transitive_closure_output_sizes(roots, &edges, &size_by_drv))
+}
+
+fn transitive_closure_output_sizes(
+    roots: &[DerivationId],
+    edges: &[(DerivationId, DerivationId)],
+    size_by_drv: &HashMap<DerivationId, i64>,
+) -> HashMap<DerivationId, i64> {
+    let mut index_of: HashMap<DerivationId, usize> = HashMap::new();
+    let nodes = roots
         .iter()
-        .map(|(&root, closure)| {
-            let total = outputs_in(closure)
-                .into_iter()
-                .filter_map(|o| {
-                    o.nar_size.or_else(|| {
-                        let hash = o.hash.clone()?;
-                        consumed.get(&(root, hash)).map(|variant| variant.nar_size)
-                    })
-                })
-                .sum();
-            (root, total)
+        .copied()
+        .chain(edges.iter().flat_map(|&(from, to)| [from, to]));
+    for drv in nodes {
+        let next = index_of.len();
+        index_of.entry(drv).or_insert(next);
+    }
+
+    let mut dependencies: Vec<Vec<usize>> = vec![Vec::new(); index_of.len()];
+    for (from, to) in edges {
+        dependencies[index_of[from]].push(index_of[to]);
+    }
+    let mut sizes = vec![0i64; index_of.len()];
+    for (drv, &index) in &index_of {
+        sizes[index] = size_by_drv.get(drv).copied().unwrap_or(0);
+    }
+
+    let mut last_visiting_root = vec![usize::MAX; index_of.len()];
+    roots
+        .iter()
+        .enumerate()
+        .map(|(root_number, root)| {
+            let start = index_of[root];
+            last_visiting_root[start] = root_number;
+            let mut stack = vec![start];
+            let mut total = 0;
+            while let Some(node) = stack.pop() {
+                total += sizes[node];
+                for &dependency in &dependencies[node] {
+                    if last_visiting_root[dependency] != root_number {
+                        last_visiting_root[dependency] = root_number;
+                        stack.push(dependency);
+                    }
+                }
+            }
+            (*root, total)
         })
-        .collect())
+        .collect()
 }
 
 #[cfg(test)]
@@ -300,6 +318,49 @@ mod tests {
 
         let sizes = transitive_closure_sizes(&db, &[root]).await.unwrap();
         assert_eq!(sizes.get(&root).copied(), Some(100));
+    }
+
+    #[tokio::test]
+    async fn shared_dependency_size_looked_up_once_and_counted_for_both_roots() {
+        let first = DerivationId::now_v7();
+        let second = DerivationId::now_v7();
+        let shared = DerivationId::now_v7();
+        let db = mock_db()
+            .append_exec_results([raise()])
+            .append_query_results([vec![
+                derivation_dependency(first, shared),
+                derivation_dependency(second, shared),
+            ]])
+            .append_query_results([vec![
+                derivation_output(first, "first", Some(1)),
+                derivation_output(second, "second", Some(2)),
+                derivation_output(shared, "shared", None),
+            ]])
+            .append_query_results([vec![MCachedPath {
+                hash: "shared".into(),
+                nar_size: 40,
+                ..Default::default()
+            }]])
+            .into_connection();
+
+        let sizes = transitive_closure_sizes(&db, &[first, second])
+            .await
+            .unwrap();
+
+        assert_eq!(sizes, HashMap::from([(first, 41), (second, 42)]));
+        let stored_copy_reads: Vec<_> = db
+            .into_transaction_log()
+            .into_iter()
+            .flat_map(|transaction| transaction.statements().to_vec())
+            .filter(|statement| statement.sql.contains("FROM cached_path"))
+            .map(|statement| statement.values)
+            .collect();
+        assert_eq!(
+            stored_copy_reads,
+            vec![Some(sea_orm::Values(vec![
+                vec!["shared".to_owned()].into()
+            ]))]
+        );
     }
 
     #[tokio::test]

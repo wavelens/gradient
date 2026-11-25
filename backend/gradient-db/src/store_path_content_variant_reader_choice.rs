@@ -298,12 +298,11 @@ crate::sql_fn! {
     ),
         params = [CachedPathHashes(64), ProjectId, CachedPathHashes(64)];
 
-    DERIVATION_ID_AND_BEST_RANKED_STORED_COPY_FROM_ANY_CACHE_FOR_STORE_PATH_HASHES_QUERY = || {
-        select_derivation_id_and_chosen_stored_copy_row_for_unnested_derivation_store_path_hash_pairs_using_per_hash_subquery_on_shared_build(
-            &cached_path_subquery_for_store_hash("wanted.hash"),
-        )
-    },
-        params = [DerivationIds(64), CachedPathHashes(64)];
+    BEST_RANKED_STORED_COPY_FROM_ANY_CACHE_FOR_STORE_PATH_HASHES_QUERY = || per_wanted_hash(
+        &cached_path_subquery_for_store_hash("wanted.hash"),
+        "",
+    ),
+        params = [CachedPathHashes(64)];
 
     DERIVATION_ID_AND_TRUSTED_CONTENT_VARIANT_ROW_FOR_OWN_OUTPUT_STORE_PATH_HASHES_ON_SHARED_BUILD_QUERY = || {
         select_derivation_id_and_chosen_stored_copy_row_for_unnested_derivation_store_path_hash_pairs_using_per_hash_subquery_on_shared_build(
@@ -494,17 +493,17 @@ pub async fn get_stored_copy_readable_by_exec_job_for_each_store_path_hash<C: Co
     .map(by_hash)
 }
 
-pub async fn find_best_ranked_stored_copy_in_any_cache_by_derivation_id_and_store_path_hash<
+pub async fn get_best_ranked_stored_copy_in_any_cache_for_each_store_path_hash<
     C: ConnectionTrait,
 >(
     db: &C,
-    wanted: &[(DerivationId, String)],
-) -> Result<HashMap<(DerivationId, String), MCachedPath>, DbErr> {
-    read_stored_copy_rows_by_derivation_store_path_hash_pairs(db, wanted, |values| {
-        DERIVATION_ID_AND_BEST_RANKED_STORED_COPY_FROM_ANY_CACHE_FOR_STORE_PATH_HASHES_QUERY
-            .bind(values)
+    hashes: &[String],
+) -> Result<HashMap<String, MCachedPath>, DbErr> {
+    rows_for_hashes(db, hashes, |chunk| {
+        BEST_RANKED_STORED_COPY_FROM_ANY_CACHE_FOR_STORE_PATH_HASHES_QUERY.bind([chunk.into()])
     })
     .await
+    .map(by_hash)
 }
 
 pub async fn highest_ranked_trusted_content_variant_by_derivation_id_and_store_path_hash_for_shared_build_own_outputs<
@@ -1085,7 +1084,6 @@ mod tests {
                 .parse()
                 .expect("a uuid"),
         );
-        let derivation_id_and_requested_store_path_hash = (parent, hash.to_owned());
         ParentBuildStorePathThreeReaderAnswers {
             parent_build_has_zero_blocking_deps_after_recount,
             package_name:
@@ -1093,20 +1091,20 @@ mod tests {
                     &conn,
                     shared_build,
                     input_closure_set,
-                    std::slice::from_ref(&derivation_id_and_requested_store_path_hash.1),
+                    &[hash.to_owned()],
                 )
                 .await
                 .expect("The selection ran.")
                 .remove(hash)
                 .map(|row| row.package),
             returned_store_path_copy_package_name:
-                find_best_ranked_stored_copy_in_any_cache_by_derivation_id_and_store_path_hash(
+                get_best_ranked_stored_copy_in_any_cache_for_each_store_path_hash(
                     &conn,
-                    std::slice::from_ref(&derivation_id_and_requested_store_path_hash),
+                    &[hash.to_owned()],
                 )
                 .await
                 .expect("The selection ran.")
-                .remove(&derivation_id_and_requested_store_path_hash)
+                .remove(hash)
                 .map(|row| row.package),
         }
     }
@@ -1981,9 +1979,9 @@ mod tests {
             .expect("The selection ran.")
             .is_empty();
         let input_size_reader_returns_stored_copy_for_same_pair =
-            !find_best_ranked_stored_copy_in_any_cache_by_derivation_id_and_store_path_hash(
+            !get_best_ranked_stored_copy_in_any_cache_for_each_store_path_hash(
                 &fixture.db.connection(),
-                &wanted,
+                &[DEPENDENCY_OUTPUT_STORE_PATH_HASH.to_owned()],
             )
             .await
             .expect("The selection ran.")
