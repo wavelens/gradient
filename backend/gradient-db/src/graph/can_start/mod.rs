@@ -26,9 +26,9 @@ pub use fetchable::{
 pub use lock::{SeedLock, SharedBuildLock, lock_seed_shared_builds, lock_shared_builds};
 pub(crate) use lock::{ids, lock_unavailable};
 pub use need::{
-    BudgetedNeedUpdate, NeedMoved, SettledNeed, gain_and_settle_need, recheck_forgotten_need,
-    recount_wanted, settle_created, settle_skipped, update_and_settle_need,
-    update_and_settle_need_with_advisory_key_limit,
+    BudgetedNeedUpdate, NeedMoved, SettledNeed, gain_and_settle_need,
+    gain_and_update_and_settle_need, recheck_forgotten_need, recount_wanted, settle_created,
+    settle_skipped, update_and_settle_need, update_and_settle_need_with_advisory_key_limit,
 };
 pub(crate) use need::{settle_need, update_need, wanted_by_its_evaluation};
 pub use queue::{promote, promote_closure, unpromote_ungated, unwalk_derivations};

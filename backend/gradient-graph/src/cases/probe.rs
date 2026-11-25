@@ -692,3 +692,50 @@ async fn p12_a_runtime_reference_asks_again_about_a_miss_older_than_the_evaluati
     case.zero_drift("step 2").await;
     case.finish().await;
 }
+
+fn entry_point_with_skipped_build_input_chain_without_probe_answers(
+    evaluation: EvaluationId,
+) -> Shape {
+    shape()
+        .evaluation(evaluation)
+        .derivation(A)
+        .walked()
+        .entry_point("pkg.a")
+        .job()
+        .output(A_OUT)
+        .depends_on(B)
+        .derivation(B)
+        .walked()
+        .job()
+        .output(B_OUT)
+        .depends_on(C)
+        .build_status(BuildStatus::Skipped)
+        .derivation(C)
+        .walked()
+        .job()
+        .output(C_OUT)
+        .build_status(BuildStatus::Skipped)
+}
+
+#[tokio::test]
+async fn p13_upstream_binary_cache_miss_for_entry_build_then_middle_build_gains_next_build_input_after_each_answer_and_reports_zero_drift()
+ {
+    let e1 = EvaluationId::now_v7();
+    let case =
+        Case::start(entry_point_with_skipped_build_input_chain_without_probe_answers(e1)).await;
+
+    case.upstream_probed(&[A]).await;
+
+    assert_eq!(
+        (case.sb(B).await.wanted, case.sb(C).await.wanted),
+        (true, false),
+        "sb(B) needed after 1, sb(C) not needed"
+    );
+    case.zero_drift("step 1").await;
+
+    case.upstream_probed(&[B]).await;
+
+    assert!(case.sb(C).await.wanted, "After 2: sb(C) requested");
+    case.zero_drift("step 2").await;
+    case.finish().await;
+}
