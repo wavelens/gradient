@@ -40,7 +40,7 @@
   postPatch = ''
     install -Dm444 ${gradient-logo}/logo-transparent.svg public/images/logo.svg
     install -Dm444 ${gradient-logo}/logo-outlined.svg public/images/favicon.svg
-    rm public/whats-new
+    rm -f public/whats-new
     cp -r ${../../docs/whats-new} public/whats-new
   '';
 
