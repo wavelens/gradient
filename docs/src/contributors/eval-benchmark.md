@@ -70,10 +70,11 @@ cat result/summary.txt
 
 | Target | Check |
 |---|---|
-| Speedup | End-to-end time on 1 worker divided by the end-to-end time on N workers, at least 1 + 0.15 x (N - 1), on more than one job |
+| Speedup rate (report only) | End-to-end time with 1 worker divided by end-to-end time with N workers. The target is at least 1 + 0.15 × (N - 1). |
+| Split | Multiple jobs on multiple workers |
 | Small flake | One job with 4 workers up, end-to-end time at most 10% slower than standalone |
 
-- A missed target can fail the test. The failure can only occur after `summary.txt` and `evalbench-multinode.tar.gz` exist.
+- ``summary.txt`` and the HTML page show a speedup below target. The test doesn't fail. A missing split or small flake check can make the test fail. That failure can only happen after ``summary.txt`` and ``evalbench-multinode.tar.gz`` exist.
 - Set at least 20 CPUs on the builder. QEMU threads of each VM pin to separate cores. Fewer CPUs trigger an immediate test failure.
 - The report check can run with `nix build .#checks.x86_64-linux.evalbench-multinode-report`.
 
