@@ -273,7 +273,7 @@ mod tests {
     use crate::graph::runtime_closure::runtime_closure_reachable;
     use crate::graph::sbom::with_referenced_paths;
     use crate::store_path_content_variant_reader_choice::StorePathContentVariantReader;
-    use gradient_fixtures::mock::{empty_db, mock_db};
+    use gradient_fixtures::mock::{all_statements, empty_db, mock_db};
     use gradient_fixtures::rows::{derivation_dependency, derivation_output};
     use gradient_fixtures::store_path_content_variants::{
         BUILD_A, BUILD_B, FIRST_KEY, Readers, SECOND_KEY, SHARED,
@@ -348,10 +348,8 @@ mod tests {
             .unwrap();
 
         assert_eq!(sizes, HashMap::from([(first, 41), (second, 42)]));
-        let stored_copy_reads: Vec<_> = db
-            .into_transaction_log()
+        let stored_copy_reads: Vec<_> = all_statements(db.into_transaction_log())
             .into_iter()
-            .flat_map(|transaction| transaction.statements().to_vec())
             .filter(|statement| statement.sql.contains("FROM cached_path"))
             .map(|statement| statement.values)
             .collect();

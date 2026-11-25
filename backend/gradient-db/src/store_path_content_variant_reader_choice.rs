@@ -1978,7 +1978,7 @@ mod tests {
             .await
             .expect("The selection ran.")
             .is_empty();
-        let input_size_reader_returns_stored_copy_for_same_pair =
+        let input_size_reader_found_stored_copy_row_for_dependency_output_hash_rejected_by_own_output_reader =
             !get_best_ranked_stored_copy_in_any_cache_for_each_store_path_hash(
                 &fixture.db.connection(),
                 &[DEPENDENCY_OUTPUT_STORE_PATH_HASH.to_owned()],
@@ -1992,7 +1992,7 @@ mod tests {
                 complete_output_store_path_hashes_reported_for_waiting_evaluation,
                 stored_copy_trusted_by_all_live_projects_check_rows,
                 own_output_reader_found_stored_copy_row_for_parent_and_dependency_output_hash,
-                input_size_reader_returns_stored_copy_for_same_pair,
+                input_size_reader_found_stored_copy_row_for_dependency_output_hash_rejected_by_own_output_reader,
             ),
             (Vec::<String>::new(), vec!["false".to_owned()], false, true),
             "Direct use can never produce the build's own output. The own output reader can't return the copy that only direct use can allow. The input reader can return that copy."
