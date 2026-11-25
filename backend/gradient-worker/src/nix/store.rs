@@ -10,6 +10,7 @@
 
 use std::collections::BTreeSet;
 use std::pin::pin;
+use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::Result;
@@ -25,6 +26,7 @@ use harmonia_store_remote::DaemonStore as _;
 use harmonia_store_remote::pool::{ConnectionPool, PoolConfig, PooledConnectionGuard};
 use harmonia_utils_hash::{Algorithm, Hash};
 use sha2::{Digest as _, Sha256};
+use tokio::sync::{Semaphore, SemaphorePermit};
 use tracing::{debug, warn};
 
 use gradient_wire::traits::WorkerStore;
@@ -48,6 +50,7 @@ const DEFAULT_DAEMON_SOCKET: &str = "/nix/var/nix/daemon-socket/socket";
 #[derive(Clone)]
 pub struct LocalNixStore {
     pool: ConnectionPool,
+    metadata_lookup_daemon_connection_semaphore: Arc<Semaphore>,
 }
 
 impl LocalNixStore {
@@ -58,7 +61,19 @@ impl LocalNixStore {
     pub fn connect_at(socket_path: &str, pool_size: usize) -> Result<Self> {
         Ok(Self {
             pool: ConnectionPool::new(socket_path, build_pool_config(pool_size)),
+            metadata_lookup_daemon_connection_semaphore: Arc::new(Semaphore::new(DAEMON_LOOKUPS)),
         })
+    }
+
+    async fn acquire_lookup_permit_and_connection(
+        &self,
+    ) -> Result<(SemaphorePermit<'_>, PooledConnectionGuard)> {
+        let permit = self
+            .metadata_lookup_daemon_connection_semaphore
+            .acquire()
+            .await
+            .map_err(|e| anyhow::anyhow!("acquire permit for metadata lookup on daemon: {e}"))?;
+        Ok((permit, self.acquire().await?))
     }
 
     pub async fn acquire(&self) -> Result<PooledConnectionGuard> {
@@ -84,7 +99,7 @@ impl LocalNixStore {
             }
         })?;
 
-        let mut guard = self.acquire().await?;
+        let (_permit, mut guard) = self.acquire_lookup_permit_and_connection().await?;
         guard
             .execute(|client| async move { client.is_valid_path(&sp).await })
             .await
@@ -122,7 +137,7 @@ impl LocalNixStore {
             }
         })?;
 
-        let mut guard = self.acquire().await?;
+        let (_permit, mut guard) = self.acquire_lookup_permit_and_connection().await?;
         let info = guard
             .execute(|client| async move { client.query_path_info(&sp).await })
             .await
@@ -269,8 +284,8 @@ impl PathMetaSource for LocalNixStore {
             }
         };
 
-        let mut guard = match self.acquire().await {
-            Ok(g) => g,
+        let (_permit, mut guard) = match self.acquire_lookup_permit_and_connection().await {
+            Ok(acquired) => acquired,
             Err(e) => {
                 warn!(store_path, error = %e, "gather_path_meta: could not acquire store connection");
                 return None;
@@ -317,5 +332,106 @@ impl PathMetaSource for LocalNixStore {
             deriver,
             ca,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use harmonia_protocol::daemon::{
+        DaemonResult, DaemonStore, FutureResultExt as _, HandshakeDaemonStore, ResultLog,
+        TrustLevel,
+    };
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    #[derive(Default)]
+    struct FakeNixDaemonConnectionAndQueryCounters {
+        connections: AtomicUsize,
+        running: AtomicUsize,
+        most_running: AtomicUsize,
+    }
+
+    struct TestNixDaemonConnectionAnsweringDelayedPathQueriesAndCountingConcurrentQueries(
+        Arc<FakeNixDaemonConnectionAndQueryCounters>,
+    );
+
+    impl HandshakeDaemonStore
+        for TestNixDaemonConnectionAnsweringDelayedPathQueriesAndCountingConcurrentQueries
+    {
+        type Store = Self;
+
+        fn handshake(self) -> impl ResultLog<Output = DaemonResult<Self>> + Send {
+            std::future::ready(Ok(self)).empty_logs()
+        }
+    }
+
+    impl DaemonStore
+        for TestNixDaemonConnectionAnsweringDelayedPathQueriesAndCountingConcurrentQueries
+    {
+        fn trust_level(&self) -> Option<TrustLevel> {
+            None
+        }
+
+        fn shutdown(&mut self) -> impl Future<Output = DaemonResult<()>> + Send + '_ {
+            std::future::ready(Ok(()))
+        }
+
+        fn query_path_info<'a>(
+            &'a mut self,
+            path: &'a StorePath,
+        ) -> impl ResultLog<Output = DaemonResult<Option<UnkeyedValidPathInfo>>> + Send + 'a
+        {
+            let counters = self.0.clone();
+            async move {
+                let running = counters.running.fetch_add(1, Ordering::SeqCst) + 1;
+                counters.most_running.fetch_max(running, Ordering::SeqCst);
+                tokio::time::sleep(Duration::from_millis(20)).await;
+                counters.running.fetch_sub(1, Ordering::SeqCst);
+                let info = LocalNixStore::content_addressed(path.name().as_ref(), b"nar")
+                    .expect("content addressed path info");
+                Ok(Some(info.info))
+            }
+            .empty_logs()
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn test_concurrent_path_metadata_lookups_against_fake_nix_daemon_never_exceed_daemon_lookups_limit_for_running_lookups_or_connections()
+     {
+        let dir = tempfile::tempdir().unwrap();
+        let socket = dir.path().join("daemon.sock");
+        let listener = tokio::net::UnixListener::bind(&socket).unwrap();
+        let counters = Arc::new(FakeNixDaemonConnectionAndQueryCounters::default());
+        let mut connections = tokio::task::JoinSet::new();
+
+        let store = LocalNixStore::connect_at(socket.to_str().unwrap(), 304).unwrap();
+        let path = format!("/nix/store/{}-lookup", "b".repeat(32));
+        let caller = || futures::future::join_all((0..150).map(|_| store.path_meta(&path)));
+        let lookups = async { tokio::join!(caller(), caller()) };
+        tokio::pin!(lookups);
+        let (first, second) = loop {
+            tokio::select! {
+                done = &mut lookups => break done,
+                accepted = listener.accept() => {
+                    let (stream, _) = accepted.unwrap();
+                    counters.connections.fetch_add(1, Ordering::SeqCst);
+                    let handler =
+                        TestNixDaemonConnectionAnsweringDelayedPathQueriesAndCountingConcurrentQueries(
+                            counters.clone(),
+                        );
+                    connections.spawn(async move {
+                        let (read, write) = tokio::io::split(stream);
+                        let _ = harmonia_daemon::server::Builder::new()
+                            .set_store_dir(StoreDir::default())
+                            .serve_connection(read, write, handler)
+                            .await;
+                    });
+                }
+            }
+        };
+
+        assert!(first.iter().chain(&second).all(Option::is_some));
+        assert!(counters.most_running.load(Ordering::SeqCst) <= DAEMON_LOOKUPS);
+        assert!(counters.connections.load(Ordering::SeqCst) <= DAEMON_LOOKUPS);
     }
 }
