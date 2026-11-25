@@ -118,6 +118,7 @@ mod m20270106_000000_add_nullable_backfill_requested_time_to_project_cache_mark_
 mod m20270107_000000_drop_not_valid_base_url_check_constraint_for_gitea_forgejo_and_gitlab_connections;
 mod m20270108_000000_exec_job_metric;
 mod m20270109_000000_create_per_cache_cached_path_signature_deletion_count_table_with_delete_trigger_and_add_claimed_deletion_count_drop_references_are_claimed;
+mod m20270110_000000_add_gin_index_on_referenced_store_path_hashes_create_per_cache_reference_closure_count_row_with_cache_insert_trigger_set_stale_reference_closure_marks_to_null_and_replace_delete_trigger_to_clear_marks_above_deleted_path;
 mod sql_on_one_connection;
 
 pub struct UpgradeFloor {
@@ -272,6 +273,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20270107_000000_drop_not_valid_base_url_check_constraint_for_gitea_forgejo_and_gitlab_connections::Migration),
             Box::new(m20270108_000000_exec_job_metric::Migration),
             Box::new(m20270109_000000_create_per_cache_cached_path_signature_deletion_count_table_with_delete_trigger_and_add_claimed_deletion_count_drop_references_are_claimed::Migration),
+            Box::new(m20270110_000000_add_gin_index_on_referenced_store_path_hashes_create_per_cache_reference_closure_count_row_with_cache_insert_trigger_set_stale_reference_closure_marks_to_null_and_replace_delete_trigger_to_clear_marks_above_deleted_path::Migration),
         ]
     }
 }
