@@ -725,7 +725,7 @@ async fn c13_pinned_claim_keeps_shared_path_until_unpinned_then_gc_retires_path(
 }
 
 #[tokio::test]
-async fn c14_unused_claim_deleted_increments_only_its_cache_deletion_count_and_its_rows_stop_counting_as_established_while_other_cache_rows_still_count()
+async fn c14_garbage_collection_deletes_unused_claim_row_raises_only_that_cache_deletion_count_unmarks_only_same_cache_claim_that_references_it_and_keeps_other_cache_claim_that_references_it_marked()
  {
     let (e1, c1, c2) = (EvaluationId::now_v7(), CacheId::now_v7(), CacheId::now_v7());
     let case = Case::start(
@@ -780,21 +780,25 @@ async fn c14_unused_claim_deleted_increments_only_its_cache_deletion_count_and_i
         "after 1: C2 lost no claim line, so its count is still 0"
     );
     let case_ref = &case;
-    let established = |hash, cache| async move {
+    let store_path_claim_has_reference_closure_mark = |hash, cache| async move {
         case_ref
             .signature(hash, cache)
             .await
             .expect("the claim survives")
             .reference_closure_established_at_cache_deletion_count
-            == Some(case_ref.cache_deleted_path_signature_count(cache).await)
+            .is_some()
     };
     assert!(
-        !established(B_OUT, c1).await && !established(drv_hash(O), c1).await,
-        "after 1: B and O.drv in C1 no longer stop the walk. C1 lost the claim line."
+        !store_path_claim_has_reference_closure_mark(B_OUT, c1).await,
+        "After 1 round: B in C1 lost its mark because B had a reference to O."
     );
     assert!(
-        established(B_OUT, c2).await,
-        "after 1: B in C2 can still stop the scan, because C2 hasn't lost the claim line."
+        store_path_claim_has_reference_closure_mark(drv_hash(O), c1).await,
+        "After 1 round: keep the mark. There's no reference from O.drv in C1 to O."
+    );
+    assert!(
+        store_path_claim_has_reference_closure_mark(B_OUT, c2).await,
+        "after 1: C2 didn't lose the claim row, so B in C2 can keep its mark"
     );
     case.zero_drift("step 1").await;
     case.finish().await;

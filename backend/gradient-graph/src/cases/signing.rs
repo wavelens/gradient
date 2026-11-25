@@ -498,7 +498,7 @@ fn b_above_x_above_y(e1: EvaluationId, c1: CacheId) -> Shape {
         .references(&[(B_OUT, "b"), (X_OUT, "x")])
 }
 
-async fn cached_signature_deletion_count_matches_cache(
+async fn cached_path_signature_has_reference_closure_mark(
     case: &Case,
     hash: &str,
     cache: CacheId,
@@ -507,7 +507,7 @@ async fn cached_signature_deletion_count_matches_cache(
     row(case, hash, cache, line)
         .await
         .reference_closure_established_at_cache_deletion_count
-        == Some(case.cache_deleted_path_signature_count(cache).await)
+        .is_some()
 }
 
 #[tokio::test]
@@ -541,7 +541,7 @@ async fn k14_claim_walk_on_signed_claim_row_with_unclaimed_references_keeps_sign
     signed(&case, B_OUT, c1, "after 1: C1 holds B").await;
     unchanged(&case, X_OUT, c1, &earlier, "after 1: X keeps its signature").await;
     let marked =
-        cached_signature_deletion_count_matches_cache(&case, X_OUT, c1, "after 1: X").await;
+        cached_path_signature_has_reference_closure_mark(&case, X_OUT, c1, "after 1: X").await;
     assert!(marked, "after 1: X has its references claimed");
     signed(&case, Y_OUT, c1, "after 1: C1 holds what X references").await;
     case.zero_drift("step 1").await;
@@ -560,17 +560,17 @@ async fn start_test_case_with_claimed_b_above_x_above_y_in_c1(
     case
 }
 
-async fn assert_c1_b_and_y_are_not_established_and_c1_deletion_count_is_one_after_removing_x_claim(
+async fn assert_b_is_unmarked_y_is_marked_and_c1_deletion_count_is_one_after_removing_x(
     case: &Case,
     c1: CacheId,
 ) {
     assert!(
-        !cached_signature_deletion_count_matches_cache(case, B_OUT, c1, "after 1: B").await,
-        "after 1: B in C1 can no longer stop the walk, since C1 lost its claim row"
+        !cached_path_signature_has_reference_closure_mark(case, B_OUT, c1, "after 1: B").await,
+        "after 1: B in C1 lost the mark because X below it lost the claim row"
     );
     assert!(
-        !cached_signature_deletion_count_matches_cache(case, Y_OUT, c1, "after 1: Y").await,
-        "after 1: Y in C1 can no longer stop the walk either, but Y doesn't reference X"
+        cached_path_signature_has_reference_closure_mark(case, Y_OUT, c1, "after 1: Y").await,
+        "after 1: C1's Y does keep that mark because Y is under X"
     );
     assert_eq!(
         case.cache_deleted_path_signature_count(c1).await,
@@ -580,7 +580,7 @@ async fn assert_c1_b_and_y_are_not_established_and_c1_deletion_count_is_one_afte
 }
 
 #[tokio::test]
-async fn demoting_cache_claim_increments_deletion_count_so_earlier_rows_do_not_stop_walk() {
+async fn demoting_cache_claim_clears_mark_above_and_keeps_mark_below_and_counts_one_deletion() {
     let (e1, c1) = (EvaluationId::now_v7(), CacheId::now_v7());
     let case = start_test_case_with_claimed_b_above_x_above_y_in_c1(e1, c1).await;
 
@@ -590,16 +590,12 @@ async fn demoting_cache_claim_increments_deletion_count_so_earlier_rows_do_not_s
     })
     .await;
 
-    assert_c1_b_and_y_are_not_established_and_c1_deletion_count_is_one_after_removing_x_claim(
-        &case, c1,
-    )
-    .await;
+    assert_b_is_unmarked_y_is_marked_and_c1_deletion_count_is_one_after_removing_x(&case, c1).await;
     case.finish().await;
 }
 
 #[tokio::test]
-async fn retiring_cached_path_cascades_to_signatures_and_increments_cache_deletion_count_so_earlier_rows_do_not_stop_walk()
- {
+async fn retiring_cached_path_cascades_to_signatures_and_clears_mark_above_but_keeps_mark_below() {
     let (e1, c1) = (EvaluationId::now_v7(), CacheId::now_v7());
     let case = start_test_case_with_claimed_b_above_x_above_y_in_c1(e1, c1).await;
 
@@ -613,10 +609,7 @@ async fn retiring_cached_path_cascades_to_signatures_and_increments_cache_deleti
         None,
         "after 1: X retired"
     );
-    assert_c1_b_and_y_are_not_established_and_c1_deletion_count_is_one_after_removing_x_claim(
-        &case, c1,
-    )
-    .await;
+    assert_b_is_unmarked_y_is_marked_and_c1_deletion_count_is_one_after_removing_x(&case, c1).await;
     case.finish().await;
 }
 
@@ -645,10 +638,10 @@ async fn k15_walked_path_references_are_claimed_only_after_all_references_are_st
     let in_c1 = signed(&case, B_OUT, c1, "after 1: C1 holds B").await;
     signed(&case, X_OUT, c1, "after 1: C1 holds X").await;
     let x_marked =
-        cached_signature_deletion_count_matches_cache(&case, X_OUT, c1, "after 1: X").await;
+        cached_path_signature_has_reference_closure_mark(&case, X_OUT, c1, "after 1: X").await;
     assert!(x_marked, "after 1: X references nothing unstored");
     let b_marked =
-        cached_signature_deletion_count_matches_cache(&case, B_OUT, c1, "after 1: B").await;
+        cached_path_signature_has_reference_closure_mark(&case, B_OUT, c1, "after 1: B").await;
     assert!(!b_marked, "after 1: B references the unstored Z");
     case.zero_drift("step 1").await;
 
@@ -660,7 +653,7 @@ async fn k15_walked_path_references_are_claimed_only_after_all_references_are_st
     signed(&case, Z_OUT, c1, "after 2: C1 holds Z").await;
     unchanged(&case, B_OUT, c1, &in_c1, "after 2: B keeps its signature").await;
     let b_marked =
-        cached_signature_deletion_count_matches_cache(&case, B_OUT, c1, "after 2: B").await;
+        cached_path_signature_has_reference_closure_mark(&case, B_OUT, c1, "after 2: B").await;
     assert!(b_marked, "after 2: every reference of B is stored");
     case.zero_drift("step 2").await;
     case.finish().await;
