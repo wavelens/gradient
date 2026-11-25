@@ -83,8 +83,9 @@ pub(crate) mod test_ctx;
 
 pub use self::chunked::{IN_CHUNK_SIZE, fetch_in_chunks, for_each_chunk};
 pub use self::context::{
-    DbContext, DbMemory, DependencyOutputPublishRequests, DependencyOutputSigningRequest,
-    HeldEvaluations, Hold, ProbeRequests, Wakeups,
+    AlreadyStoredPushCacheQueryStorePathHashesByProject, DbContext, DbMemory,
+    DependencyOutputPublishRequests, DependencyOutputSigningRequest, HeldEvaluations, Hold,
+    ProbeRequests, Wakeups,
 };
 pub use self::error::{MissingRow, database_error_kind_text_and_sqlstate_for_warning_log};
 pub use self::pool::{CacheDb, WebDb, WorkerDb};

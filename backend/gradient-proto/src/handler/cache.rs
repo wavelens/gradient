@@ -41,30 +41,6 @@ impl CacheQueryJob {
     }
 }
 
-async fn ensure_push_signatures(
-    db: &CacheDb,
-    project_id: ProjectId,
-    trusted: &ContentVariantByStoreHash,
-) {
-    let hashes: Vec<String> = trusted.keys().cloned().collect();
-
-    const SIGNATURE_PATH_BATCH: usize = 8000;
-
-    for chunk in hashes.chunks(SIGNATURE_PATH_BATCH) {
-        let result = gradient_db::store_path_content_variant_trust::insert_unsigned_signature_placeholders_for_trusted_content_variants(
-            db, project_id, chunk,
-        )
-        .await;
-        if let Err(e) = result {
-            warn!(
-                %project_id,
-                error = %e,
-                "failed to insert cached_path_signature placeholders (Push mode)"
-            );
-        }
-    }
-}
-
 /// A reply is carrying up to `CACHE_QUERY_MAX_PATHS` paths. Per-path lookups were putting about
 /// 4000 sequential round trips in front of the 75 s deadline.
 #[derive(Default)]
@@ -501,7 +477,12 @@ async fn query(
     .await?;
 
     if matches!(mode, QueryMode::Push) {
-        ensure_push_signatures(&handles.cache_db, project_id, &trusted).await;
+        handles
+            .db
+            .queue_store_path_hashes_for_unsigned_signature_placeholder_insertion(
+                project_id,
+                trusted.keys().cloned(),
+            );
     }
 
     let meta = match mode {
@@ -1005,6 +986,64 @@ mod tests {
                 && served[0].as_deref() != Some("sha256:second")
                 && served[1].as_deref() == Some("sha256:second"),
             "Each cache answers with the variant it serves: cache C1 with the variant of project A, cache C2 with the variant of project B: {served:?}"
+        );
+        drop((handles, state));
+        readers.db.finish().await;
+    }
+
+    #[tokio::test]
+    async fn push_cache_query_answers_during_cached_path_signature_insert_lock_and_stored_hash_enters_placeholder_queue()
+     {
+        use gradient_fixtures::store_path_content_variants::{
+            SHARED, two_variants_of_one_hash_and_one_untrusted_hash,
+        };
+        use sea_orm::{ConnectionTrait, TransactionTrait};
+
+        let readers = two_variants_of_one_hash_and_one_untrusted_hash().await;
+        let state = TestState::new()
+            .worker_db(readers.db.connection())
+            .web_db(readers.db.connection())
+            .cache_db(readers.db.connection())
+            .build();
+        let handles = SessionHandles::from_state(&state);
+        let insert_lock = readers
+            .db
+            .connection()
+            .begin()
+            .await
+            .expect("a transaction starts");
+        insert_lock
+            .execute_unprepared("LOCK TABLE cached_path_signature IN EXCLUSIVE MODE")
+            .await
+            .expect("the lock is taken");
+
+        let pushed = tokio::time::timeout(
+            std::time::Duration::from_secs(10),
+            query(
+                &handles,
+                "w1",
+                CacheQueryJob::for_test_project(readers.project_b),
+                &[format!("/nix/store/{SHARED}-shared")],
+                &[Some(1)],
+                QueryMode::Push,
+                false,
+            ),
+        )
+        .await
+        .expect("the push answer does not wait for the placeholder insert")
+        .unwrap();
+        insert_lock.rollback().await.expect("the lock is released");
+
+        assert_eq!(
+            (
+                pushed.iter().map(|entry| entry.cached).collect::<Vec<_>>(),
+                state
+                    .memory
+                    .db
+                    .store_path_hashes_awaiting_unsigned_signature_placeholder
+                    .take_queued_store_path_hashes(readers.project_b),
+            ),
+            (vec![true], HashSet::from([SHARED.to_owned()]))
         );
         drop((handles, state));
         readers.db.finish().await;

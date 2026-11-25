@@ -175,6 +175,35 @@ impl DependencyOutputPublishRequests {
     }
 }
 
+#[derive(Clone, Debug, Default)]
+pub struct AlreadyStoredPushCacheQueryStorePathHashesByProject(
+    Arc<Mutex<HashMap<ProjectId, HashSet<String>>>>,
+);
+
+impl AlreadyStoredPushCacheQueryStorePathHashesByProject {
+    pub fn enqueue_store_path_hashes_for_project(
+        &self,
+        wake: &Notify,
+        project: ProjectId,
+        hashes: impl IntoIterator<Item = String>,
+    ) {
+        let mut hashes = hashes.into_iter().peekable();
+        if hashes.peek().is_none() {
+            return;
+        }
+        lock(&self.0).entry(project).or_default().extend(hashes);
+        wake.notify_one();
+    }
+
+    pub fn list_projects_with_queued_store_path_hashes(&self) -> Vec<ProjectId> {
+        lock(&self.0).keys().copied().collect()
+    }
+
+    pub fn take_queued_store_path_hashes(&self, project: ProjectId) -> HashSet<String> {
+        lock(&self.0).remove(&project).unwrap_or_default()
+    }
+}
+
 fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
     mutex
         .lock()
@@ -233,6 +262,7 @@ pub struct Wakeups {
     pub run_cache_maintenance_now: Arc<Notify>,
     pub run_signature_sweep_now: Arc<Notify>,
     pub run_signature_backfill_now: Arc<Notify>,
+    pub run_signature_placeholder_insert_now: Arc<Notify>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -241,6 +271,8 @@ pub struct DbMemory {
     pub startable_set: StartableSet,
     pub held_evaluations: HeldEvaluations,
     pub dependency_output_publish_requests: DependencyOutputPublishRequests,
+    pub store_path_hashes_awaiting_unsigned_signature_placeholder:
+        AlreadyStoredPushCacheQueryStorePathHashesByProject,
 }
 
 impl DbMemory {
@@ -354,6 +386,20 @@ impl DbContext {
         );
     }
 
+    pub fn queue_store_path_hashes_for_unsigned_signature_placeholder_insertion(
+        &self,
+        project: ProjectId,
+        hashes: impl IntoIterator<Item = String>,
+    ) {
+        self.memory
+            .store_path_hashes_awaiting_unsigned_signature_placeholder
+            .enqueue_store_path_hashes_for_project(
+                &self.wake.run_signature_placeholder_insert_now,
+                project,
+                hashes,
+            );
+    }
+
     pub async fn record_evaluation_created(&self, eval: &gradient_types::MEvaluation) {
         self.wake.eval_assign.notify_one();
         if let Some(event) = crate::deliveries::events::evaluation_created(eval) {
@@ -410,6 +456,41 @@ mod tests {
         requests.staged().publish();
 
         assert!(inbox.try_recv().is_err());
+    }
+
+    #[tokio::test]
+    async fn test_already_stored_push_cache_query_store_path_hashes_by_project_deduplicates_enqueues_notifies_wake_and_removes_project()
+     {
+        let queued = AlreadyStoredPushCacheQueryStorePathHashesByProject::default();
+        let wake = Notify::new();
+        let (project, other_project) = (ProjectId::now_v7(), ProjectId::now_v7());
+
+        queued.enqueue_store_path_hashes_for_project(&wake, project, Vec::new());
+        let empty_push_listed = queued.list_projects_with_queued_store_path_hashes();
+        queued.enqueue_store_path_hashes_for_project(&wake, project, ["a".to_owned()]);
+        queued.enqueue_store_path_hashes_for_project(
+            &wake,
+            project,
+            ["a".to_owned(), "b".to_owned()],
+        );
+        queued.enqueue_store_path_hashes_for_project(&wake, other_project, ["c".to_owned()]);
+        tokio::time::timeout(std::time::Duration::from_secs(1), wake.notified())
+            .await
+            .expect("a push wakes the placeholder pass");
+
+        let taken = queued.take_queued_store_path_hashes(project);
+        assert_eq!(
+            (
+                empty_push_listed,
+                taken,
+                queued.list_projects_with_queued_store_path_hashes()
+            ),
+            (
+                Vec::new(),
+                HashSet::from(["a".to_owned(), "b".to_owned()]),
+                vec![other_project]
+            )
+        );
     }
 
     #[tokio::test]

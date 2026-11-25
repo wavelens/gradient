@@ -59,7 +59,9 @@ root
 │   abandoned-dispatch-sweep             every 60 s
 ├── cache-maintenance, sign-sweep,
 │   signature-backfill, debug-index,
-│   eval-cache-sweep                     cache sweeps
+│   eval-cache-sweep,
+│   pushed-store-path-unsigned-signature-placeholder-insert
+│                                        cache sweeps
 ├── effects                              actor: sends pending deliveries; effects-workers factory beneath
 ├── retention (hourly), rollup,
 │   cache_metric_flush, otlp-snapshot    metrics pipeline; otlp-snapshot only with an OTLP endpoint
