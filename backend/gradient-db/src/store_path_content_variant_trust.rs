@@ -1208,7 +1208,7 @@ pub(crate) mod tests {
     }
 
     fn migration_name_starts_with_store_path_content_variant_trust_prefix(name: &str) -> bool {
-        ["m20261221_000001_", "m20261221_000002_"]
+        ["m20261221_000001_", "m20261221_000002_", "m20270110_000000_"]
             .iter()
             .any(|prefix| name.starts_with(prefix))
     }
