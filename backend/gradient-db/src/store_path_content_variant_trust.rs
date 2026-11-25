@@ -63,7 +63,7 @@ crate::sql_fn! {
         budget = crate::sql::Budget::sweep().buffers(1_500_000)
             .because("The background pass of signature-backfill can run this one-time backfill after the cache subscription starts the signature. \
                       This statement can write one unsigned placeholder per project output into the cache. \
-                      Buffer reads reach 1.19 million on the amplified dump. \
+                      With every row marked it reads 0.97 million buffers on end-to-end row counts and 1.07 million after one delete. \
                       The cost is about 1.3 seconds per 100k output hashes.");
 
     INSERT_PLACEHOLDERS_FOR_PROJECT_STORE_HASHES = || unsigned_placeholders_insert(
@@ -74,35 +74,51 @@ crate::sql_fn! {
         tier = Bulk,
         budget = crate::sql::Budget::bulk().buffers(800_000)
             .because("The first push can walk the reference closure of each pushed path and read about 20 buffers per path to choose one trusted variant. \
-                      Later pushes stop at rows with a stored deletion count equal to the current deletion count of that cache. \
-                      The stop condition did not exist yet. 64 pushed paths with overlapping reference closures read 540k buffers in the amplified end-to-end dump.");
+                      Later pushes stop at rows that hold a reference closure mark. \
+                      Deletions clear only the marks on rows above the deleted path. \
+                      64 pushed paths with overlapping reference closures read 540k buffers in the amplified end-to-end dump. \
+                      No stop condition existed.");
 }
 
 fn unsigned_placeholders_insert(seeds: &str, filter: &str) -> String {
     format!(
         "WITH cached_path_cache_pairs_needing_signature_row_or_reference_claim AS MATERIALIZED ({claimable}), \
+         locked_deleted_path_signature_count_by_cache AS MATERIALIZED ({locked}), \
+         walk_rows_with_signature_claim_cleared_when_deletion_counts_differ AS MATERIALIZED ( \
+             SELECT claimable.cached_path, claimable.cache, \
+                    CASE WHEN locked.deleted_cached_path_signature_count = claimable.reference_closure_established_at_cache_deletion_count \
+                         THEN claimable.reference_closure_established_at_cache_deletion_count \
+                    END AS reference_closure_established_at_cache_deletion_count \
+             FROM cached_path_cache_pairs_needing_signature_row_or_reference_claim claimable \
+             LEFT JOIN locked_deleted_path_signature_count_by_cache locked ON locked.cache = claimable.cache \
+             WHERE {filter}), \
          mark_existing_cached_path_signatures_references_claimed AS ( \
              UPDATE cached_path_signature updated_cached_path_signature \
              SET reference_closure_established_at_cache_deletion_count = greatest( \
                  updated_cached_path_signature.reference_closure_established_at_cache_deletion_count, \
                  claimable.reference_closure_established_at_cache_deletion_count) \
-             FROM cached_path_cache_pairs_needing_signature_row_or_reference_claim claimable \
+             FROM walk_rows_with_signature_claim_cleared_when_deletion_counts_differ claimable \
              WHERE updated_cached_path_signature.cached_path = claimable.cached_path \
                AND updated_cached_path_signature.cache = claimable.cache \
                AND updated_cached_path_signature.reference_closure_established_at_cache_deletion_count \
                    IS DISTINCT FROM claimable.reference_closure_established_at_cache_deletion_count \
-               AND claimable.reference_closure_established_at_cache_deletion_count IS NOT NULL AND {filter}) \
+               AND claimable.reference_closure_established_at_cache_deletion_count IS NOT NULL) \
          INSERT INTO cached_path_signature (id, cached_path, cache, fetch_count, created_at, reference_closure_established_at_cache_deletion_count) \
          SELECT uuidv7(), claimable.cached_path, claimable.cache, 0, (now() AT TIME ZONE 'UTC'), \
                 claimable.reference_closure_established_at_cache_deletion_count \
-         FROM cached_path_cache_pairs_needing_signature_row_or_reference_claim claimable WHERE {filter} \
+         FROM walk_rows_with_signature_claim_cleared_when_deletion_counts_differ claimable \
          ON CONFLICT DO NOTHING",
+        locked = sql_select_cache_deleted_path_signature_counts_for_cache_uuids_for_share(&format!(
+            "ARRAY(SELECT DISTINCT claimable.cache \
+                   FROM cached_path_cache_pairs_needing_signature_row_or_reference_claim claimable \
+                   WHERE {filter})"
+        )),
         claimable =
             build_recursive_sql_for_content_variant_to_sign_with_reference_closure_per_cache_and_store_path_hash(
                 seeds,
                 &signing_subscription("claim_subscription"),
                 candidate_content_variant_is_in_target_cache_or_trusted_by_project,
-                cached_path_signature_stored_deletion_count_equals_cache_current_deletion_count_for_whole_reference_closure,
+                cached_path_signature_row_has_reference_closure_mark,
             ),
     )
 }
@@ -121,6 +137,31 @@ pub async fn insert_unsigned_signature_placeholders_for_trusted_store_path_conte
         ]))
         .await?
         .rows_affected())
+}
+
+crate::sql_fn! {
+    LOCK_PER_CACHE_DELETION_COUNTS_BY_CACHE_IDS = || {
+        sql_select_cache_deleted_path_signature_counts_for_cache_uuids_for_share("$1::uuid[]")
+    },
+        params = [CacheIds(64)],
+        tier = Hot;
+}
+
+pub async fn lock_cache_deletion_counts_for_share_in_cache_id_order<C: ConnectionTrait>(
+    db: &C,
+    caches: &[CacheId],
+) -> Result<std::collections::HashMap<CacheId, i64>, DbErr> {
+    let caches: Vec<uuid::Uuid> = caches.iter().map(|cache| cache.into_inner()).collect();
+    db.query_all_raw(LOCK_PER_CACHE_DELETION_COUNTS_BY_CACHE_IDS.bind([caches.into()]))
+        .await?
+        .into_iter()
+        .map(|row| {
+            Ok((
+                CacheId::new(row.try_get("", "cache")?),
+                row.try_get("", "deleted_cached_path_signature_count")?,
+            ))
+        })
+        .collect()
 }
 
 pub const SUBSCRIPTION_SIGNATURE_BACKFILL_ADVISORY_LOCK_CLASS: i32 = 647;
@@ -824,7 +865,7 @@ ORDER BY signable.cache, signable.hash
                 "claim_subscription"
             ),
             sql_prefix_for_project_readable_store_path_content_variant_with_nar_hash_and_nar_size,
-            cached_path_signature_has_signature_and_current_deletion_count,
+            cached_path_signature_has_signature_and_reference_closure_condition,
         ),
     ),
         params = [DerivationIds(64)],
@@ -886,29 +927,30 @@ pub fn build_sql_for_content_variants_needing_signature_from_store_hash_project_
         seeds,
         &signing_subscription("claim_subscription"),
         candidate_content_variant_is_in_target_cache_or_trusted_by_project,
-        cached_path_signature_has_signature_and_current_deletion_count,
+        cached_path_signature_has_signature_and_reference_closure_condition,
     )
 }
 
-fn cached_path_signature_has_signature_and_current_deletion_count(
-    alias: &str,
-    current_deletion_count: &str,
-) -> String {
+fn cached_path_signature_has_signature_and_reference_closure_condition(alias: &str) -> String {
     format!(
         "{alias}.signature IS NOT NULL AND {}",
-        cached_path_signature_stored_deletion_count_equals_cache_current_deletion_count_for_whole_reference_closure(
-            alias,
-            current_deletion_count
-        )
+        cached_path_signature_row_has_reference_closure_mark(alias)
     )
 }
 
-fn cached_path_signature_stored_deletion_count_equals_cache_current_deletion_count_for_whole_reference_closure(
-    alias: &str,
-    current_deletion_count: &str,
+fn cached_path_signature_row_has_reference_closure_mark(alias: &str) -> String {
+    format!("{alias}.reference_closure_established_at_cache_deletion_count IS NOT NULL")
+}
+
+pub fn sql_select_cache_deleted_path_signature_counts_for_cache_uuids_for_share(
+    caches: &str,
 ) -> String {
     format!(
-        "{alias}.reference_closure_established_at_cache_deletion_count = {current_deletion_count}"
+        "SELECT locked.cache, locked.deleted_cached_path_signature_count \
+         FROM binary_cache_deleted_path_signature_count locked \
+         WHERE locked.cache = ANY({caches}) \
+         ORDER BY locked.cache \
+         FOR SHARE"
     )
 }
 
@@ -916,7 +958,7 @@ fn build_recursive_sql_for_content_variant_to_sign_with_reference_closure_per_ca
     seeds: &str,
     target_subscription: &str,
     eligible: fn(&str, &str) -> String,
-    reference_walk_stop_condition: fn(&str, &str) -> String,
+    reference_walk_stop_condition: fn(&str) -> String,
 ) -> String {
     format!(
         r#"
@@ -1023,10 +1065,9 @@ ORDER BY selected_content_variant_for_signing.cache, selected_content_variant_fo
         ),
         rank = variant_rank("cp", "claim.cache"),
         seed_stop = reference_walk_stop_condition(
-            "target_cache_cached_path_signature_ending_walk_at_seed_store_path_hash",
-            "coalesce(target_cache_deletion_count.deleted_cached_path_signature_count, 0)",
+            "target_cache_cached_path_signature_ending_walk_at_seed_store_path_hash"
         ),
-        row_stop = reference_walk_stop_condition("s", "claim.target_cache_deletion_count_snapshot"),
+        row_stop = reference_walk_stop_condition("s"),
     )
 }
 
@@ -2276,7 +2317,7 @@ claim(cached_path, project, cache, target_cache_deletion_count_snapshot) AS (
               SELECT 1 FROM cached_path_signature s
               WHERE s.cached_path = claimed.id AND s.cache = claim.cache
                 AND s.signature IS NOT NULL
-                AND s.reference_closure_established_at_cache_deletion_count = claim.target_cache_deletion_count_snapshot)
+                AND s.reference_closure_established_at_cache_deletion_count IS NOT NULL)
     ) reference
     CROSS JOIN LATERAL ({reference_choice}) chosen
 ),
@@ -2289,7 +2330,7 @@ selected_content_variant_for_signing AS MATERIALIZED (
     JOIN cached_path cp ON cp.id = claim.cached_path
     LEFT JOIN cached_path_signature s ON s.cached_path = cp.id AND s.cache = claim.cache
     WHERE NOT coalesce(s.signature IS NOT NULL
-                       AND s.reference_closure_established_at_cache_deletion_count = claim.target_cache_deletion_count_snapshot, false)
+                       AND s.reference_closure_established_at_cache_deletion_count IS NOT NULL, false)
     ORDER BY claim.cache, cp.hash, {rank}
 ),
 store_paths_to_claim(cache, hash) AS MATERIALIZED (
@@ -2675,7 +2716,7 @@ ORDER BY selected_content_variant_for_signing.cache, selected_content_variant_fo
                                 &seeds,
                                 &signing_subscription("claim_subscription"),
                                 candidate_content_variant_is_in_target_cache_or_trusted_by_project,
-                                cached_path_signature_stored_deletion_count_equals_cache_current_deletion_count_for_whole_reference_closure,
+                                cached_path_signature_row_has_reference_closure_mark,
                             ),
                             &build_recursive_sql_before_skipping_already_signed_and_claimed_pairs(
                                 &seeds,
@@ -2710,7 +2751,7 @@ ORDER BY selected_content_variant_for_signing.cache, selected_content_variant_fo
                                 &seeds,
                                 &target_subscription,
                                 sql_prefix_for_project_readable_store_path_content_variant_with_nar_hash_and_nar_size,
-                                cached_path_signature_has_signature_and_current_deletion_count,
+                                cached_path_signature_has_signature_and_reference_closure_condition,
                             ),
                             &build_recursive_sql_before_skipping_already_signed_and_claimed_pairs(
                                 &seeds,
