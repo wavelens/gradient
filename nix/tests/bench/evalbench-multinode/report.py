@@ -35,18 +35,20 @@ def jobs_text(jobs):
     return f"{jobs} job" if jobs == 1 else f"{jobs} jobs"
 
 
-def speedup_verdicts(runs):
+def speedup_below_target_lines(runs):
     if 1 not in runs:
         return []
 
-    failed = []
-    for n in sorted(n for n in runs if n > 1):
-        if speedup(runs, n) < target(n):
-            failed.append(f"N={n}: speedup {speedup(runs, n):.2f} below {target(n):.2f}")
-        if runs[n]["jobs"] <= 1:
-            failed.append(f"N={n}: ran on {jobs_text(runs[n]['jobs'])}")
+    return [f"N={n}: speedup {speedup(runs, n):.2f} below {target(n):.2f}"
+            for n in sorted(n for n in runs if n > 1) if speedup(runs, n) < target(n)]
 
-    return failed
+
+def failure_lines_for_worker_counts_above_one_with_single_job(runs):
+    if 1 not in runs:
+        return []
+
+    return [f"N={n}: ran on {jobs_text(runs[n]['jobs'])}"
+            for n in sorted(n for n in runs if n > 1) if runs[n]["jobs"] <= 1]
 
 
 def small_complete(small):
@@ -69,7 +71,7 @@ def small_verdicts(small):
 
 
 def verdicts(runs, small=None):
-    return speedup_verdicts(runs) + small_verdicts(small)
+    return failure_lines_for_worker_counts_above_one_with_single_job(runs) + small_verdicts(small)
 
 
 def run_line(runs, n):

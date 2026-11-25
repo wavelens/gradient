@@ -175,8 +175,16 @@ def runs_table(runs):
 
 def verdict_card(failed):
     if not failed:
-        return '<div class="card">All #568 targets met.</div>'
-    return '<div class="card"><b>Missed targets</b><pre>' + escape("\n".join(failed)) + "</pre></div>"
+        return '<div class="card">All checks passed.</div>'
+    return '<div class="card"><b>Failed Checks</b><pre>' + escape("\n".join(failed)) + "</pre></div>"
+
+
+def worker_speedup_target_card(runs):
+    below = report.speedup_below_target_lines(runs)
+    if not below:
+        return '<div class="card">All speedup targets passed.</div>'
+    return ('<div class="card"><b>Speedups Below Target (Report Only)</b><pre>'
+            + escape("\n".join(below)) + "</pre></div>")
 
 
 def run_section(title, run, out_dir):
@@ -227,7 +235,8 @@ def render(runs, small, failed, out_dir=None):
         titled += [(f"Small Flake, {label}", small[label]) for label in ("standalone", "multinode")]
     nav = "<nav>" + "".join(f'<a href="#{anchor(title)}">{escape(title)}</a>' for title, _ in titled) + "</nav>"
     sections = nav + "".join(run_section(title, run, out_dir) for title, run in titled)
-    speedup = (f"<h2>Speedup</h2><div class=\"card\">{speedup_chart(runs)}{runs_table(runs)}</div>"
+    speedup = (f"<h2>Speedup</h2>{worker_speedup_target_card(runs)}"
+               f"<div class=\"card\">{speedup_chart(runs)}{runs_table(runs)}</div>"
                if 1 in runs else "")
     return (
         "<!doctype html><html><head><meta charset=\"utf-8\"><title>Multinode Evalbench</title>"

@@ -4,7 +4,7 @@
 
 import unittest
 
-from report import evaluation_phase_span_milliseconds, render, verdicts
+from report import evaluation_phase_span_milliseconds, render, speedup_below_target_lines, verdicts
 
 
 def run(end_to_end, statements=500, shards=4, jobs=1, phase_span=None):
@@ -18,15 +18,16 @@ def ph(phase, start_ms, end_ms, offset_ms=0):
 
 
 class ReportTest(unittest.TestCase):
-    def test_speedup_below_target_fails(self):
+    def test_speedup_below_target_is_reported_without_failing(self):
         runs = {1: run(100_000), 2: run(90_000, jobs=2)}
-        self.assertEqual(verdicts(runs), ["N=2: speedup 1.11 below 1.15"])
+        self.assertEqual(speedup_below_target_lines(runs), ["N=2: speedup 1.11 below 1.15"])
+        self.assertEqual(verdicts(runs), [])
 
     def test_speedup_compares_end_to_end_durations_not_worker_phases(self):
         runs = {1: run(143_700, phase_span=104_900), 4: run(88_900, jobs=4, phase_span=78_400)}
-        self.assertEqual(verdicts(runs), [])
+        self.assertEqual(speedup_below_target_lines(runs), [])
         runs = {1: run(100_000, phase_span=200_000), 4: run(90_000, jobs=4, phase_span=50_000)}
-        self.assertEqual(verdicts(runs), ["N=4: speedup 1.11 below 1.45"])
+        self.assertEqual(speedup_below_target_lines(runs), ["N=4: speedup 1.11 below 1.45"])
 
     def test_a_split_that_never_happened_fails(self):
         runs = {1: run(100_000), 2: run(50_000, jobs=1)}

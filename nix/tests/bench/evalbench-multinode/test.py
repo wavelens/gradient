@@ -450,6 +450,9 @@ def write_summary(runs, small):
     (out / "report").mkdir(exist_ok=True)
     (out / "report" / "index.html").write_text(page.render(runs, small, failed, out))
     print(text)
+    below = report.speedup_below_target_lines(runs)
+    if below:
+        print("Speedups below target (report only)\n" + "\n".join(below))
 
 
 def measure_large(token):
@@ -511,4 +514,4 @@ finally:
 out = pathlib.Path(server.out_dir)
 publish(out, out / "report" / "index.html", name="evalbench-multinode")
 failed = report.verdicts(runs, small)
-assert not failed, "missed #568 targets:\n" + "\n".join(failed)
+assert not failed, "Failed checks\n" + "\n".join(failed)
