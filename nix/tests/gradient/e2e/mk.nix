@@ -2838,6 +2838,11 @@ pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
         "SELECT gen_random_uuid(), 'gate', 'GATE-GATE', id, created_at, created_at "
         "FROM \"user\" ORDER BY created_at LIMIT 1;"
     )
+    sql(
+        "INSERT INTO git_host_connection (id, name, display_name, git_host_type, created_by, created_at) "
+        "SELECT gen_random_uuid(), 'gate', 'gate', 0, id, created_at "
+        "FROM \"user\" ORDER BY created_at LIMIT 1;"
+    )
 
     print(server.succeed(
         "${pkgs.gradient.gate}/bin/gradient-sql-gate "

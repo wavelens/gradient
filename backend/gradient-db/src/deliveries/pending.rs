@@ -51,7 +51,7 @@ crate::sql! {
          FROM unnest($1::uuid[], $3::text[], $4::text[]) AS r(id, key, payload) \
          ON CONFLICT (kind, key) WHERE delivered_at IS NULL AND failed_at IS NULL \
          DO UPDATE SET revision = pending_delivery.revision + 1, payload = EXCLUDED.payload, attempts = 0",
-        params = [NewUuids(64), Int(8), Texts("pending-delivery-gate-probe", 64), Texts("{}", 64)];
+        params = [NewUuids(1), Int(8), Texts("pending-delivery-gate-probe", 1), Texts("{}", 1)];
 
     /// Attempt count, dead-letter check and next attempt happen in one statement. Any separate write after the read of `attempts` can drop concurrent retries on the same row.
     RECORD_CLAIMED_PENDING_DELIVERY_OUTCOMES = "UPDATE pending_delivery p SET \
