@@ -50,21 +50,15 @@ crate::sql_fn! {
         params = [];
 
     INSERT_PLACEHOLDERS_FOR_PROJECT_OUTPUTS_INTO_CACHE = || unsigned_placeholders_insert(
-        "SELECT DISTINCT dout.hash, t.project \
-         FROM task t \
-         JOIN evaluation e           ON e.task = t.id \
-         JOIN build_job bj           ON bj.evaluation = e.id \
-         JOIN derivation_output dout ON dout.derivation = bj.derivation \
-         WHERE t.project = $1 AND dout.hash IS NOT NULL",
+        PROJECT_EVALUATION_BUILD_JOB_OUTPUT_STORE_PATH_HASH_PROJECT_PAIR_SELECT_SQL,
         "claimable.cache = $2",
     ),
         params = [ProjectId, CacheId],
         tier = Sweep,
         budget = crate::sql::Budget::sweep().buffers(1_500_000)
-            .because("The background pass of signature-backfill can run this one-time backfill after the cache subscription starts the signature. \
-                      This statement can write one unsigned placeholder per project output into the cache. \
-                      With every row marked it reads 0.97 million buffers on end-to-end row counts and 1.07 million after one delete. \
-                      The cost is about 1.3 seconds per 100k output hashes.");
+            .because("The background pass for signature backfill can run this one-time insertion after the start of signing for the cache subscription. \
+                      This pass can write one unsigned placeholder for each project output to the cache. \
+                      End-to-end row counts read 17k buffers with all rows marked, 420k buffers with 4% of rows unmarked and 720k buffers after one delete.");
 
     INSERT_PLACEHOLDERS_FOR_PROJECT_STORE_HASHES = || unsigned_placeholders_insert(
         "SELECT DISTINCT pushed.hash, $1::uuid FROM unnest($2::text[]) pushed(hash)",
@@ -79,6 +73,14 @@ crate::sql_fn! {
                       64 pushed paths with overlapping reference closures read 540k buffers in the amplified end-to-end dump. \
                       No stop condition existed.");
 }
+
+// We don't use DISTINCT here. The planner can't see the actual row count through a DISTINCT subquery. Index lookups then probe every hash instead of a single hash anti-join. The walk can deduplicate hashes later.
+const PROJECT_EVALUATION_BUILD_JOB_OUTPUT_STORE_PATH_HASH_PROJECT_PAIR_SELECT_SQL: &str = "SELECT dout.hash, t.project \
+     FROM task t \
+     JOIN evaluation e           ON e.task = t.id \
+     JOIN build_job bj           ON bj.evaluation = e.id \
+     JOIN derivation_output dout ON dout.derivation = bj.derivation \
+     WHERE t.project = $1 AND dout.hash IS NOT NULL";
 
 fn unsigned_placeholders_insert(seeds: &str, filter: &str) -> String {
     format!(
@@ -907,13 +909,31 @@ fn chosen_variant(
     cache: &str,
     eligible: fn(&str, &str) -> String,
 ) -> String {
+    build_chosen_variant_sql_subquery_with_held_condition(
+        hash,
+        project,
+        cache,
+        eligible,
+        &format!(
+            "(EXISTS (SELECT 1 FROM cached_path_signature held \
+                      WHERE held.cached_path = candidate.id AND held.cache = {cache}) \
+              OR NOT EXISTS (SELECT 1 FROM cached_path_signature held \
+                             WHERE held.store_path_hash = candidate.hash AND held.cache = {cache}))"
+        ),
+    )
+}
+
+fn build_chosen_variant_sql_subquery_with_held_condition(
+    hash: &str,
+    project: &str,
+    cache: &str,
+    eligible: fn(&str, &str) -> String,
+    held: &str,
+) -> String {
     format!(
         "SELECT candidate.id FROM cached_path candidate \
          WHERE candidate.hash = {hash} \
-           AND {eligible}(EXISTS (SELECT 1 FROM cached_path_signature held \
-                        WHERE held.cached_path = candidate.id AND held.cache = {cache}) \
-                OR NOT EXISTS (SELECT 1 FROM cached_path_signature held \
-                               WHERE held.store_path_hash = candidate.hash AND held.cache = {cache})) \
+           AND {eligible}{held} \
          ORDER BY {rank} LIMIT 1",
         eligible = eligible(project, cache),
         rank = variant_rank("candidate", cache),
@@ -990,12 +1010,12 @@ claim(cached_path, project, cache, target_cache_deletion_count_snapshot) AS (
         JOIN cached_path claimed ON claimed.id = claim.cached_path
         CROSS JOIN LATERAL unnest(string_to_array(claimed."references", ' ')) r(token)
         WHERE r.token <> ''
-          AND NOT EXISTS (
-              SELECT 1 FROM cached_path_signature s
-              WHERE s.cached_path = claimed.id AND s.cache = claim.cache
-                AND {row_stop})
     ) reference
+    LEFT JOIN cached_path_signature referenced_store_path_cached_signature
+      ON referenced_store_path_cached_signature.cache = reference.cache
+     AND referenced_store_path_cached_signature.store_path_hash = reference.hash
     CROSS JOIN LATERAL ({reference_choice}) chosen
+    WHERE NOT coalesce({reference_stop}, false)
 ),
 selected_content_variant_for_signing AS MATERIALIZED (
     SELECT DISTINCT ON (claim.cache, cp.hash)
@@ -1057,17 +1077,20 @@ ORDER BY selected_content_variant_for_signing.cache, selected_content_variant_fo
             "claim_target.cache",
             eligible,
         ),
-        reference_choice = chosen_variant(
+        reference_choice = build_chosen_variant_sql_subquery_with_held_condition(
             "reference.hash",
             "reference.project",
             "reference.cache",
             eligible,
+            "(referenced_store_path_cached_signature.id IS NULL \
+              OR referenced_store_path_cached_signature.cached_path = candidate.id)",
         ),
         rank = variant_rank("cp", "claim.cache"),
         seed_stop = reference_walk_stop_condition(
             "target_cache_cached_path_signature_ending_walk_at_seed_store_path_hash"
         ),
         row_stop = reference_walk_stop_condition("s"),
+        reference_stop = reference_walk_stop_condition("referenced_store_path_cached_signature"),
     )
 }
 
@@ -2642,12 +2665,6 @@ ORDER BY selected_content_variant_for_signing.cache, selected_content_variant_fo
                 &[],
             ),
         ];
-        let project_build_job_output_hashes_insert_sql_seed = "SELECT DISTINCT dout.hash, t.project \
-             FROM task t \
-             JOIN evaluation e           ON e.task = t.id \
-             JOIN build_job bj           ON bj.evaluation = e.id \
-             JOIN derivation_output dout ON dout.derivation = bj.derivation \
-             WHERE t.project = $1 AND dout.hash IS NOT NULL";
         let pushed_store_path_hashes_insert_sql_seed_copy =
             "SELECT DISTINCT pushed.hash, $1::uuid FROM unnest($2::text[]) pushed(hash)";
         let dependency_derivation_path = format!("/nix/store/{}-dependency.drv", "p".repeat(32));
@@ -2691,7 +2708,8 @@ ORDER BY selected_content_variant_for_signing.cache, selected_content_variant_fo
             let three_compared_statement_text_and_binding_replacements = [
                 (
                     INSERT_PLACEHOLDERS_FOR_PROJECT_OUTPUTS_INTO_CACHE.text().into_owned(),
-                    project_build_job_output_hashes_insert_sql_seed.to_owned(),
+                    PROJECT_EVALUATION_BUILD_JOB_OUTPUT_STORE_PATH_HASH_PROJECT_PAIR_SELECT_SQL
+                        .to_owned(),
                     vec![
                         Value::Uuid(Some(waiting_project_id)),
                         Value::Uuid(Some(fixture.cache.into_inner())),
