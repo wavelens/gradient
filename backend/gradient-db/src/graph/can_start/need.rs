@@ -210,24 +210,27 @@ fn need_sql(stop_region_at: &str) -> String {
         stop_region_at,
     );
     let entered = format!(
-        "entered(derivation) AS (SELECT open_wanted_edges.dependency FROM \
-         (SELECT oe.parent, oe.dependency FROM \
-          (SELECT e.derivation AS parent, e.dependency \
-           FROM (SELECT DISTINCT derivation FROM region) r \
-           JOIN derivation_dependency e ON e.dependency = r.derivation OFFSET 0) oe \
-          CROSS JOIN LATERAL (SELECT 1 FROM derivation_build p \
-                              WHERE p.derivation = oe.parent AND p.wanted AND {open} \
-                              OFFSET 0) wanted_open_parent \
-          OFFSET 0) open_wanted_edges \
-         CROSS JOIN LATERAL (SELECT 1 FROM derivation_dependency k \
-                             JOIN derivation_build pb ON pb.derivation = k.derivation \
-                             JOIN derivation pw ON pw.id = pb.derivation \
-                             WHERE (k.derivation, k.dependency) \
-                                   = (open_wanted_edges.parent, open_wanted_edges.dependency) \
-                               AND (({builder}) OR k.kind IN (1, 2)) \
-                               AND {walk_may_enter_dependency_sql} OFFSET 0) wanting \
-         WHERE NOT EXISTS (SELECT 1 FROM region x \
-                           WHERE x.derivation = open_wanted_edges.parent))",
+        "region_derivation_id_array(region_derivation_ids) AS MATERIALIZED \
+         (SELECT array_agg(DISTINCT derivation) FROM region), \
+         entered(derivation) AS (SELECT r.derivation \
+         FROM (SELECT DISTINCT derivation FROM region) r \
+         CROSS JOIN LATERAL (SELECT 1 FROM \
+          (SELECT e.derivation AS parent FROM derivation_dependency e \
+           CROSS JOIN LATERAL (SELECT 1 FROM derivation_build p \
+                               WHERE p.derivation = e.derivation AND p.wanted AND {open} \
+                               OFFSET 0) wanted_open_parent \
+           WHERE e.dependency = r.derivation \
+             AND e.derivation NOT IN (SELECT unnest(region_derivation_ids) \
+                                      FROM region_derivation_id_array) \
+           OFFSET 0) wanted_open_outside_region_parent_derivations \
+          CROSS JOIN LATERAL (SELECT 1 FROM derivation_dependency k \
+                              JOIN derivation_build pb ON pb.derivation = k.derivation \
+                              JOIN derivation pw ON pw.id = pb.derivation \
+                              WHERE (k.derivation, k.dependency) \
+                                    = (wanted_open_outside_region_parent_derivations.parent, r.derivation) \
+                                AND (({builder}) OR k.kind IN (1, 2)) \
+                                AND {walk_may_enter_dependency_sql} OFFSET 0) outside_parent_wanted_region_derivation_edge \
+          LIMIT 1) wanting)",
         open = open_predicate("p"),
         builder = builds_once_wanted_predicate("pb", "pw"),
         walk_may_enter_dependency_sql = walk_may_enter_dependency_sql(),
@@ -924,13 +927,6 @@ mod tests {
         );
         assert!(
             walk.contains(
-                "OFFSET 0) wanting WHERE NOT EXISTS (SELECT 1 FROM region x \
-                 WHERE x.derivation = open_wanted_edges.parent))"
-            ),
-            "Take the seed from a wanter outside the region. Run the region check only for parents that are already wanted and open: {walk}"
-        );
-        assert!(
-            walk.contains(
                 "OFFSET 0) t WHERE EXISTS (SELECT 1 FROM region x WHERE x.derivation = t.next))"
             ),
             "the wanted step semi-joins the region once per level: {walk}"
@@ -951,31 +947,39 @@ mod tests {
         );
         assert!(
             walk.contains(&format!(
-                "entered(derivation) AS (SELECT open_wanted_edges.dependency FROM \
-                 (SELECT oe.parent, oe.dependency FROM \
-                 (SELECT e.derivation AS parent, e.dependency \
+                "entered(derivation) AS (SELECT r.derivation \
                  FROM (SELECT DISTINCT derivation FROM region) r \
-                 JOIN derivation_dependency e ON e.dependency = r.derivation OFFSET 0) oe \
+                 CROSS JOIN LATERAL (SELECT 1 FROM \
+                 (SELECT e.derivation AS parent FROM derivation_dependency e \
                  CROSS JOIN LATERAL (SELECT 1 FROM derivation_build p \
-                 WHERE p.derivation = oe.parent AND p.wanted \
+                 WHERE p.derivation = e.derivation AND p.wanted \
                  AND (NOT p.fetchable AND p.status NOT IN (4, 6, 9)) \
                  OFFSET 0) wanted_open_parent \
-                 OFFSET 0) open_wanted_edges \
+                 WHERE e.dependency = r.derivation \
+                 AND e.derivation NOT IN (SELECT unnest(region_derivation_ids) \
+                 FROM region_derivation_id_array) \
+                 OFFSET 0) wanted_open_outside_region_parent_derivations \
                  CROSS JOIN LATERAL (SELECT 1 FROM derivation_dependency k \
                  JOIN derivation_build pb ON pb.derivation = k.derivation \
                  JOIN derivation pw ON pw.id = pb.derivation \
                  WHERE (k.derivation, k.dependency) \
-                 = (open_wanted_edges.parent, open_wanted_edges.dependency) \
+                 = (wanted_open_outside_region_parent_derivations.parent, r.derivation) \
                  AND ((pw.walked AND pb.probed AND NOT pb.cache_available \
                  AND pb.status IN (0, 1, 2, 5, 8, 10)) OR k.kind IN (1, 2)) \
-                 AND {walk_may_enter_dependency_sql} OFFSET 0) wanting \
-                 WHERE NOT EXISTS (SELECT 1 FROM region x \
-                 WHERE x.derivation = open_wanted_edges.parent))",
+                 AND {walk_may_enter_dependency_sql} OFFSET 0) \
+                 outside_parent_wanted_region_derivation_edge \
+                 LIMIT 1) wanting)",
                 walk_may_enter_dependency_sql =
                     norm(&walk_may_enter_dependency_sql()).replace('"', "\\\""),
             )),
-            "the parent probe is a lateral lookup by key, never a semi join the planner can \
-             turn into a materialised filter: {walk}"
+            "Derivations in the `region` reach the `entered` state at the first `wanted` and `open` parent outside the `region`. The lookup can stop there. No need to scan every parent edge of a widely shared dependency. {walk}"
+        );
+        assert!(
+            walk.contains(
+                "region_derivation_id_array(region_derivation_ids) AS MATERIALIZED \
+                 (SELECT array_agg(DISTINCT derivation) FROM region)"
+            ) && !walk.contains("<> ALL ("),
+            "The region check is `NOT IN` against the unnested region array. The planner can hash that array once per query. `<> ALL` against the array can scan the array once for each parent edge. Cost can rise quadratically with the size of region. {walk}"
         );
         assert!(
             walk.contains(
