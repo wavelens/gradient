@@ -41,7 +41,10 @@ allow-wildcard-paths = true
 version      = 2
 yanked       = "deny"
 unmaintained = "workspace"
-ignore       = []
+ignore       = [
+  { id = "RUSTSEC-2023-0071", reason = "No fixed rsa release exists. age needs it for RSA SSH keys. See #1181 for details." },
+  { id = "RUSTSEC-2026-0543", reason = "No maintained release. See #1182 for the chrono replacement." },
+]
 
 [sources]
 unknown-registry = "deny"

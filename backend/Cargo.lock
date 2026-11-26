@@ -1378,9 +1378,9 @@ dependencies = [
 
 [[package]]
 name = "cookie"
-version = "0.18.2"
+version = "0.18.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1a373e3602691c3cdea496d2f0ee5935151e6168fe87739483c463db1b2f2f87"
+checksum = "d55f2d6c30eeec7d5c6f98bd4395d4abb1895629eab97ee6522d340623615f8a"
 dependencies = [
  "time",
  "version_check",
@@ -1522,9 +1522,9 @@ dependencies = [
 
 [[package]]
 name = "crypto-bigint"
-version = "0.7.5"
+version = "0.7.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1a52aa3fcda4e6302a9f48734f234d35d4721b96f8fe07d073f07ce9df4f0271"
+checksum = "914c195c4d7fbc5ed7f88d14cbf85914d5c664967658d43404b263913a477e82"
 dependencies = [
  "cpubits",
  "ctutils",
@@ -1997,9 +1997,9 @@ dependencies = [
 
 [[package]]
 name = "email-encoding"
-version = "0.4.2"
+version = "0.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "420b9da095f052ea597503e39073b5b3c522f7db933fbac202d91d24492693fd"
+checksum = "9f690ae2169f2ceb3f45b28b6fcd8fa16839f2f5c8818546774b9425f5f71004"
 dependencies = [
  "base64 0.23.1",
  "memchr",
@@ -2090,7 +2090,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -2311,9 +2311,9 @@ checksum = "77ce24cb58228fbb8aa041425bb1050850ac19177686ea6e0f41a70416f56fdb"
 
 [[package]]
 name = "form_urlencoded"
-version = "1.2.2"
+version = "1.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cb4cb245038516f5f85277875cdaa4f7d2c9a0fa0468de06ed190163b1581fcf"
+checksum = "afa489199eaffb1211795df1c6236ce1ad0d41a6fa45250add73e3b02420f06e"
 dependencies = [
  "percent-encoding",
 ]
@@ -2594,7 +2594,7 @@ dependencies = [
 
 [[package]]
 name = "gradient-api-types"
-version = "2.0.1"
+version = "2.1.0-rc.1"
 dependencies = [
  "chrono",
  "clap",
@@ -2610,7 +2610,7 @@ dependencies = [
 
 [[package]]
 name = "gradient-cache"
-version = "2.0.1"
+version = "2.1.0-rc.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2647,7 +2647,7 @@ dependencies = [
 
 [[package]]
 name = "gradient-ci"
-version = "2.0.1"
+version = "2.1.0-rc.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2690,7 +2690,7 @@ dependencies = [
 
 [[package]]
 name = "gradient-core"
-version = "2.0.1"
+version = "2.1.0-rc.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2737,7 +2737,7 @@ dependencies = [
 
 [[package]]
 name = "gradient-daemon"
-version = "2.0.1"
+version = "2.1.0-rc.1"
 dependencies = [
  "anyhow",
  "async-stream",
@@ -2777,7 +2777,7 @@ dependencies = [
 
 [[package]]
 name = "gradient-db"
-version = "2.0.1"
+version = "2.1.0-rc.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2810,7 +2810,7 @@ dependencies = [
 
 [[package]]
 name = "gradient-derivation"
-version = "2.0.1"
+version = "2.1.0-rc.1"
 dependencies = [
  "anyhow",
  "gradient-wire",
@@ -2819,7 +2819,7 @@ dependencies = [
 
 [[package]]
 name = "gradient-derive"
-version = "2.0.1"
+version = "2.1.0-rc.1"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -2828,7 +2828,7 @@ dependencies = [
 
 [[package]]
 name = "gradient-effects"
-version = "2.0.1"
+version = "2.1.0-rc.1"
 dependencies = [
  "anyhow",
  "gradient-ci",
@@ -2851,7 +2851,7 @@ dependencies = [
 
 [[package]]
 name = "gradient-entity"
-version = "2.0.1"
+version = "2.1.0-rc.1"
 dependencies = [
  "chrono",
  "futures",
@@ -2868,7 +2868,7 @@ dependencies = [
 
 [[package]]
 name = "gradient-eval"
-version = "2.0.1"
+version = "2.1.0-rc.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2888,7 +2888,7 @@ dependencies = [
 
 [[package]]
 name = "gradient-fixtures"
-version = "2.0.1"
+version = "2.1.0-rc.1"
 dependencies = [
  "chrono",
  "gradient-db",
@@ -2904,7 +2904,7 @@ dependencies = [
 
 [[package]]
 name = "gradient-git-host"
-version = "2.0.1"
+version = "2.1.0-rc.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2932,7 +2932,7 @@ dependencies = [
 
 [[package]]
 name = "gradient-graph"
-version = "2.0.1"
+version = "2.1.0-rc.1"
 dependencies = [
  "anyhow",
  "chrono",
@@ -2964,7 +2964,7 @@ dependencies = [
 
 [[package]]
 name = "gradient-guest-agent"
-version = "2.0.1"
+version = "2.1.0-rc.1"
 dependencies = [
  "anyhow",
  "axum",
@@ -2994,7 +2994,7 @@ dependencies = [
 
 [[package]]
 name = "gradient-migration"
-version = "2.0.1"
+version = "2.1.0-rc.1"
 dependencies = [
  "async-trait",
  "sea-orm-migration",
@@ -3006,7 +3006,7 @@ dependencies = [
 
 [[package]]
 name = "gradient-notify"
-version = "2.0.1"
+version = "2.1.0-rc.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -3021,7 +3021,7 @@ dependencies = [
 
 [[package]]
 name = "gradient-pool"
-version = "2.0.1"
+version = "2.1.0-rc.1"
 dependencies = [
  "chrono",
  "gradient-api-types",
@@ -3037,7 +3037,7 @@ dependencies = [
 
 [[package]]
 name = "gradient-proto"
-version = "2.0.1"
+version = "2.1.0-rc.1"
 dependencies = [
  "anyhow",
  "arc-swap",
@@ -3079,7 +3079,7 @@ dependencies = [
 
 [[package]]
 name = "gradient-redact"
-version = "2.0.1"
+version = "2.1.0-rc.1"
 dependencies = [
  "aho-corasick",
  "base64 0.23.1",
@@ -3090,7 +3090,7 @@ dependencies = [
 
 [[package]]
 name = "gradient-report"
-version = "2.0.1"
+version = "2.1.0-rc.1"
 dependencies = [
  "anyhow",
  "gradient-db",
@@ -3111,7 +3111,7 @@ dependencies = [
 
 [[package]]
 name = "gradient-scheduler"
-version = "2.0.1"
+version = "2.1.0-rc.1"
 dependencies = [
  "anyhow",
  "arc-swap",
@@ -3152,7 +3152,7 @@ dependencies = [
 
 [[package]]
 name = "gradient-secret"
-version = "2.0.1"
+version = "2.1.0-rc.1"
 dependencies = [
  "libc",
  "subtle",
@@ -3161,7 +3161,7 @@ dependencies = [
 
 [[package]]
 name = "gradient-server"
-version = "2.0.1"
+version = "2.1.0-rc.1"
 dependencies = [
  "anyhow",
  "clap",
@@ -3188,7 +3188,7 @@ dependencies = [
 
 [[package]]
 name = "gradient-sops"
-version = "2.0.1"
+version = "2.1.0-rc.1"
 dependencies = [
  "aes-gcm 0.11.1",
  "age",
@@ -3206,7 +3206,7 @@ dependencies = [
 
 [[package]]
 name = "gradient-sources"
-version = "2.0.1"
+version = "2.1.0-rc.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -3251,7 +3251,7 @@ dependencies = [
 
 [[package]]
 name = "gradient-ssh"
-version = "2.0.1"
+version = "2.1.0-rc.1"
 dependencies = [
  "anyhow",
  "async-compression",
@@ -3299,7 +3299,7 @@ dependencies = [
 
 [[package]]
 name = "gradient-state"
-version = "2.0.1"
+version = "2.1.0-rc.1"
 dependencies = [
  "anyhow",
  "base64 0.23.1",
@@ -3328,7 +3328,7 @@ dependencies = [
 
 [[package]]
 name = "gradient-storage"
-version = "2.0.1"
+version = "2.1.0-rc.1"
 dependencies = [
  "anyhow",
  "async-compression",
@@ -3364,7 +3364,7 @@ dependencies = [
 
 [[package]]
 name = "gradient-test-support"
-version = "2.0.1"
+version = "2.1.0-rc.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -3407,7 +3407,7 @@ dependencies = [
 
 [[package]]
 name = "gradient-types"
-version = "2.0.1"
+version = "2.1.0-rc.1"
 dependencies = [
  "anyhow",
  "base64 0.23.1",
@@ -3444,7 +3444,7 @@ dependencies = [
 
 [[package]]
 name = "gradient-util"
-version = "2.0.1"
+version = "2.1.0-rc.1"
 dependencies = [
  "base64 0.23.1",
  "bytes",
@@ -3473,7 +3473,7 @@ dependencies = [
 
 [[package]]
 name = "gradient-vm"
-version = "2.0.1"
+version = "2.1.0-rc.1"
 dependencies = [
  "anyhow",
  "gradient-wire",
@@ -3494,7 +3494,7 @@ dependencies = [
 
 [[package]]
 name = "gradient-web"
-version = "2.0.1"
+version = "2.1.0-rc.1"
 dependencies = [
  "anyhow",
  "async-stream",
@@ -3581,11 +3581,11 @@ dependencies = [
 
 [[package]]
 name = "gradient-wildcard"
-version = "2.0.1"
+version = "2.1.0-rc.1"
 
 [[package]]
 name = "gradient-wire"
-version = "2.0.1"
+version = "2.1.0-rc.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -3618,7 +3618,7 @@ dependencies = [
 
 [[package]]
 name = "gradient-worker"
-version = "2.0.1"
+version = "2.1.0-rc.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -3682,7 +3682,7 @@ dependencies = [
 
 [[package]]
 name = "gradient-worker-client"
-version = "2.0.1"
+version = "2.1.0-rc.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -4740,9 +4740,9 @@ dependencies = [
 
 [[package]]
 name = "lettre"
-version = "0.11.23"
+version = "0.11.24"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f2c646bd5cc763b1087b15493e29a64be6147ba8f19342004fa52048ee596eae"
+checksum = "f294f3d7cdb313e578acef7d7727d4e8d897e0fcd0d6d58c19959cec95073f19"
 dependencies = [
  "async-trait",
  "base64 0.23.1",
@@ -4891,9 +4891,9 @@ checksum = "2e126dda6f34391ab7b444f9922055facc83c07a910da3eb16f1e4d9c45dc777"
 
 [[package]]
 name = "libz-sys"
-version = "1.1.30"
+version = "1.1.33"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f710a23e6dbf193214fd46ca56a9d6864e550abe86202184532ae7275e46de19"
+checksum = "fee3f59f4321dab0c78d828942e7aa09d0bd8ad6e78a501977e6bf3d02938045"
 dependencies = [
  "cc",
  "libc",
@@ -5250,7 +5250,7 @@ version = "0.50.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7957b9740744892f114936ab4a57b3f487491bbeafaf8083688b16841a4240e5"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -6537,7 +6537,7 @@ dependencies = [
  "once_cell",
  "socket2",
  "tracing",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -7105,7 +7105,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys 0.12.1",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -7164,7 +7164,7 @@ dependencies = [
  "security-framework",
  "security-framework-sys",
  "webpki-root-certs",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -8337,10 +8337,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
- "getrandom 0.4.3",
+ "getrandom 0.3.4",
  "once_cell",
  "rustix 1.1.5",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -8456,9 +8456,9 @@ checksum = "fd3ca314f692efd6c868f8408f53fe444634a845f96c028b97d35f6a1f79f0ee"
 
 [[package]]
 name = "tokio"
-version = "1.54.0"
+version = "1.54.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a0c168a474b95bfecfe908a65d4bdffc523144b649a74c09c286afb35d53e0bc"
+checksum = "b52fd3255258d26fac7264ab5a76b53c13367136dc011d3d6ad4f8ed070396a3"
 dependencies = [
  "bytes",
  "libc",
@@ -9143,9 +9143,9 @@ dependencies = [
 
 [[package]]
 name = "url"
-version = "2.5.8"
+version = "2.5.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ff67a8a4397373c3ef660812acab3268222035010ab8680ec4215f38ba3d0eed"
+checksum = "f00cd2407bb42c0ef17be88d4cf020f5cceffd121665bac9b8b9493a369b3b1a"
 dependencies = [
  "form_urlencoded",
  "idna",
@@ -9428,7 +9428,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]

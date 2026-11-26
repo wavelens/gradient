@@ -5,7 +5,7 @@
 # This manifest is self-contained and doesn't inherit from a workspace. The separate gradient-cli workspace can use this crate as a path dependency.
 [package]
 name = "gradient-api-types"
-version = "2.0.1"
+version = "2.1.0-rc.1"
 edition = "2024"
 license = "AGPL-3.0-only"
 authors = ["Wavelens GmbH <info@wavelens.io>"]
