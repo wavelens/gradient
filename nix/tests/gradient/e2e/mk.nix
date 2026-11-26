@@ -2844,20 +2844,6 @@ pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
         "FROM \"user\" ORDER BY created_at LIMIT 1;"
     )
 
-    print("MARKSTATE per cache: " + sql(
-        "SELECT s.cache, count(*), count(s.reference_closure_established_at_cache_deletion_count), "
-        "count(s.signature), (SELECT d.deleted_cached_path_signature_count "
-        "FROM binary_cache_deleted_path_signature_count d WHERE d.cache = s.cache), "
-        "count(*) FILTER (WHERE s.reference_closure_established_at_cache_deletion_count IS NULL AND EXISTS ("
-        "SELECT 1 FROM cached_path cp, unnest(public.cached_path_references_to_store_path_hashes(cp.\"references\")) r(hash) "
-        "WHERE cp.id = s.cached_path AND r.hash <> cp.hash AND NOT EXISTS ("
-        "SELECT 1 FROM cached_path_signature below WHERE below.cache = s.cache AND below.store_path_hash = r.hash))) "
-        "FROM cached_path_signature s GROUP BY s.cache;"
-    ))
-    print("MARKSTATE tables: " + sql(
-        "SELECT (SELECT count(*) FROM cached_path), (SELECT count(*) FROM derivation_output WHERE hash IS NOT NULL), "
-        "(SELECT count(*) FROM project_cache), (SELECT count(*) FROM cache);"
-    ))
     print(server.succeed(
         "${pkgs.gradient.gate}/bin/gradient-sql-gate "
         "--database-url postgresql://postgres@127.0.0.1/gradient "
