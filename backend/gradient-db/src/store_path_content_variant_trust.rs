@@ -56,7 +56,7 @@ crate::sql_fn! {
         params = [ProjectId, CacheId],
         tier = Sweep,
         budget = crate::sql::Budget::sweep().buffers(1_500_000)
-            .because("The background pass for signature backfill can run this one-time insertion after the start of signing for the cache subscription. \
+            .because("The background pass for signature-backfill can run this one-time insertion after the start of signing for the cache subscription. \
                       This pass can write one unsigned placeholder for each project output to the cache. \
                       End-to-end row counts read 17k buffers with all rows marked, 420k buffers with 4% of rows unmarked and 720k buffers after one delete.");
 
@@ -3305,10 +3305,10 @@ ORDER BY selected_content_variant_for_signing.cache, selected_content_variant_fo
                     (referenced_store_path_hash, true)
                 ],
                 fully_marked_cache_expected_store_path_hash_marks.clone(),
-                (1, 4.0),
+                (1, 3.0),
                 fully_marked_cache_expected_store_path_hash_marks
             ),
-            "The deletion of the X row in cache 1 cleared the marks on A and B. Y and Z kept their marks. Every row in cache 2 kept its mark. The next push of A recreated the X row. That push visited A, B, X and Y, but not Z below the marked Y. That push marked every row in cache 1."
+            "The deletion of the X row in cache 1 cleared the marks on A and B. Y and Z kept their marks. Every row in cache 2 kept its mark. The next push of A recreated the X row. The walk visited A, B, and X on that push, but didn't visit the marked Y or Z under Y. That push marked every row in cache 1."
         );
     }
 
