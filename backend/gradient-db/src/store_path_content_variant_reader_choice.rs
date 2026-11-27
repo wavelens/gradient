@@ -14,9 +14,10 @@ use crate::graph::predicates::{
     derivation_build_has_build_job_not_aborted_and_evaluation_not_finished_sql_predicate,
     stored_copy_in_input_closure_or_trusted_by_every_project_with_live_job_on_shared_build_sql_condition,
 };
+use crate::sql::Query;
 use crate::store_path_content_variant_trust::{
     project_trusts_content_variant_exists_sql, query_input_closure_store_path_hashes_for_build,
-    variant_rank,
+    query_input_closure_store_path_hashes_for_evaluation, variant_rank,
 };
 use gradient_types::*;
 use sea_orm::{ConnectionTrait, DbErr, FromQueryResult, Statement, Value};
@@ -37,26 +38,20 @@ struct StorePathHashSetAndLastRecomputeInstant {
 pub struct StorePathInputClosureHashes(Arc<Mutex<Option<StorePathHashSetAndLastRecomputeInstant>>>);
 
 impl StorePathInputClosureHashes {
-    pub async fn input_closure_store_path_hashes<C: ConnectionTrait>(
+    async fn get_or_load_allowed_store_path_hashes(
         &self,
-        db: &C,
-        shared_build: DerivationBuildId,
+        load_from_database: impl Future<Output = Result<HashSet<String>, DbErr>>,
     ) -> Result<Arc<HashSet<String>>, DbErr> {
-        let mut input_closure_set_cache_guard = self.0.lock().await;
-        if let Some(cached_input_closure_set_and_last_recompute_instant) =
-            input_closure_set_cache_guard.as_ref()
-        {
-            return Ok(cached_input_closure_set_and_last_recompute_instant
-                .current_input_closure_store_path_hashes
-                .clone());
+        let mut cached_set_guard = self.0.lock().await;
+        if let Some(cached) = cached_set_guard.as_ref() {
+            return Ok(cached.current_input_closure_store_path_hashes.clone());
         }
-        store_walk_result_as_current_path_set(
-            &mut input_closure_set_cache_guard,
-            db,
-            shared_build,
-            None,
-        )
-        .await
+        let loaded_store_path_hashes = Arc::new(load_from_database.await?);
+        *cached_set_guard = Some(StorePathHashSetAndLastRecomputeInstant {
+            current_input_closure_store_path_hashes: loaded_store_path_hashes.clone(),
+            last_recompute_after_miss_instant: None,
+        });
+        Ok(loaded_store_path_hashes)
     }
 
     async fn refresh_input_closure_store_path_hashes_if_stale<C: ConnectionTrait>(
@@ -78,37 +73,14 @@ impl StorePathInputClosureHashes {
                 .current_input_closure_store_path_hashes
                 .clone());
         }
-        store_walk_result_as_current_path_set(
-            &mut input_closure_set_cache_guard,
-            db,
-            shared_build,
-            Some(current_read_instant),
-        )
-        .await
-    }
-
-    async fn load_exec_job_program_closure_store_path_hashes<C: ConnectionTrait>(
-        &self,
-        db: &C,
-        program: &str,
-    ) -> Result<Arc<HashSet<String>>, DbErr> {
-        let mut program_closure_set_cache_guard = self.0.lock().await;
-        if let Some(cached_program_closure_set) = program_closure_set_cache_guard.as_ref() {
-            return Ok(cached_program_closure_set
-                .current_input_closure_store_path_hashes
-                .clone());
-        }
-        let program_closure_store_path_hashes = Arc::new(
-            crate::exec_jobs::closure::load_exec_job_program_closure_store_path_hashes_from_database(
-                db, program,
-            )
-            .await?,
-        );
-        *program_closure_set_cache_guard = Some(StorePathHashSetAndLastRecomputeInstant {
-            current_input_closure_store_path_hashes: program_closure_store_path_hashes.clone(),
-            last_recompute_after_miss_instant: None,
+        let shared_build_input_closure_store_path_hashes =
+            Arc::new(query_input_closure_store_path_hashes_for_build(db, shared_build).await?);
+        *input_closure_set_cache_guard = Some(StorePathHashSetAndLastRecomputeInstant {
+            current_input_closure_store_path_hashes: shared_build_input_closure_store_path_hashes
+                .clone(),
+            last_recompute_after_miss_instant: Some(current_read_instant),
         });
-        Ok(program_closure_store_path_hashes)
+        Ok(shared_build_input_closure_store_path_hashes)
     }
 
     pub fn shares_underlying_set(&self, other: &Self) -> bool {
@@ -116,27 +88,12 @@ impl StorePathInputClosureHashes {
     }
 }
 
-async fn store_walk_result_as_current_path_set<C: ConnectionTrait>(
-    cached_input_closure_set: &mut Option<StorePathHashSetAndLastRecomputeInstant>,
-    db: &C,
-    shared_build: DerivationBuildId,
-    last_recompute_after_miss_instant: Option<Instant>,
-) -> Result<Arc<HashSet<String>>, DbErr> {
-    let shared_build_input_closure_store_path_hashes =
-        Arc::new(query_input_closure_store_path_hashes_for_build(db, shared_build).await?);
-    *cached_input_closure_set = Some(StorePathHashSetAndLastRecomputeInstant {
-        current_input_closure_store_path_hashes: shared_build_input_closure_store_path_hashes
-            .clone(),
-        last_recompute_after_miss_instant,
-    });
-    Ok(shared_build_input_closure_store_path_hashes)
-}
-
 #[derive(Debug, Clone)]
 pub enum StorePathContentVariantReader {
     Project(ProjectId),
     SharedBuild(DerivationBuildId, StorePathInputClosureHashes),
     ExecJob(ProjectId, String, StorePathInputClosureHashes),
+    EvaluationJob(ProjectId, EvaluationId, StorePathInputClosureHashes),
     Cache(CacheId),
 }
 
@@ -184,15 +141,15 @@ pub fn cached_path_subquery_for_store_hash_with_input_closure(
     )
 }
 
-fn stored_copies_for_store_hash_usable_by_exec_job_subquery(
+fn build_best_cached_path_row_query_for_allowed_or_trusted_store_path_hash(
     hash: &str,
     project: &str,
-    program_closure_hashes: &str,
+    allowed_closure_store_path_hashes: &str,
 ) -> String {
     trusted_variant_sql(
         hash,
         &format!(
-            "({CHOSEN}.hash = ANY({program_closure_hashes}) OR {trusted})",
+            "({CHOSEN}.hash = ANY({allowed_closure_store_path_hashes}) OR {trusted})",
             trusted = project_trusts_content_variant_exists_sql(&format!("{CHOSEN}.id"), project),
         ),
     )
@@ -288,8 +245,8 @@ crate::sql_fn! {
     ),
         params = [CachedPathHashes(64), SharedBuildId, CachedPathHashes(64)];
 
-    STORED_COPY_PER_WANTED_STORE_HASH_READABLE_BY_EXEC_JOB_QUERY = || per_wanted_hash(
-        &stored_copies_for_store_hash_usable_by_exec_job_subquery(
+    BEST_STORED_COPY_PER_WANTED_STORE_PATH_HASH_IN_ALLOWED_CLOSURE_HASHES_OR_TRUSTED_BY_PROJECT_SHARED_BY_EXEC_AND_EVALUATION_JOBS_QUERY = || per_wanted_hash(
+        &build_best_cached_path_row_query_for_allowed_or_trusted_store_path_hash(
             "wanted.hash",
             "$2::uuid",
             "$3::text[]",
@@ -391,6 +348,28 @@ pub async fn fetch_stored_copy_usable_as_build_input_of_shared_build_for_each_st
     .await
 }
 
+pub async fn get_stored_copy_readable_by_evaluation_for_each_store_path_hash<C: ConnectionTrait>(
+    db: &C,
+    project: ProjectId,
+    evaluation: EvaluationId,
+    import_output_closure_set: &StorePathInputClosureHashes,
+    hashes: &[String],
+) -> Result<HashMap<String, MCachedPath>, DbErr> {
+    let import_output_closure = import_output_closure_set
+        .get_or_load_allowed_store_path_hashes(
+            query_input_closure_store_path_hashes_for_evaluation(db, evaluation),
+        )
+        .await?;
+    read_chosen_store_path_content_variant_rows_for_hashes_in_chunks(
+        db,
+        &BEST_STORED_COPY_PER_WANTED_STORE_PATH_HASH_IN_ALLOWED_CLOSURE_HASHES_OR_TRUSTED_BY_PROJECT_SHARED_BY_EXEC_AND_EVALUATION_JOBS_QUERY,
+        &Value::Uuid(Some(project.into_inner())),
+        &import_output_closure,
+        hashes,
+    )
+    .await
+}
+
 async fn read_shared_build_stored_copies_for_each_store_path_hash_at_instant<C: ConnectionTrait>(
     db: &C,
     shared_build: DerivationBuildId,
@@ -398,12 +377,17 @@ async fn read_shared_build_stored_copies_for_each_store_path_hash_at_instant<C: 
     hashes: &[String],
     current_read_instant: Instant,
 ) -> Result<HashMap<String, MCachedPath>, DbErr> {
+    let reader = Value::Uuid(Some(shared_build.into_inner()));
     let input_closure = input_closure_set
-        .input_closure_store_path_hashes(db, shared_build)
+        .get_or_load_allowed_store_path_hashes(query_input_closure_store_path_hashes_for_build(
+            db,
+            shared_build,
+        ))
         .await?;
     let mut chosen = read_chosen_store_path_content_variant_rows_for_hashes_in_chunks(
         db,
-        shared_build,
+        &STORED_COPY_BY_STORE_PATH_HASH_USABLE_AS_SHARED_BUILD_BUILD_INPUT_QUERY,
+        &reader,
         &input_closure,
         hashes,
     )
@@ -431,7 +415,8 @@ async fn read_shared_build_stored_copies_for_each_store_path_hash_at_instant<C: 
         chosen.extend(
             read_chosen_store_path_content_variant_rows_for_hashes_in_chunks(
                 db,
-                shared_build,
+                &STORED_COPY_BY_STORE_PATH_HASH_USABLE_AS_SHARED_BUILD_BUILD_INPUT_QUERY,
+                &reader,
                 &input_closure,
                 &missed_hashes_to_read_again,
             )
@@ -443,20 +428,22 @@ async fn read_shared_build_stored_copies_for_each_store_path_hash_at_instant<C: 
 
 async fn read_chosen_store_path_content_variant_rows_for_hashes_in_chunks<C: ConnectionTrait>(
     db: &C,
-    shared_build: DerivationBuildId,
-    input_closure: &HashSet<String>,
+    read_chosen_stored_copy_query: &Query,
+    reader_build_or_project_id: &Value,
+    allowed_closure_store_path_hashes: &HashSet<String>,
     hashes: &[String],
 ) -> Result<HashMap<String, MCachedPath>, DbErr> {
-    let reader = Value::Uuid(Some(shared_build.into_inner()));
     rows_for_hashes(db, hashes, |chunk| {
         let in_input_closure: Vec<String> = chunk
             .iter()
-            .filter(|requested_store_path_hash| input_closure.contains(*requested_store_path_hash))
+            .filter(|requested_store_path_hash| {
+                allowed_closure_store_path_hashes.contains(*requested_store_path_hash)
+            })
             .cloned()
             .collect();
-        STORED_COPY_BY_STORE_PATH_HASH_USABLE_AS_SHARED_BUILD_BUILD_INPUT_QUERY.bind([
+        read_chosen_stored_copy_query.bind([
             chunk.into(),
-            reader.clone(),
+            reader_build_or_project_id.clone(),
             in_input_closure.into(),
         ])
     })
@@ -472,25 +459,20 @@ pub async fn get_stored_copy_readable_by_exec_job_for_each_store_path_hash<C: Co
     hashes: &[String],
 ) -> Result<HashMap<String, MCachedPath>, DbErr> {
     let program_closure = program_closure_set
-        .load_exec_job_program_closure_store_path_hashes(db, program)
+        .get_or_load_allowed_store_path_hashes(
+            crate::exec_jobs::closure::load_exec_job_program_closure_store_path_hashes_from_database(
+                db, program,
+            ),
+        )
         .await?;
-    let reader = Value::Uuid(Some(project.into_inner()));
-    rows_for_hashes(db, hashes, |chunk| {
-        let in_program_closure: Vec<String> = chunk
-            .iter()
-            .filter(|requested_store_path_hash| {
-                program_closure.contains(*requested_store_path_hash)
-            })
-            .cloned()
-            .collect();
-        STORED_COPY_PER_WANTED_STORE_HASH_READABLE_BY_EXEC_JOB_QUERY.bind([
-            chunk.into(),
-            reader.clone(),
-            in_program_closure.into(),
-        ])
-    })
+    read_chosen_store_path_content_variant_rows_for_hashes_in_chunks(
+        db,
+        &BEST_STORED_COPY_PER_WANTED_STORE_PATH_HASH_IN_ALLOWED_CLOSURE_HASHES_OR_TRUSTED_BY_PROJECT_SHARED_BY_EXEC_AND_EVALUATION_JOBS_QUERY,
+        &Value::Uuid(Some(project.into_inner())),
+        &program_closure,
+        hashes,
+    )
     .await
-    .map(by_hash)
 }
 
 pub async fn get_best_ranked_stored_copy_in_any_cache_for_each_store_path_hash<
@@ -553,6 +535,16 @@ pub async fn get_trusted_content_variant_for_each_store_path_hash_for_project_sh
         StorePathContentVariantReader::Project(project) => {
             highest_ranked_trusted_content_variant_by_store_path_hash_for_project(
                 db, project, hashes,
+            )
+            .await
+        }
+        StorePathContentVariantReader::EvaluationJob(project, evaluation, input_closure_set) => {
+            get_stored_copy_readable_by_evaluation_for_each_store_path_hash(
+                db,
+                project,
+                evaluation,
+                &input_closure_set,
+                hashes,
             )
             .await
         }
@@ -624,7 +616,7 @@ mod tests {
     }
 
     #[test]
-    fn worker_read_sql_has_no_recursive_keyword_and_trust_source_files_register_exactly_four_recursive_statements()
+    fn worker_read_sql_has_no_recursive_keyword_and_trust_source_files_register_exactly_five_recursive_statements()
      {
         let mut sorted_recursive_registered_sql_statement_names_in_both_trust_source_files: Vec<
             &str,
@@ -649,13 +641,14 @@ mod tests {
             (
                 false,
                 vec![
+                    "EVALUATION_IMPORT_FROM_DERIVATION_OUTPUT_REFERENCE_CLOSURE_STORE_PATH_HASHES_QUERY",
                     "INSERT_PLACEHOLDERS_FOR_PROJECT_OUTPUTS_INTO_CACHE",
                     "INSERT_PLACEHOLDERS_FOR_PROJECT_STORE_HASHES",
                     "SHARED_BUILD_INPUT_CLOSURE_STORE_PATH_HASHES_QUERY",
                     "SQL_SELECT_STORED_CONTENT_VARIANTS_WITH_REFERENCE_CLOSURE_FOR_PROJECT_CACHE_SIGNING",
                 ]
             ),
-            "A query for the input closure can traverse the build closure once per job. The worker read does not traverse the build closure. Exactly four statements in both trust files are recursive. They are the query for the input closure, the signature query for dependency outputs and two placeholder inserts."
+            "A query for a closure can traverse the build closure once per job. The worker read does not traverse the build closure. Exactly five statements in both trust files are recursive. These are the query for the input closure of the shared build and the query for the closure of import outputs from evaluation. The signature query for dependency outputs and two placeholder inserts are the other three."
         );
     }
 
@@ -2079,6 +2072,169 @@ mod tests {
             .await,
             ParentBuildStorePathThreeReaderAnswers::all_three_readers_return_stored_copy_for_package("dependency"),
             "Both build readers choose the same copy of the input."
+        );
+    }
+
+    #[tokio::test]
+    async fn evaluation_job_reader_returns_untrusted_import_from_derivation_output_and_referenced_path_project_reader_returns_neither_and_unrelated_hash_stays_unreadable()
+     {
+        let import_from_derivation_output_store_path_hash = "7".repeat(32);
+        let dependency_store_path_hash = "8".repeat(32);
+        let store_path_hash_with_stored_copy_outside_import_closure = "9".repeat(32);
+        let other_project_evaluation_id_that_built_import_derivation = EvaluationId::now_v7();
+        let evaluation_id_that_imports_derivation_output = EvaluationId::now_v7();
+        let import_from_derivation_store_path =
+            format!("/nix/store/{}-temp-auth-key.drv", "i".repeat(32));
+        let db = gradient_fixtures::shape::shape()
+            .evaluation(other_project_evaluation_id_that_built_import_derivation)
+            .derivation(&import_from_derivation_store_path)
+            .output(&import_from_derivation_output_store_path_hash)
+            .job()
+            .shared_build_option(|b| b.fetchable = true)
+            .cached_path(
+                &import_from_derivation_output_store_path_hash,
+                "temp-auth-key",
+            )
+            .references(&[(&dependency_store_path_hash, "dependency")])
+            .cached_path(&dependency_store_path_hash, "dependency")
+            .cached_path(
+                &store_path_hash_with_stored_copy_outside_import_closure,
+                "outside",
+            )
+            .evaluation(evaluation_id_that_imports_derivation_output)
+            .derivation(&import_from_derivation_store_path)
+            .ifd()
+            .entry_point("temp-auth-key")
+            .job()
+            .into_database()
+            .await;
+        let importing_evaluation_project_id = db
+            .project_of(evaluation_id_that_imports_derivation_output)
+            .await;
+        let conn = db.connection();
+        let hashes = [
+            import_from_derivation_output_store_path_hash.clone(),
+            dependency_store_path_hash.clone(),
+            store_path_hash_with_stored_copy_outside_import_closure,
+        ];
+        let sorted_store_path_hashes = |rows: HashMap<String, MCachedPath>| {
+            let mut hashes: Vec<String> = rows.into_keys().collect();
+            hashes.sort();
+            hashes
+        };
+        let evaluation_job_and_project_reader_sorted_store_path_hashes = (
+            sorted_store_path_hashes(
+                get_trusted_content_variant_for_each_store_path_hash_for_project_shared_build_or_binary_cache(
+                    &conn,
+                    StorePathContentVariantReader::EvaluationJob(
+                        importing_evaluation_project_id,
+                        evaluation_id_that_imports_derivation_output,
+                        StorePathInputClosureHashes::default(),
+                    ),
+                    &hashes,
+                )
+                .await
+                .expect("The selection ran."),
+            ),
+            sorted_store_path_hashes(
+                highest_ranked_trusted_content_variant_by_store_path_hash_for_project(
+                    &conn,
+                    importing_evaluation_project_id,
+                    &hashes,
+                )
+                .await
+                .expect("The selection ran."),
+            ),
+        );
+        db.finish().await;
+        assert_eq!(
+            evaluation_job_and_project_reader_sorted_store_path_hashes,
+            (
+                vec![
+                    import_from_derivation_output_store_path_hash,
+                    dependency_store_path_hash
+                ],
+                Vec::new()
+            ),
+            "The reader for the evaluation job can return stored copies of import outputs and the paths that they reference, even though the evaluation project doesn't trust them. The reader for the project can return neither. Stored copies outside the closure of the import outputs stay unreadable to the evaluation job."
+        );
+    }
+
+    #[tokio::test]
+    async fn evaluation_job_reader_keeps_allowed_hash_set_until_replaced() {
+        let import_from_derivation_output_store_path_hash = "7".repeat(32);
+        let dependency_store_path_hash = "8".repeat(32);
+        let other_project_evaluation_id_that_built_import_derivation = EvaluationId::now_v7();
+        let evaluation_id_that_imports_derivation_output = EvaluationId::now_v7();
+        let import_from_derivation_store_path =
+            format!("/nix/store/{}-temp-auth-key.drv", "i".repeat(32));
+        let db = gradient_fixtures::shape::shape()
+            .evaluation(other_project_evaluation_id_that_built_import_derivation)
+            .derivation(&import_from_derivation_store_path)
+            .output(&import_from_derivation_output_store_path_hash)
+            .job()
+            .shared_build_option(|b| b.fetchable = true)
+            .cached_path(
+                &import_from_derivation_output_store_path_hash,
+                "temp-auth-key",
+            )
+            .references(&[(&dependency_store_path_hash, "dependency")])
+            .cached_path(&dependency_store_path_hash, "dependency")
+            .evaluation(evaluation_id_that_imports_derivation_output)
+            .derivation(&import_from_derivation_store_path)
+            .entry_point("temp-auth-key")
+            .job()
+            .into_database()
+            .await;
+        let importing_evaluation_project_id = db
+            .project_of(evaluation_id_that_imports_derivation_output)
+            .await;
+        let conn = db.connection();
+        let hashes = [
+            import_from_derivation_output_store_path_hash.clone(),
+            dependency_store_path_hash.clone(),
+        ];
+        let read_sorted_store_path_hashes =
+            async |allowed_hash_set: &StorePathInputClosureHashes| {
+                let mut readable: Vec<String> =
+                    get_stored_copy_readable_by_evaluation_for_each_store_path_hash(
+                        &conn,
+                        importing_evaluation_project_id,
+                        evaluation_id_that_imports_derivation_output,
+                        allowed_hash_set,
+                        &hashes,
+                    )
+                    .await
+                    .expect("The selection ran.")
+                    .into_keys()
+                    .collect();
+                readable.sort();
+                readable
+            };
+        let first_loaded_allowed_hash_set = StorePathInputClosureHashes::default();
+        let before_import_recorded =
+            read_sorted_store_path_hashes(&first_loaded_allowed_hash_set).await;
+        db.execute("UPDATE derivation SET ifd = true").await;
+        let after_import_recorded_with_first_set =
+            read_sorted_store_path_hashes(&first_loaded_allowed_hash_set).await;
+        let after_import_recorded_with_replaced_set =
+            read_sorted_store_path_hashes(&StorePathInputClosureHashes::default()).await;
+        db.finish().await;
+        assert_eq!(
+            (
+                before_import_recorded,
+                after_import_recorded_with_first_set,
+                after_import_recorded_with_replaced_set
+            ),
+            (
+                Vec::<String>::new(),
+                Vec::new(),
+                vec![
+                    import_from_derivation_output_store_path_hash,
+                    dependency_store_path_hash
+                ]
+            ),
+            "Evaluation jobs keep the set of allowed hashes of store paths from the first load. A miss doesn't reload that set, so an import record can't make the imported output readable through the same set. Worker sessions create a new set when they relay a completed import. The reader can load that set again to read the imported output and the paths in the reference closure of that output."
         );
     }
 }

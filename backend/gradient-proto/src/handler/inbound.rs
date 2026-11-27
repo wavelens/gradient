@@ -27,7 +27,7 @@ use gradient_wire::messages::{
 };
 use gradient_wire::types::{
     BuildProgressPhase as WireBuildProgressPhase, EvalProgress as WireEvalProgress,
-    EvalShardOutcome, ExecMetrics, FinishedShard, MAX_PHASE_PAYLOAD,
+    EvalShardOutcome, ExecMetrics, FinishedShard, ImportOutcome, MAX_PHASE_PAYLOAD,
 };
 use gradient_wire::worker_store_path_bloom_filter::{
     BloomFilterBitArrayChunk, WorkerStorePathBloomFilterChunkCollector,
@@ -157,12 +157,22 @@ impl ActiveJobs {
                     exec.spec.program.clone(),
                     active.input_closure_set.clone(),
                 ),
-                other => StorePathContentVariantReader::Project(other.project_id()),
+                PendingJob::Eval(eval) => StorePathContentVariantReader::EvaluationJob(
+                    eval.project_id,
+                    eval.evaluation_id,
+                    active.input_closure_set.clone(),
+                ),
             });
         pending.or_else(|| {
             self.fetch_project(job_id)
                 .map(StorePathContentVariantReader::Project)
         })
+    }
+
+    pub(crate) fn clear_cached_input_closure_set(&self, job_id: &str) {
+        if let Some(active) = self.0.lock().get_mut(job_id) {
+            active.input_closure_set = StorePathInputClosureHashes::default();
+        }
     }
 
     pub(crate) fn build(&self, job_id: &str) -> Option<DerivationBuildId> {
@@ -1036,6 +1046,33 @@ impl<'a> InboundContext<'a> {
         }
     }
 
+    pub(super) async fn send_import_result_to_worker_and_clear_cached_input_closure_set_if_completed(
+        &self,
+        job_id: String,
+        request_id: String,
+        outcome: ImportOutcome,
+    ) -> bool {
+        let Some(project) = self.active.project(&job_id) else {
+            debug!(peer_id = %self.peer_id, %job_id, "import result for a job this session no longer runs");
+            return true;
+        };
+        if matches!(outcome, ImportOutcome::Completed { .. }) {
+            self.active.clear_cached_input_closure_set(&job_id);
+        }
+
+        let msg = ServerMessage::ImportResult {
+            job_id,
+            request_id,
+            outcome,
+        };
+        let Some(mapper) = project_mapper(&self.handles.db, project).await else {
+            return true;
+        };
+        send_server_msg(self.writer, &outbound_message(msg, &mapper))
+            .await
+            .is_ok()
+    }
+
     #[tracing::instrument(level = "debug", skip_all, fields(?kind, job_id = tracing::field::Empty))]
     pub(super) async fn send_assign_job_for_available_requested_job_kind(
         &mut self,
@@ -1714,6 +1751,38 @@ pub(in crate::handler) mod fixture {
             input_closure_set_for_job_id(&reattached_active_jobs, JOB)
                 .is_some_and(|set| !set.shares_underlying_set(&old_session_third_job_input_set)),
             "Three job types get a new input-closure set. They are jobs dispatched again after removal, jobs that belong to a removed attempt and jobs in a new session. These jobs never get the old set."
+        );
+    }
+
+    #[test]
+    fn replacing_allowed_hash_set_does_not_share_storage_with_previous_set_and_keeps_other_job_set()
+    {
+        let job = || ActiveJob {
+            assignment_id: DispatchedJobId::now_v7(),
+            pending: pending_eval(),
+            cluster: None,
+            input_closure_set: Default::default(),
+        };
+        let active = ActiveJobs::from(HashMap::from([
+            (JOB.to_owned(), job()),
+            ("other".to_owned(), job()),
+        ]));
+        let allowed_hash_set_for_job_id =
+            |job_id: &str| match active.store_path_content_variant_reader_for_job(job_id) {
+                Some(StorePathContentVariantReader::EvaluationJob(_, _, set)) => set,
+                reader => panic!("{reader:?}"),
+            };
+        let previous_set = allowed_hash_set_for_job_id(JOB);
+        let other_job_previous_set = allowed_hash_set_for_job_id("other");
+
+        active.clear_cached_input_closure_set(JOB);
+
+        assert_eq!(
+            (
+                allowed_hash_set_for_job_id(JOB).shares_underlying_set(&previous_set),
+                allowed_hash_set_for_job_id("other").shares_underlying_set(&other_job_previous_set)
+            ),
+            (false, true)
         );
     }
 
@@ -2471,12 +2540,18 @@ mod assignment_response_tests {
         );
     }
 
+    fn empty_mock_rows_for_ifd_reference_closure_store_path_hashes()
+    -> Vec<std::collections::BTreeMap<String, sea_orm::Value>> {
+        Vec::new()
+    }
+
     #[tokio::test]
     async fn a_cache_query_for_a_job_no_session_runs_is_refused_and_the_next_is_answered() {
         use super::fixture::{JOB, TestSession, decode};
         use gradient_entity::EXAMPLE_ORIGINAL_HASH;
 
         let cache_db = gradient_fixtures::mock::mock_db()
+            .append_query_results([empty_mock_rows_for_ifd_reference_closure_store_path_hashes()])
             .append_query_results([Vec::<gradient_entity::cached_path::Model>::new()])
             .into_connection();
         let state = TestState::new().cache_db(cache_db).build();
@@ -2593,6 +2668,55 @@ mod assignment_response_tests {
     }
 
     #[tokio::test]
+    async fn relaying_import_answer_to_worker_replaces_active_evaluation_job_cached_readable_store_path_hash_set_only_for_completed_answer()
+     {
+        use super::fixture::{JOB, TestSession};
+
+        let state = test_state(empty_db());
+        let (mut session, _sent, _admitted) = TestSession::new(&state).await;
+        let (ctx, _uploads) = session.split();
+        let cached_allowed_hash_set_for_job_id =
+            || match ctx.active.store_path_content_variant_reader_for_job(JOB) {
+                Some(StorePathContentVariantReader::EvaluationJob(_, _, set)) => set,
+                reader => panic!("{reader:?}"),
+            };
+        let import_outcomes_for_worker = [
+            ImportOutcome::Completed {
+                realisations: Vec::new(),
+            },
+            ImportOutcome::Failed {
+                drv_path: "a.drv".into(),
+                build_id: "b1".into(),
+                status: "failed".into(),
+            },
+            ImportOutcome::Unknown {
+                drv_path: "a.drv".into(),
+            },
+        ];
+
+        let mut cached_readable_hash_set_still_same_object_for_each_relayed_import_answer =
+            Vec::new();
+        for outcome in import_outcomes_for_worker {
+            let previous_set = cached_allowed_hash_set_for_job_id();
+            assert!(
+                ctx.send_import_result_to_worker_and_clear_cached_input_closure_set_if_completed(
+                    JOB.into(),
+                    "r1".into(),
+                    outcome,
+                )
+                .await
+            );
+            cached_readable_hash_set_still_same_object_for_each_relayed_import_answer
+                .push(cached_allowed_hash_set_for_job_id().shares_underlying_set(&previous_set));
+        }
+
+        assert_eq!(
+            cached_readable_hash_set_still_same_object_for_each_relayed_import_answer,
+            [false, true, true]
+        );
+    }
+
+    #[tokio::test]
     async fn a_cache_status_names_the_paths_the_worker_asked_for() {
         use super::fixture::{JOB, TestSession, decode};
         use gradient_entity::{EXAMPLE_ORIGINAL_HASH, EXAMPLE_STORED_HASH, RotatedHashMapping};
@@ -2604,6 +2728,7 @@ mod assignment_response_tests {
             ..Default::default()
         };
         let cache_db = gradient_fixtures::mock::mock_db()
+            .append_query_results([empty_mock_rows_for_ifd_reference_closure_store_path_hashes()])
             .append_query_results([vec![stored]])
             .into_connection();
         let state = TestState::new()
@@ -2673,6 +2798,7 @@ mod assignment_response_tests {
             ..Default::default()
         };
         let cache_db = gradient_fixtures::mock::mock_db()
+            .append_query_results([empty_mock_rows_for_ifd_reference_closure_store_path_hashes()])
             .append_query_results([vec![stored]])
             .into_connection();
         let state = TestState::new()
