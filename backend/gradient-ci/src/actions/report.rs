@@ -318,14 +318,11 @@ async fn evaluation_reports(
     description: Option<String>,
 ) -> Result<Vec<CiReport>> {
     let evaluation = target.evaluation;
-    if reporting::suppress_evaluation_failure(&status, evaluation.building_started_at.is_some()) {
-        return Ok(Vec::new());
-    }
-
     let failed = failed_attributes(&ctx.db.worker_db, evaluation.id)
         .await
         .context("load failed attributes")?;
-    let status = reporting::evaluation_check_status(status, !failed.is_empty());
+    let status =
+        reporting::evaluation_check_status(status, evaluation.walk_finished(), !failed.is_empty());
     let attributes_failed = status == CiStatus::Failure && !failed.is_empty();
 
     let wildcard_suffix =

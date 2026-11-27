@@ -254,13 +254,22 @@ fn evaluation_check_reports_success_when_no_attribute_failed_and_failure_with_fa
     use gradient_types::{EvaluationId, MEvaluation, MEvaluationMessage, TaskId};
 
     run(async {
-        for attribute_failed in [false, true] {
+        let statuses_after_building = [
+            EvaluationStatus::Building,
+            EvaluationStatus::Completed,
+            EvaluationStatus::Failed,
+            EvaluationStatus::Aborted,
+        ];
+        for (status, attribute_failed) in statuses_after_building
+            .into_iter()
+            .flat_map(|status| [(status, false), (status, true)])
+        {
             let evaluation_id = EvaluationId::now_v7();
             let task = TaskId::now_v7();
             let db = mock_db().append_query_results([vec![MEvaluation {
                 id: evaluation_id,
                 task: Some(task),
-                status: EvaluationStatus::Building,
+                status,
                 building_started_at: Some(gradient_types::now()),
                 ..Default::default()
             }]]);
@@ -301,8 +310,48 @@ fn evaluation_check_reports_success_when_no_attribute_failed_and_failure_with_fa
             } else {
                 vec![("gradient/hosts: Evaluation", &CiStatus::Success)]
             };
-            assert_eq!(checks, expected);
+            assert_eq!(checks, expected, "{status:?}");
         }
+    });
+}
+
+#[test]
+fn evaluation_check_reports_failure_when_fetch_restarted_after_building_and_failed() {
+    use gradient_entity::evaluation::EvaluationStatus;
+    use gradient_types::{EvaluationId, MEvaluation, MEvaluationMessage, TaskId};
+
+    run(async {
+        let evaluation_id = EvaluationId::now_v7();
+        let task = TaskId::now_v7();
+        let building_started_at = gradient_types::now();
+        let db = mock_db().append_query_results([vec![MEvaluation {
+            id: evaluation_id,
+            task: Some(task),
+            status: EvaluationStatus::Failed,
+            building_started_at: Some(building_started_at),
+            fetch_started_at: Some(building_started_at + chrono::Duration::seconds(1)),
+            ..Default::default()
+        }]]);
+        let ctx = make_ctx_with(
+            append_task_commit_and_empty_project_result_to_mock_database(db, task)
+                .append_query_results([Vec::<MEvaluationMessage>::new()]),
+        );
+        let check = CommitStatusCheckWithIds::Evaluation {
+            evaluation: evaluation_id,
+        };
+
+        let reports = build_ci_reports_from_commit_status_check_rows(&ctx, &check)
+            .await
+            .unwrap();
+
+        let checks: Vec<(&str, &CiStatus)> = reports
+            .iter()
+            .map(|r| (r.context.as_str(), &r.status))
+            .collect();
+        assert_eq!(
+            checks,
+            vec![("gradient/hosts: Evaluation", &CiStatus::Failure)]
+        );
     });
 }
 
