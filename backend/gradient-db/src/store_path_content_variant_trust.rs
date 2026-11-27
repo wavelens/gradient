@@ -9,7 +9,7 @@ use gradient_entity::store_path_content_producer::StoredContentVariantProducerKi
 use gradient_types::*;
 use sea_orm::{
     ActiveEnum, ColumnTrait, ConnectionTrait, DbErr, EntityTrait, FromQueryResult, JoinType,
-    QueryFilter, QuerySelect, RelationTrait, Value,
+    QueryFilter, QuerySelect, RelationTrait, Statement, Value,
 };
 use std::collections::HashSet;
 
@@ -580,12 +580,29 @@ pub fn project_cache_row_has_active_read_write_subscription_that_signs_outputs_a
     )
 }
 
-fn build_recursive_store_path_content_variant_trust_sql_text(
+fn build_transitive_referenced_store_path_content_variant_trust_sql_text(
+    seed_store_path_hashes: &str,
+) -> String {
+    format!(
+        r#"WITH RECURSIVE collected_store_path_hashes(hash) AS (
+    {seed_store_path_hashes}
+    UNION
+    SELECT {STORE_PATH_HASH_FROM_REFERENCE_TOKEN_SQL_EXPRESSION}
+    FROM collected_store_path_hashes
+    JOIN cached_path cached_path_references_to_walk
+      ON cached_path_references_to_walk.hash = collected_store_path_hashes.hash
+    CROSS JOIN LATERAL unnest(string_to_array(cached_path_references_to_walk."references", ' ')) r(token)
+    WHERE r.token <> ''
+)
+SELECT hash FROM collected_store_path_hashes"#
+    )
+}
+
+fn build_shared_build_derivation_direct_build_time_dependency_output_store_path_hash_seed_select_sql(
     shared_build_derivation: &str,
 ) -> String {
     format!(
-        r#"WITH RECURSIVE shared_build_input_closure_store_path_hashes(hash) AS (
-    SELECT direct_dependency_outputs_used_as_inputs.hash
+        r#"SELECT direct_dependency_outputs_used_as_inputs.hash
     FROM derivation_dependency direct_dependencies_of_shared_build_derivation
     JOIN derivation_output direct_dependency_outputs_used_as_inputs
       ON direct_dependency_outputs_used_as_inputs.derivation = direct_dependencies_of_shared_build_derivation.dependency
@@ -593,43 +610,82 @@ fn build_recursive_store_path_content_variant_trust_sql_text(
           OR direct_dependency_outputs_used_as_inputs.name = ANY(direct_dependencies_of_shared_build_derivation.dependency_outputs))
     WHERE direct_dependencies_of_shared_build_derivation.derivation = {shared_build_derivation}
       AND direct_dependencies_of_shared_build_derivation.kind IN (0, 2)
-      AND direct_dependency_outputs_used_as_inputs.hash IS NOT NULL
-    UNION
-    SELECT {STORE_PATH_HASH_FROM_REFERENCE_TOKEN_SQL_EXPRESSION}
-    FROM shared_build_input_closure_store_path_hashes
-    JOIN cached_path cached_path_references_to_walk
-      ON cached_path_references_to_walk.hash = shared_build_input_closure_store_path_hashes.hash
-    CROSS JOIN LATERAL unnest(string_to_array(cached_path_references_to_walk."references", ' ')) r(token)
-    WHERE r.token <> ''
-)
-SELECT hash FROM shared_build_input_closure_store_path_hashes"#
+      AND direct_dependency_outputs_used_as_inputs.hash IS NOT NULL"#
+    )
+}
+
+fn build_import_from_derivation_output_store_path_hash_seed_select_for_evaluation(
+    evaluation: &str,
+) -> String {
+    format!(
+        r#"SELECT closure_seed_derivation_output.hash
+    FROM entry_point evaluation_entry_point_rows
+    JOIN derivation derivation_imported_during_evaluation
+      ON derivation_imported_during_evaluation.id = evaluation_entry_point_rows.derivation
+     AND derivation_imported_during_evaluation.ifd
+    JOIN derivation_output closure_seed_derivation_output
+      ON closure_seed_derivation_output.derivation = derivation_imported_during_evaluation.id
+    WHERE evaluation_entry_point_rows.evaluation = {evaluation}
+      AND closure_seed_derivation_output.hash IS NOT NULL"#
     )
 }
 
 crate::sql_fn! {
     SHARED_BUILD_INPUT_CLOSURE_STORE_PATH_HASHES_QUERY = || {
-        build_recursive_store_path_content_variant_trust_sql_text(
-            "(SELECT derivation FROM derivation_build WHERE id = $1::uuid)",
+        build_transitive_referenced_store_path_content_variant_trust_sql_text(
+            &build_shared_build_derivation_direct_build_time_dependency_output_store_path_hash_seed_select_sql(
+                "(SELECT derivation FROM derivation_build WHERE id = $1::uuid)",
+            ),
         )
     },
         params = [SharedBuildId],
         tier = Walk,
         flags = [Walk];
+
+    EVALUATION_IMPORT_FROM_DERIVATION_OUTPUT_REFERENCE_CLOSURE_STORE_PATH_HASHES_QUERY = || {
+        build_transitive_referenced_store_path_content_variant_trust_sql_text(
+            &build_import_from_derivation_output_store_path_hash_seed_select_for_evaluation(
+                "$1::uuid",
+            ),
+        )
+    },
+        params = [EvaluationId],
+        tier = Walk,
+        flags = [Walk];
+}
+
+async fn collect_store_path_hashes_from_bound_statement<C: ConnectionTrait>(
+    db: &C,
+    statement: Statement,
+) -> Result<HashSet<String>, DbErr> {
+    let rows = db.query_all_raw(statement).await?;
+    rows.iter()
+        .map(|row| row.try_get::<String>("", "hash"))
+        .collect()
 }
 
 pub(crate) async fn query_input_closure_store_path_hashes_for_build<C: ConnectionTrait>(
     db: &C,
     shared_build: DerivationBuildId,
 ) -> Result<HashSet<String>, DbErr> {
-    let rows = db
-        .query_all_raw(
-            SHARED_BUILD_INPUT_CLOSURE_STORE_PATH_HASHES_QUERY
-                .bind([Value::Uuid(Some(shared_build.into_inner()))]),
-        )
-        .await?;
-    rows.iter()
-        .map(|row| row.try_get::<String>("", "hash"))
-        .collect()
+    collect_store_path_hashes_from_bound_statement(
+        db,
+        SHARED_BUILD_INPUT_CLOSURE_STORE_PATH_HASHES_QUERY
+            .bind([Value::Uuid(Some(shared_build.into_inner()))]),
+    )
+    .await
+}
+
+pub(crate) async fn query_input_closure_store_path_hashes_for_evaluation<C: ConnectionTrait>(
+    db: &C,
+    evaluation: EvaluationId,
+) -> Result<HashSet<String>, DbErr> {
+    collect_store_path_hashes_from_bound_statement(
+        db,
+        EVALUATION_IMPORT_FROM_DERIVATION_OUTPUT_REFERENCE_CLOSURE_STORE_PATH_HASHES_QUERY
+            .bind([Value::Uuid(Some(evaluation.into_inner()))]),
+    )
+    .await
 }
 
 fn seed_missing_signed_dependency_output_cache_rows_for_project_with_live_parent_job_and_signing_cache_subscription(

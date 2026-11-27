@@ -323,20 +323,13 @@ impl Actor for SessionActor {
                 request_id,
                 outcome,
             }) => {
-                let Some(project) = st.active.project(&job_id) else {
-                    debug!(peer_id = %st.peer_id, %job_id, "import result for a job this session no longer runs");
-                    return Ok(());
-                };
-
-                let msg = ServerMessage::ImportResult {
-                    job_id,
-                    request_id,
-                    outcome,
-                };
-                let Some(msg) = outbound_to(st, project, msg).await else {
-                    return Ok(());
-                };
-                if send_server_msg(&st.writer, &msg).await.is_err() {
+                let (ctx, _) = split_uploads(st);
+                if !ctx
+                    .send_import_result_to_worker_and_clear_cached_input_closure_set_if_completed(
+                        job_id, request_id, outcome,
+                    )
+                    .await
+                {
                     myself.stop(Some("write failed".into()));
                 }
             }
