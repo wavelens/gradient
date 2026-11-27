@@ -38,6 +38,9 @@ impl From<HostError> for ProvisionError {
             error = %gradient_util::error_cause_chain_formatting::error_chain(&e),
             "The Git host rejected the provisioning request."
         );
+        if let Some(refusal) = e.allowlist_refusal() {
+            return Self::Host(refusal.to_string());
+        }
         Self::Host(match e.status() {
             Some(status) => status.to_string(),
             None => "No response from the Git host".to_owned(),
@@ -266,6 +269,36 @@ mod tests {
             .unwrap_err();
 
         assert!(error.to_string().contains("401"), "{error}");
+    }
+
+    #[tokio::test]
+    async fn token_account_login_to_loopback_forgejo_with_empty_allowlist_names_outbound_allowed_non_public_network_targets_in_error()
+     {
+        let resolving_to_loopback = HttpClientForUserSuppliedUrls::new(
+            gradient_util::http_validation::UserUrlDestinationAllowlist::default()
+                .with_dns_lookup_function(|_, port| {
+                    Box::pin(
+                        async move { Ok(vec![std::net::SocketAddr::from(([127, 0, 0, 1], port))]) },
+                    )
+                }),
+        )
+        .expect("http client");
+
+        let error = token_account_login(
+            resolving_to_loopback,
+            GitHostType::Forgejo,
+            "http://forgejo.internal.example",
+            "tok",
+        )
+        .await
+        .unwrap_err();
+
+        assert!(
+            error
+                .to_string()
+                .contains("outbound.allowedNonPublicNetworkTargets"),
+            "{error}"
+        );
     }
 
     #[test]

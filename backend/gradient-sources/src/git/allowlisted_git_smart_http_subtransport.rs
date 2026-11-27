@@ -16,7 +16,9 @@ use bytes::Bytes;
 use git2::transport::{Service, SmartSubtransport, SmartSubtransportStream, Transport};
 use gradient_types::https_git_url_host::https_host_from_repository_url;
 use gradient_util::http::{HttpClientForUserSuppliedUrls, HttpUpstreamCredential, user_agent};
-use gradient_util::http_validation::{DestinationUrlRejectedError, HostHasNoAllowedAddressError};
+use gradient_util::http_validation::{
+    DestinationUrlRejectedError, find_allowlist_rejection_in_error_chain,
+};
 use reqwest::header::{ACCEPT, CONTENT_TYPE, USER_AGENT};
 use reqwest::{Method, StatusCode};
 use std::io::{self, Read, Write};
@@ -315,15 +317,13 @@ impl Write for GitSmartHttpRequestAndResponseStream {
 }
 
 fn error_text_for_libgit2_from_reqwest_error_or_allowlist_refusal(error: reqwest::Error) -> String {
-    let mut cause_texts = Vec::new();
-    for cause in std::iter::successors(std::error::Error::source(&error), |cause| cause.source()) {
-        if cause.is::<DestinationUrlRejectedError>() || cause.is::<HostHasNoAllowedAddressError>() {
-            return store_current_thread_git_allowlist_refusal_text_and_return_it(
-                cause.to_string(),
-            );
-        }
-        cause_texts.push(cause.to_string());
+    if let Some(refusal) = find_allowlist_rejection_in_error_chain(&error) {
+        return store_current_thread_git_allowlist_refusal_text_and_return_it(refusal.to_string());
     }
+    let mut cause_texts: Vec<String> =
+        std::iter::successors(std::error::Error::source(&error), |cause| cause.source())
+            .map(ToString::to_string)
+            .collect();
     cause_texts.dedup();
     std::iter::once(error.without_url().to_string())
         .chain(cause_texts)
