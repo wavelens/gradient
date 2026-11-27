@@ -191,12 +191,46 @@ mod tests {
         StorePathContentVariantReader::Project(ProjectId::now_v7())
     }
 
-    #[test]
-    fn runtime_closure_query_sql_uses_only_kind_1_and_2_graph_edges_and_not_cached_path_reference()
-    {
-        let walk = RUNTIME_CLOSURE_REACHABLE.text();
-        assert!(walk.contains("e.kind IN (1, 2)"), "{walk}");
-        assert!(!walk.contains("cached_path_reference"), "{walk}");
+    #[tokio::test]
+    async fn runtime_closure_walk_over_real_rows_follows_runtime_and_both_kind_edges_only() {
+        let path = |c: &str| format!("/nix/store/{}-closure.drv", c.repeat(32));
+        let hash = |c: &str| c.repeat(32);
+        let [root, build, runtime, both, below_runtime, below_build] =
+            ["1", "2", "3", "4", "5", "6"];
+        let db = gradient_fixtures::shape::shape()
+            .evaluation(EvaluationId::now_v7())
+            .derivation(&path(below_runtime))
+            .output(&hash(below_runtime))
+            .derivation(&path(below_build))
+            .output(&hash(below_build))
+            .derivation(&path(build))
+            .output(&hash(build))
+            .runtime_depends_on(&path(below_build))
+            .derivation(&path(runtime))
+            .output(&hash(runtime))
+            .runtime_depends_on(&path(below_runtime))
+            .derivation(&path(both))
+            .output(&hash(both))
+            .derivation(&path(root))
+            .output(&hash(root))
+            .depends_on(&path(build))
+            .runtime_depends_on(&path(runtime))
+            .both_depends_on(&path(both))
+            .into_database()
+            .await;
+
+        let reached: std::collections::BTreeSet<String> = db
+            .connection()
+            .query_all_raw(RUNTIME_CLOSURE_REACHABLE.bind([vec![hash(root)].into()]))
+            .await
+            .unwrap()
+            .iter()
+            .map(|row| row.try_get("", "hash").unwrap())
+            .collect();
+        db.finish().await;
+
+        let expected = [root, runtime, both, below_runtime].map(hash);
+        assert_eq!(reached, expected.into_iter().collect());
     }
 
     #[tokio::test]

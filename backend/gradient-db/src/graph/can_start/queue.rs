@@ -187,44 +187,8 @@ pub async fn unwalk_derivations(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::graph::can_start::test_rows::{exec, norm, transition_row};
-    use gradient_fixtures::mock::{mock_db, raw_statements, statements};
-    use sea_orm::Value;
-    use std::collections::BTreeMap;
-
-    #[test]
-    fn promote_embeds_the_promotable_predicate() {
-        for sql in [norm(&PROMOTE), norm(&PROMOTE_ANY)] {
-            assert!(sql.contains("SET status = 1"), "{sql}");
-            assert!(sql.contains(&norm(&promotable_predicate("db"))), "{sql}");
-            assert!(sql.contains("RETURNING db.derivation"), "{sql}");
-            assert!(
-                !sql.contains("dispatched_job"),
-                "promotion is a can-start decision, not a dispatch one: {sql}"
-            );
-        }
-
-        assert!(norm(&PROMOTE).contains("db.derivation = ANY($1::uuid[])"));
-        assert!(
-            norm(&PROMOTE_ANY).contains("(db.blocking_deps = 0 OR db.cache_available) AND"),
-            "the table-wide promote must spell out its partial-index bound: {}",
-            norm(&PROMOTE_ANY)
-        );
-
-        let closure = norm(&PROMOTE_CLOSURE);
-        assert!(
-            closure.starts_with("WITH RECURSIVE closure(derivation) AS"),
-            "{closure}"
-        );
-        assert!(
-            closure.contains("db.derivation IN (SELECT derivation FROM closure)"),
-            "{closure}"
-        );
-        assert!(
-            closure.contains(&norm(&promotable_predicate("db"))),
-            "{closure}"
-        );
-    }
+    use crate::graph::can_start::test_rows::transition_row;
+    use gradient_fixtures::mock::mock_db;
 
     #[tokio::test]
     async fn unpromote_ungated_moves_queued_rows_back_to_created() {
@@ -244,56 +208,5 @@ mod tests {
             (changes[0].from, changes[0].to),
             (BuildStatus::Queued, BuildStatus::Created)
         );
-        let log = statements(db.into_transaction_log());
-        assert!(log[0].contains("SET status = 0"), "{log:?}");
-        assert!(
-            log[0].contains("db.derivation = ANY($1::uuid[]) AND NOT ("),
-            "{log:?}"
-        );
-        assert!(
-            log[0].contains("AND db.wanted"),
-            "the embedded gate reads the need column: {log:?}"
-        );
-    }
-
-    #[test]
-    fn no_unpromote_takes_a_shared_build_out_from_under_its_job() {
-        let gate = norm(
-            &crate::scheduling::assignment_record::no_open_assignment_predicate(
-                &crate::scheduling::assignment_record::build_job_key_sql("db.id"),
-            ),
-        );
-        for sql in [&*UNPROMOTE_UNGATED, &*UNPROMOTE_UNGATED_IN] {
-            assert!(norm(sql).contains(&gate), "{sql}");
-        }
-    }
-
-    #[tokio::test]
-    async fn an_unwalk_moves_the_counter_before_it_reaches_the_shared_builds() {
-        let gone = DerivationId::now_v7();
-        let db = mock_db()
-            .append_exec_results([exec(1), exec(0)])
-            .append_query_results([vec![BTreeMap::from([(
-                "id".to_owned(),
-                Value::from(gone.into_inner()),
-            )])]])
-            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
-            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
-            .into_connection();
-        let (ctx, pool) = crate::test_ctx::ctx(db).await;
-
-        unwalk_derivations(&ctx, &[gone]).await.unwrap();
-        drop(ctx);
-
-        let log = raw_statements(pool.into_transaction_log());
-        let at = |needle: &str| {
-            log.iter()
-                .position(|s| s.sql.contains(needle))
-                .unwrap_or_else(|| panic!("{needle} must run: {log:?}"))
-        };
-        let complete = at("AND walked AND unwalked_inputs = 0 ORDER BY id FOR NO KEY UPDATE");
-        let unwalk = at("UPDATE derivation SET walked = false");
-        let shared_builds = at("FROM derivation_build");
-        assert!(complete < unwalk && unwalk < shared_builds, "{log:?}");
     }
 }

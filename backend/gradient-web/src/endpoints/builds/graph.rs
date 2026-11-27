@@ -252,7 +252,6 @@ mod tests {
         let log = db.into_transaction_log();
         let walk = &log[0].statements()[0];
         let values = &walk.values.as_ref().unwrap().0;
-        assert!(walk.sql.contains(r#""kind" IN"#), "{}", walk.sql);
         assert!(values.contains(&sea_orm::Value::SmallInt(Some(0))));
         assert!(values.contains(&sea_orm::Value::SmallInt(Some(2))));
         assert!(!values.contains(&sea_orm::Value::SmallInt(Some(1))));

@@ -86,21 +86,4 @@ mod tests {
         );
         assert_eq!(pred, "(SELECT n FROM shared_build_locks) >= 0");
     }
-
-    #[test]
-    fn the_try_pass_never_waits_for_a_key() {
-        let (with, pred) = try_advisory_filter("$1");
-        assert!(
-            with.contains("bool_and(pg_try_advisory_xact_lock(643, k)) AS locked"),
-            "{with}"
-        );
-        assert!(!with.contains("pg_advisory_xact_lock("), "{with}");
-        assert_eq!(pred, "(SELECT locked FROM shared_build_locks)");
-    }
-
-    #[test]
-    fn without_dependencies_only_the_shared_builds_are_locked() {
-        let (with, _) = advisory_filter("$1", false);
-        assert!(!with.contains("derivation_dependency"), "{with}");
-    }
 }

@@ -404,7 +404,6 @@ mod tests {
     use gradient_wire::types::DiscoveredDerivation;
     use harmonia_store_aterm::parse_derivation_aterm;
     use harmonia_store_path::{StoreDir, StorePath as ClientPath};
-    use sea_orm::{DbBackend, QueryTrait};
 
     use std::sync::Mutex;
 
@@ -1091,13 +1090,6 @@ mod tests {
                 .expect("running evaluation lookup");
             assert!(
                 lookup
-                    .sql
-                    .contains("\"allows_project_credentials_and_privileged_actions\" ="),
-                "{}",
-                lookup.sql
-            );
-            assert!(
-                lookup
                     .values
                     .as_ref()
                     .expect("values")
@@ -1109,19 +1101,117 @@ mod tests {
         }
     }
 
-    #[test]
-    fn the_lookup_matches_task_kind_user_and_the_statuses_that_take_batches() {
-        let task = TaskId::now_v7();
-        let user = UserId::now_v7();
+    #[tokio::test]
+    async fn lookup_running_ssh_evaluation_for_join_returns_only_evaluation_matching_task_kind_starter_credentials_flag_and_joinable_status()
+     {
+        use sea_orm::EntityTrait;
+        use sea_orm::sea_query::Expr;
 
-        let sql = running_evaluation(task, user, true)
-            .build(DbBackend::Postgres)
-            .to_string();
+        let (target, other_task) = (EvaluationId::now_v7(), EvaluationId::now_v7());
+        let test_db = gradient_fixtures::shape::shape()
+            .evaluation(target)
+            .evaluation_status(EvaluationStatus::Building)
+            .evaluation(other_task)
+            .evaluation_status(EvaluationStatus::Building)
+            .into_database()
+            .await;
+        let db = test_db.connection();
+        let user = gradient_fixtures::rows::user();
+        let stranger = gradient_db::rows::insert::<gradient_types::EUser, _>(
+            &db,
+            MUser {
+                id: UserId::now_v7(),
+                username: "stranger".into(),
+                email: "stranger@example.com".into(),
+                ..user.clone()
+            },
+        )
+        .await
+        .expect("stranger");
+        EEvaluation::update_many()
+            .col_expr(CEvaluation::StartedBy, Expr::value(user.id))
+            .col_expr(CEvaluation::Kind, Expr::value(EvaluationKind::Ssh))
+            .exec(&db)
+            .await
+            .expect("ssh evaluations");
+        let matching = test_db
+            .find::<gradient_entity::evaluation::Entity>(target)
+            .await
+            .expect("target");
+        let finished_or_not_started = [
+            EvaluationStatus::Queued,
+            EvaluationStatus::EvaluatingFlake,
+            EvaluationStatus::Fetching,
+            EvaluationStatus::Completed,
+            EvaluationStatus::Failed,
+            EvaluationStatus::Aborted,
+        ]
+        .map(|status| MEvaluation {
+            status,
+            ..matching.clone()
+        });
+        let other_joinable = [
+            EvaluationStatus::EvaluatingDerivation,
+            EvaluationStatus::Waiting,
+        ]
+        .map(|status| MEvaluation {
+            id: EvaluationId::now_v7(),
+            status,
+            ..matching.clone()
+        });
+        let lookalikes = finished_or_not_started.into_iter().chain([
+            MEvaluation {
+                allows_project_credentials_and_privileged_actions: false,
+                ..matching.clone()
+            },
+            MEvaluation {
+                kind: EvaluationKind::Retry,
+                ..matching.clone()
+            },
+            MEvaluation {
+                started_by: Some(stranger.id),
+                ..matching.clone()
+            },
+        ]);
+        for lookalike in other_joinable.iter().cloned() {
+            gradient_db::rows::insert::<EEvaluation, _>(
+                &db,
+                MEvaluation {
+                    branch: format!("joinable-{}", lookalike.id),
+                    ..lookalike
+                },
+            )
+            .await
+            .expect("joinable");
+        }
+        for (n, lookalike) in lookalikes.enumerate() {
+            gradient_db::rows::insert::<EEvaluation, _>(
+                &db,
+                MEvaluation {
+                    id: EvaluationId::now_v7(),
+                    branch: format!("lookalike-{n}"),
+                    ..lookalike
+                },
+            )
+            .await
+            .expect("lookalike");
+        }
 
-        assert!(sql.contains(&format!("\"task\" = '{task}'")), "{sql}");
-        assert!(sql.contains(&format!("\"started_by\" = '{user}'")), "{sql}");
-        assert!(sql.contains("\"kind\" ="), "{sql}");
-        assert!(sql.contains("\"status\" IN (2, 3, 4)"), "{sql}");
+        let found = running_evaluation(test_db.task_of(target).await, user.id, true)
+            .all(&db)
+            .await
+            .expect("lookup");
+
+        let mut expected: Vec<_> = other_joinable
+            .iter()
+            .map(|e| e.id)
+            .chain([target])
+            .collect();
+        let mut found: Vec<_> = found.into_iter().map(|e| e.id).collect();
+        expected.sort();
+        found.sort();
+        assert_eq!(found, expected);
+        test_db.finish().await;
     }
 
     #[test]

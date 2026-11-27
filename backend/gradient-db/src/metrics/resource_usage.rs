@@ -235,36 +235,157 @@ pub async fn expensive_evaluations<C: ConnectionTrait>(
 mod tests {
     use super::*;
 
-    const SCOPE: &str = "'11111111-1111-1111-1111-111111111111'";
-
     #[test]
     fn eval_metric_expr_unknown_is_none() {
         assert!(eval_metric_expr("bogus").is_none());
         assert!(eval_metric_expr("").is_none());
     }
 
-    #[test]
-    fn expensive_resources_skip_zero_values_for_every_metric() {
-        for metric in ["ram", "cpu", "disk"] {
-            let (value_expr, _) = resource_metric_expr(metric).unwrap();
-            let sql = expensive_by_resource_sql(value_expr, 30, None);
-            assert!(sql.contains(&format!("{value_expr} > 0")), "sql = {sql}");
-        }
-        assert!(resource_metric_expr("bogus").is_none());
-    }
+    #[tokio::test]
+    async fn expensive_derivation_ranking_skips_zero_ram_cpu_disk_values() {
+        use gradient_fixtures::shape::shape;
+        use gradient_types::EvaluationId;
 
-    #[test]
-    fn expensive_resources_name_the_worker_within_the_callers_scope() {
-        for sql in [
-            expensive_by_resource_sql("dm.cpu_time_ms::double precision", 30, Some(SCOPE)),
-            expensive_evals_by_resource_sql("em.total_eval_ms::double precision", 30, Some(SCOPE)),
-        ] {
-            assert!(sql.contains("AS worker_name"), "sql = {sql}");
-            assert!(
-                sql.contains(&format!("wr.peer_id IN ({SCOPE})")),
-                "sql = {sql}"
+        let now = chrono::Utc::now().naive_utc();
+        let db = shape()
+            .evaluation(EvaluationId::now_v7())
+            .derivation("/nix/store/0123456789abcdfghijklmnpqrsvwxyz-heavy.drv")
+            .job()
+            .derivation_metric(|m| {
+                m.peak_ram_mb = Some(500);
+                m.cpu_time_ms = Some(7_000);
+                m.disk_read_bytes = Some(3_000);
+                m.disk_write_bytes = Some(1_096);
+                m.created_at = now;
+            })
+            .derivation("/nix/store/0c7kxbq0fdq6pnxpzhg5yvbbrylx4v3f-idle.drv")
+            .job()
+            .derivation_metric(|m| {
+                m.peak_ram_mb = Some(0);
+                m.created_at = now;
+            })
+            .derivation("/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-cpu-only.drv")
+            .job()
+            .derivation_metric(|m| {
+                m.cpu_time_ms = Some(100);
+                m.created_at = now;
+            })
+            .into_database()
+            .await;
+        let conn = db.connection();
+
+        let mut ranked = Vec::new();
+        for metric in ["ram", "cpu", "disk"] {
+            let metric = ResourceMetric::of_build(metric).expect("a build metric");
+            let rows = expensive_derivations(&conn, metric, 30, None)
+                .await
+                .expect("the expensive derivations read");
+            ranked.push(
+                rows.into_iter()
+                    .map(|r| (r.name, r.value))
+                    .collect::<Vec<_>>(),
             );
         }
+
+        db.finish().await;
+        assert_eq!(
+            ranked,
+            [
+                vec![("heavy".to_owned(), 500.0)],
+                vec![
+                    ("heavy".to_owned(), 7_000.0),
+                    ("cpu-only".to_owned(), 100.0)
+                ],
+                vec![("heavy".to_owned(), 4_096.0)],
+            ]
+        );
+        assert!(ResourceMetric::of_build("bogus").is_none());
+    }
+
+    #[tokio::test]
+    async fn expensive_derivations_and_evaluations_only_list_callers_projects_and_name_workers_from_registrations_in_those_projects()
+     {
+        use gradient_fixtures::shape::shape;
+        use gradient_types::EvaluationId;
+
+        let now = chrono::Utc::now().naive_utc();
+        let (mine, other) = (EvaluationId::now_v7(), EvaluationId::now_v7());
+        let db = shape()
+            .evaluation(mine)
+            .worker_registration("w1")
+            .derivation("/nix/store/0123456789abcdfghijklmnpqrsvwxyz-mine.drv")
+            .job()
+            .derivation_metric(|m| {
+                m.peak_ram_mb = Some(100);
+                m.created_at = now;
+                m.worker_id = "w1".into();
+            })
+            .evaluation_metric(|m| {
+                m.peak_rss_mb = 100;
+                m.created_at = now;
+                m.worker_id = "w1".into();
+            })
+            .evaluation(other)
+            .worker_registration("w1")
+            .derivation("/nix/store/0c7kxbq0fdq6pnxpzhg5yvbbrylx4v3f-other.drv")
+            .job()
+            .derivation_metric(|m| {
+                m.peak_ram_mb = Some(200);
+                m.created_at = now;
+                m.worker_id = "w1".into();
+            })
+            .evaluation_metric(|m| {
+                m.peak_rss_mb = 200;
+                m.created_at = now;
+                m.worker_id = "w1".into();
+            })
+            .into_database()
+            .await;
+        let mine_project = db.project_of(mine).await.into_inner();
+        let other_project = db.project_of(other).await.into_inner();
+        for (project, name, created) in [
+            (mine_project, "Mine", "2020-01-01"),
+            (other_project, "Other", "2021-01-01"),
+        ] {
+            db.execute(&format!(
+                "UPDATE worker_registration SET display_name = '{name}', created_at = '{created}' \
+                 WHERE peer_id = '{project}'"
+            ))
+            .await;
+        }
+        let conn = db.connection();
+        let scope = format!("'{mine_project}'");
+        let ram = ResourceMetric::of_build("ram").expect("a build metric");
+        let rss = ResourceMetric::of_evaluation("rss").expect("an evaluation metric");
+
+        let derivations = expensive_derivations(&conn, ram, 30, Some(&scope))
+            .await
+            .expect("the scoped derivations");
+        let evaluations = expensive_evaluations(&conn, rss, 30, Some(&scope))
+            .await
+            .expect("the scoped evaluations");
+        let everyone = expensive_derivations(&conn, ram, 30, None)
+            .await
+            .expect("the unscoped derivations");
+
+        db.finish().await;
+        let derivations: Vec<_> = derivations
+            .into_iter()
+            .map(|r| (r.name, r.worker_name))
+            .collect();
+        let evaluations: Vec<_> = evaluations
+            .into_iter()
+            .map(|r| (r.evaluation, r.worker_name))
+            .collect();
+        assert_eq!(derivations, [("mine".to_owned(), Some("Mine".to_owned()))]);
+        assert_eq!(evaluations, [(mine.into_inner(), Some("Mine".to_owned()))]);
+        assert_eq!(
+            everyone
+                .into_iter()
+                .map(|r| r.worker_name)
+                .collect::<Vec<_>>(),
+            [Some("Other".to_owned()), Some("Other".to_owned())]
+        );
     }
 
     #[tokio::test]

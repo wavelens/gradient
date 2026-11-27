@@ -112,30 +112,73 @@ pub async fn delete_managed_except<C: ConnectionTrait>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use gradient_fixtures::mock::mock_db;
+    use gradient_fixtures::database::TestDatabase;
+    use gradient_fixtures::rows;
 
     #[tokio::test]
-    async fn an_upsert_replaces_the_value_of_an_existing_name() {
-        let project = ProjectId::now_v7();
-        let db = mock_db()
-            .append_query_results([vec![MProjectSecret {
-                id: ProjectSecretId::now_v7(),
-                project,
-                name: "wandb-token".into(),
-                value: "encrypted".into(),
-                ..Default::default()
-            }]])
-            .into_connection();
-        upsert(&db, project, "wandb-token", "encrypted".into(), false, None)
+    async fn project_secret_upsert_replaces_value_list_is_ordered_delete_and_delete_managed_except_are_scoped_to_project_and_managed()
+     {
+        let db = TestDatabase::create().await;
+        let conn = db.connection();
+        crate::rows::insert::<EUser, _>(&conn, rows::user())
             .await
-            .expect("upsert");
+            .unwrap();
+        let mine = crate::rows::insert::<EProject, _>(&conn, rows::project())
+            .await
+            .unwrap()
+            .id;
+        let other = crate::rows::insert::<EProject, _>(
+            &conn,
+            rows::project_with_id(ProjectId::now_v7(), "other-project"),
+        )
+        .await
+        .unwrap()
+        .id;
 
-        let log = db.into_transaction_log();
-        let sql = &log[0].statements()[0].sql;
-        assert!(
-            sql.contains(r#"ON CONFLICT ("project", "name") DO UPDATE"#),
-            "{sql}"
+        upsert(&conn, mine, "wandb-token", "first".into(), false, None)
+            .await
+            .unwrap();
+        let replaced = upsert(&conn, mine, "wandb-token", "second".into(), true, None)
+            .await
+            .unwrap();
+        for (project, name, managed) in [
+            (mine, "a-kept", true),
+            (mine, "b-dropped", true),
+            (mine, "c-unmanaged", false),
+            (other, "b-dropped", true),
+        ] {
+            upsert(&conn, project, name, "v".into(), managed, None)
+                .await
+                .unwrap();
+        }
+
+        let listed: Vec<String> = list(&conn, mine)
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|secret| secret.name)
+            .collect();
+        let removed = delete_managed_except(&conn, mine, &["a-kept".to_owned()])
+            .await
+            .unwrap();
+        let deleted = delete(&conn, mine, "c-unmanaged").await.unwrap();
+        let missing = delete(&conn, mine, "c-unmanaged").await.unwrap();
+
+        assert_eq!(
+            (replaced.value.as_str(), replaced.managed),
+            ("second", true)
         );
-        assert!(sql.contains("RETURNING"), "{sql}");
+        assert_eq!(
+            listed,
+            ["a-kept", "b-dropped", "c-unmanaged", "wandb-token"]
+        );
+        assert_eq!(removed, 2, "b-dropped and wandb-token are managed");
+        assert!(deleted && !missing);
+        assert_eq!(
+            names(&conn, mine).await.unwrap(),
+            BTreeSet::from(["a-kept".to_owned()])
+        );
+        assert!(one(&conn, other, "b-dropped").await.unwrap().is_some());
+        db.finish().await;
     }
 }

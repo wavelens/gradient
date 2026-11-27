@@ -170,8 +170,8 @@ pub async fn repair_all_shared_build_start_gate_states<C: ConnectionTrait>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::graph::can_start::test_rows::{drv, exec, norm, transition_row};
-    use gradient_fixtures::mock::{mock_db, statements};
+    use crate::graph::can_start::test_rows::{drv, exec, transition_row};
+    use gradient_fixtures::mock::mock_db;
     use sea_orm::Value;
     use std::collections::BTreeMap;
 
@@ -247,51 +247,8 @@ mod tests {
         db.finish().await;
     }
 
-    #[test]
-    fn the_counter_recount_is_a_compare_and_swap_over_the_locked_chunk() {
-        let sql = norm(&RECOUNT_BLOCKING_DEPS);
-        assert!(
-            sql.contains("FROM derivation_build p WHERE p.derivation = ANY($1::uuid[])"),
-            "the chunk is the whole bound: {sql}"
-        );
-        assert!(
-            !sql.contains("WHERE p.status IN"),
-            "a status scope would widen a recount past its lock: {sql}"
-        );
-        assert!(
-            sql.contains("db.blocking_deps = x.old AND x.old <> x.n"),
-            "compare-and-swap plus drift filter: {sql}"
-        );
-    }
-
-    #[test]
-    fn the_scope_reaches_one_edge_past_the_pending_shared_builds_and_every_contradicting_flag() {
-        let sql = norm(&repair_scope());
-        assert_eq!(sql.matches("q.status IN (0, 1)").count(), 2, "{sql}");
-        assert!(
-            sql.contains("SELECT e.dependency FROM derivation_dependency e"),
-            "{sql}"
-        );
-        assert!(
-            sql.starts_with("SELECT q.derivation"),
-            "the UNION names the first arm's column: {sql}"
-        );
-        assert!(
-            sql.contains("WHERE q.fetchable AND q.missing_runtime_deps > 0"),
-            "a fetchable shared build with a missing runtime dependency counted is a lie every walk trusts: {sql}"
-        );
-        assert!(
-            sql.contains("WHERE q.status IN (3, 7) AND NOT q.fetchable"),
-            "a terminal-success shared build without the flag may be complete again: {sql}"
-        );
-        assert!(
-            !sql.contains("derivation_output"),
-            "the scope reads columns only; the mark evaluates the predicate: {sql}"
-        );
-    }
-
     #[tokio::test]
-    async fn a_repaired_column_adjusts_its_parents_in_the_same_transaction_and_queues_nothing() {
+    async fn repair_fetchable_reports_marked_count_and_unqueued_parent() {
         let now_fetchable = DerivationId::now_v7();
         let unblocked_parent = DerivationId::now_v7();
         let no_longer_fetchable = DerivationId::now_v7();
@@ -316,34 +273,10 @@ mod tests {
             (repaired.unqueued[0].from, repaired.unqueued[0].to),
             (BuildStatus::Queued, BuildStatus::Created)
         );
-
-        let raw = db.into_transaction_log();
-        assert_eq!(raw.len(), 1, "{raw:?}");
-        let inside: Vec<&str> = raw[0].statements().iter().map(|s| s.sql.as_str()).collect();
-        assert_eq!(
-            inside.len(),
-            8,
-            "BEGIN, lock, fetchable mark and its parents, unfetchable mark and its parent lock and parents, COMMIT: {inside:?}"
-        );
-        assert!(inside[1].contains("FOR NO KEY UPDATE NOWAIT"), "{inside:?}");
-        assert!(
-            inside[2].contains("SET fetchable = true") && inside[3].contains("blocking_deps - c.n"),
-            "{inside:?}"
-        );
-        assert!(
-            inside[4].contains("SET fetchable = false")
-                && inside[5].contains("ORDER BY p.derivation FOR NO KEY UPDATE")
-                && inside[6].contains("SET blocking_deps = c.n,"),
-            "{inside:?}"
-        );
-        assert!(
-            !inside.iter().any(|s| s.contains("SET status = 1")),
-            "a parent reaching zero is queued by repair_all_shared_build_start_gate_states, after its recount: {inside:?}"
-        );
     }
 
     #[tokio::test]
-    async fn the_repair_locks_each_chunk_before_it_recounts_it() {
+    async fn full_repair_pass_over_one_scope_recounts_three_blocking_deps_and_promotes_one_build() {
         let a = DerivationId::now_v7();
         let demoted = DerivationId::now_v7();
         let promoted = DerivationId::now_v7();
@@ -370,30 +303,6 @@ mod tests {
         assert_eq!(queue.unpromoted[0].derivation, demoted);
         assert_eq!(queue.promoted.len(), 1);
         assert_eq!(queue.promoted[0].derivation, promoted);
-
-        let raw = db.into_transaction_log();
-        assert_eq!(
-            raw.len(),
-            5,
-            "the scope select, one transaction per pass, then the queue: {raw:?}"
-        );
-
-        for (entry, first_write) in [(1, "SET fetchable = true"), (2, "SET blocking_deps = x.n")] {
-            let inside: Vec<&str> = raw[entry]
-                .statements()
-                .iter()
-                .map(|s| s.sql.as_str())
-                .collect();
-            assert!(
-                inside[1].contains("ORDER BY derivation FOR NO KEY UPDATE NOWAIT"),
-                "{inside:?}"
-            );
-            assert!(inside[2].contains(first_write), "{inside:?}");
-        }
-
-        let log = statements(raw);
-        assert!(log[log.len() - 2].contains("SET status = 0"), "{log:?}");
-        assert!(log[log.len() - 1].contains("SET status = 1"), "{log:?}");
     }
 
     #[tokio::test]
@@ -413,21 +322,11 @@ mod tests {
             .unwrap();
 
         assert_eq!((fetchable.marked, blocking_deps), (0, 1));
-        let raw = db.into_transaction_log();
-        let skipped: Vec<&str> = raw[1].statements().iter().map(|s| s.sql.as_str()).collect();
-        assert_eq!(
-            skipped.len(),
-            3,
-            "BEGIN, the refused lock, ROLLBACK: {skipped:?}"
-        );
-        assert!(
-            skipped[1].contains("NOWAIT") && skipped[2].contains("ROLLBACK"),
-            "{skipped:?}"
-        );
     }
 
     #[tokio::test]
-    async fn the_repair_finishes_fetchable_everywhere_before_it_recounts_a_counter() {
+    async fn repair_recounts_one_row_per_lock_chunk_and_marks_none_fetchable_with_more_derivations_than_one_chunk()
+     {
         let scope: Vec<BTreeMap<String, Value>> = (0..SWEEP_LOCK_CHUNK + 1)
             .map(|_| drv(DerivationId::now_v7()))
             .collect();
@@ -454,36 +353,67 @@ mod tests {
             (0, 2),
             "one recounted row per chunk"
         );
+    }
 
-        let log = statements(db.into_transaction_log());
-        let columns: Vec<&str> = log
-            .iter()
-            .filter_map(|s| {
-                if s.contains("SET fetchable = true") || s.contains("SET fetchable = false") {
-                    Some("fetchable")
-                } else if s.contains("SET blocking_deps = x.n") {
-                    Some("blocking_deps")
-                } else {
-                    None
-                }
-            })
+    #[tokio::test]
+    async fn repair_scope_query_returns_pending_builds_direct_dependencies_fetchable_builds_with_missing_runtime_deps_and_terminal_success_builds_not_flagged_fetchable_but_no_other_builds()
+     {
+        let path = |c: &str| format!("/nix/store/{}-scope.drv", c.repeat(32));
+        let [
+            pending,
+            dependency,
+            grandparent,
+            queued,
+            missing_runtime,
+            unflagged,
+            settled,
+            failed,
+        ] = ["1", "2", "3", "4", "5", "6", "7", "8"];
+        let completed = |shape: gradient_fixtures::shape::Shape, key: &str| {
+            shape
+                .derivation(&path(key))
+                .output(&key.repeat(32))
+                .build_status(BuildStatus::Completed)
+                .cached_path(&key.repeat(32), key)
+        };
+        let shape = gradient_fixtures::shape::shape()
+            .evaluation(gradient_entity::ids::EvaluationId::now_v7());
+        let shape = [dependency, missing_runtime, unflagged, settled]
+            .into_iter()
+            .fold(shape, completed);
+        let db = shape
+            .derivation(&path(pending))
+            .depends_on(&path(dependency))
+            .derivation(&path(queued))
+            .build_status(BuildStatus::Queued)
+            .derivation(&path(failed))
+            .build_status(BuildStatus::FailedPermanent)
+            .derivation(&path(grandparent))
+            .depends_on(&path(pending))
+            .build_status(BuildStatus::Completed)
+            .into_database()
+            .await;
+        db.execute(&format!(
+            "UPDATE derivation_build SET fetchable = (status = 3), missing_runtime_deps = 0; \
+             UPDATE derivation_build SET missing_runtime_deps = 2 \
+               WHERE derivation = '{}'; \
+             UPDATE derivation_build SET fetchable = false WHERE derivation = '{}'",
+            db.id_of(&path(missing_runtime)).await,
+            db.id_of(&path(unflagged)).await,
+        ))
+        .await;
+
+        let scope: std::collections::BTreeSet<_> = can_start_scope(&db.connection())
+            .await
+            .unwrap()
+            .into_iter()
             .collect();
-        assert_eq!(
-            columns,
-            [
-                "fetchable",
-                "fetchable",
-                "fetchable",
-                "fetchable",
-                "blocking_deps",
-                "blocking_deps"
-            ],
-            "two chunks, both fetchable passes first: {log:?}"
-        );
-        assert!(
-            log[log.len() - 2].contains("SET status = 0")
-                && log[log.len() - 1].contains("SET status = 1"),
-            "the queue is settled after the counters: {log:?}"
-        );
+        let mut expected = std::collections::BTreeSet::new();
+        for key in [pending, dependency, queued, missing_runtime, unflagged] {
+            expected.insert(db.id_of(&path(key)).await);
+        }
+        db.finish().await;
+
+        assert_eq!(scope, expected);
     }
 }

@@ -257,35 +257,62 @@ mod tests {
         );
     }
 
-    #[test]
-    fn the_fold_deletes_what_it_adds_in_one_statement() {
-        let sql = FOLD_SHARED_BUILD_DELTAS.text();
-        assert!(
-            sql.contains("ORDER BY id FOR NO KEY UPDATE SKIP LOCKED), gone AS (DELETE FROM evaluation_shared_build_delta d USING locked"),
-            "{sql}"
-        );
-        assert!(
-            sql.contains(
-                "UPDATE evaluation e SET named_shared_builds = e.named_shared_builds + s.named"
-            ),
-            "{sql}"
-        );
+    async fn evaluation_with_two_ledger_rows()
+    -> (gradient_fixtures::database::TestDatabase, EvaluationId) {
+        use gradient_fixtures::shape::shape;
+
+        let evaluation = EvaluationId::now_v7();
+        let db = shape().evaluation(evaluation).into_database().await;
+        db.execute(&format!(
+            "INSERT INTO evaluation_shared_build_delta \
+             (evaluation, named, active, failed, queued, building) \
+             VALUES ('{evaluation}', 2, 1, 0, 1, 0), ('{evaluation}', 1, 0, 1, 0, 0)"
+        ))
+        .await;
+        (db, evaluation)
     }
 
-    #[test]
-    fn the_recount_clears_the_ledger_it_counted_past() {
-        let sql = RECOUNT_EVAL_COUNTERS.text();
-        assert!(
-            sql.contains(
-                "ORDER BY id FOR NO KEY UPDATE SKIP LOCKED), gone AS (DELETE FROM evaluation_shared_build_delta d USING locked"
-            ),
-            "{sql}"
-        );
-        assert!(
-            sql.contains("evaluation_shared_build_counts(db.status, db.wanted)"),
-            "{sql}"
-        );
-        assert!(sql.contains("IS DISTINCT FROM"), "{sql}");
+    #[tokio::test]
+    async fn the_fold_deletes_what_it_adds_in_one_statement() {
+        let (db, evaluation) = evaluation_with_two_ledger_rows().await;
+
+        assert!(fold_shared_build_deltas(&db.connection()).await.unwrap());
+
+        let ledger = db
+            .texts("SELECT count(*)::text FROM evaluation_shared_build_delta")
+            .await;
+        let stored = db
+            .texts(&format!(
+                "SELECT concat_ws(',', named_shared_builds, active_shared_builds, \
+                 failed_shared_builds, queued_shared_builds, building_shared_builds) \
+                 FROM evaluation WHERE id = '{evaluation}'"
+            ))
+            .await;
+        db.finish().await;
+        assert_eq!(ledger, vec!["0"]);
+        assert_eq!(stored, vec!["3,1,1,1,0"]);
+    }
+
+    #[tokio::test]
+    async fn the_recount_clears_the_ledger_it_counted_past() {
+        let (db, evaluation) = evaluation_with_two_ledger_rows().await;
+        db.execute(&format!(
+            "UPDATE evaluation SET named_shared_builds = 7 WHERE id = '{evaluation}'"
+        ))
+        .await;
+
+        let drift = recount_evaluations(&db.connection(), &[evaluation])
+            .await
+            .unwrap();
+
+        let ledger = db
+            .texts("SELECT count(*)::text FROM evaluation_shared_build_delta")
+            .await;
+        let counters = eval_counters(&db.connection(), evaluation).await.unwrap();
+        db.finish().await;
+        assert_eq!(drift, 1);
+        assert_eq!(ledger, vec!["0"]);
+        assert_eq!(counters, Some(EvalCounters::default()));
     }
 
     #[tokio::test]

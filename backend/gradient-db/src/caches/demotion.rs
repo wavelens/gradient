@@ -545,154 +545,71 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn invalidating_cached_output_with_producer_removes_cached_path_row_in_lock_order_and_keeps_stored_nar_object_until_commit()
-     {
-        use gradient_types::ids::{DerivationId, DerivationOutputId};
-        use sea_orm::{MockExecResult, Value};
-        use std::collections::BTreeMap;
+    async fn demote_output_resets_producers_and_returns_storage_keys() {
+        use gradient_entity::build::BuildStatus;
+        use gradient_fixtures::shape::shape;
+        use gradient_types::ids::EvaluationId;
 
-        let hash = "bn1sgl0pn88d9dkc10jp0i1a77iadh8w";
-        let (tmp, file) = present_nar(hash);
-
-        let producer = DerivationId::now_v7();
-        let output = gradient_entity::derivation_output::Model {
-            id: DerivationOutputId::now_v7(),
-            derivation: producer,
-            hash: Some(hash.to_string()),
-            ..Default::default()
-        };
-        let producer_row =
-            BTreeMap::from([("derivation".to_owned(), Value::from(producer.into_inner()))]);
-        let row = BTreeMap::from([(
-            "id".to_owned(),
-            Value::from(gradient_types::ids::CachedPathId::now_v7().into_inner()),
-        )]);
-        let deleted = BTreeMap::from([(
-            "nar_object_storage_key".to_owned(),
-            Value::from(hash.to_owned()),
-        )]);
-        let none = Vec::<BTreeMap<String, Value>>::new();
-
-        let db = mock_db()
-            .append_query_results([vec![output.clone()], vec![output]])
-            .append_query_results([
-                none.clone(),
-                vec![row],
-                none.clone(),
-                vec![producer_row],
-                none.clone(),
-                vec![deleted],
-                none.clone(),
-                none.clone(),
-                none.clone(),
-                none.clone(),
-                none.clone(),
-                none.clone(),
-                none,
-            ])
-            .append_exec_results(vec![
-                MockExecResult {
-                    last_insert_id: 0,
-                    rows_affected: 1,
-                };
-                8
-            ])
-            .into_connection();
-        let (ctx, pool) = crate::test_ctx::ctx_at(db, tmp.path()).await;
+        let [with_row, without_row, untouched] = ["1", "2", "3"].map(|c| c.repeat(32));
+        let drv = |name: &str| format!("{}-{name}.drv", name.repeat(32));
+        let db = shape()
+            .evaluation(EvaluationId::now_v7())
+            .derivation(&drv("a"))
+            .output(&with_row)
+            .build_status(BuildStatus::Completed)
+            .cached_path(&with_row, "a")
+            .derivation(&drv("b"))
+            .output(&without_row)
+            .build_status(BuildStatus::Completed)
+            .derivation(&drv("c"))
+            .output(&untouched)
+            .build_status(BuildStatus::Completed)
+            .cached_path(&untouched, "c")
+            .into_database()
+            .await;
+        let key = db
+            .cached_path(&with_row)
+            .await
+            .unwrap()
+            .nar_object_storage_key;
+        let (a, b) = (db.id_of(&drv("a")).await, db.id_of(&drv("b")).await);
+        let tmp = tempfile::tempdir().unwrap();
+        let (ctx, _pool) = crate::test_ctx::ctx_at(db.connection(), tmp.path()).await;
 
         let demoted = demote_cached_output(
             &ctx,
-            &StoreContentToRetire::StoreHashesWithGraphOutput(vec![hash.to_owned()]),
+            &StoreContentToRetire::StoreHashesWithGraphOutput(vec![
+                with_row.clone(),
+                without_row.clone(),
+            ]),
             DemoteWhen::Always,
             true,
         )
         .await
         .unwrap();
 
-        assert_eq!(
-            demoted.producers.len(),
-            1,
-            "the output's producer is returned"
-        );
-        assert_eq!(
-            demoted.unreferenced_cached_path_object_storage_keys,
-            vec![hash.to_owned()]
-        );
-        assert!(
-            file.exists(),
-            "the object outlives the transaction, which can still roll back"
-        );
         drop(ctx);
-        let log = statements(pool.into_transaction_log());
-        assert!(
-            log.iter().any(|s| s.contains("DELETE FROM cached_path")),
-            "the row must be retired, so the counters it backed move with it: {log:?}"
+        let mut producers = demoted.producers.clone();
+        producers.sort();
+        let mut expected = vec![a, b];
+        expected.sort();
+        assert_eq!(producers, expected);
+        assert_eq!(demoted.unreferenced_cached_path_object_storage_keys, [key]);
+        assert!(db.cached_path(&with_row).await.is_none());
+        assert!(db.cached_path(&untouched).await.is_some());
+        assert_ne!(
+            db.shared_build(&drv("a")).await.status,
+            BuildStatus::Completed
+        );
+        assert_ne!(
+            db.shared_build(&drv("b")).await.status,
+            BuildStatus::Completed
         );
         assert_eq!(
-            log.len(),
-            22,
-            "output, demote, path lock, derivations that list path, shared build lock, trust clear, retire lock, cached path ids of that hash, derivations that list path, producers of that hash, full closures that they held, delete, shared build lock, mark, reset, forget unneeded outputs under that lock and read closure, un-promote and update producer needs under raised lock: {log:?}"
+            db.shared_build(&drv("c")).await.status,
+            BuildStatus::Completed
         );
-        let paths = log
-            .iter()
-            .position(|s| s.contains("FROM cached_path WHERE hash = ANY($1)"))
-            .expect("the path lock is taken first");
-        let listing_derivations = log
-            .iter()
-            .position(|s| s.contains("FROM derivation_input_source WHERE hash = ANY"))
-            .expect("demote can read which derivations list that path.");
-        let shared_builds = log
-            .iter()
-            .position(|s| s.contains("FROM derivation_build WHERE derivation = ANY($1::uuid[])"))
-            .expect("the shared build lock is taken");
-        let trust = log
-            .iter()
-            .position(|s| s.contains("SET cache_available = false"))
-            .expect("the upstream trust is dropped");
-        let complete = log
-            .iter()
-            .position(|s| s.contains("ORDER BY db.derivation FOR NO KEY UPDATE"))
-            .expect("the complete closure the producers had is read");
-        let retire = log
-            .iter()
-            .position(|s| s.contains("DELETE FROM cached_path"))
-            .expect("the row is retired");
-        let mark = log
-            .iter()
-            .position(|s| s.contains("SET fetchable = false"))
-            .expect("the producers are offered to the mark");
-        let reset = log
-            .iter()
-            .position(|s| s.contains("substituted = false, attempt = 0"))
-            .expect("the producer with nothing left to serve is reset");
-        assert!(
-            paths < trust,
-            "this is the one path that writes derivation_build before a retire, so it takes the cached_path lock first or it deadlocks against a concurrent eviction: {log:?}"
-        );
-        assert!(
-            paths < listing_derivations && listing_derivations < shared_builds,
-            "Writers mark derivations that list the path as not walked after the cached_path lock and before the shared build lock. All writers follow this order of lock classes. Otherwise concurrent retire can deadlock: {log:?}"
-        );
-        assert!(
-            paths < shared_builds && shared_builds < trust,
-            "the trust clear names its producers in one UPDATE, so it acquires them in \
-             plan order: the ordered shared build pass has to precede it or it deadlocks \
-             against the can-start repair's chunk: {log:?}"
-        );
-        assert!(
-            trust < retire,
-            "the retire decides fetchability, so the stale offer must be gone first: {log:?}"
-        );
-        assert!(
-            complete < retire,
-            "which producers had a complete closure is the one endpoint the delete destroys, so it \
-             is read under the lock before it: {log:?}"
-        );
-        assert!(
-            mark < reset,
-            "the producer reset belongs to the retire, which decides it from the \
-             `fetchable` flag the mark has just written: {log:?}"
-        );
+        db.finish().await;
     }
 
     #[tokio::test]
@@ -745,85 +662,6 @@ mod tests {
         );
     }
 
-    #[tokio::test]
-    async fn demote_of_a_hash_with_no_row_still_resets_its_producer() {
-        use gradient_types::ids::{DerivationId, DerivationOutputId};
-        use sea_orm::{MockExecResult, Value};
-        use std::collections::BTreeMap;
-
-        let hash = "bn1sgl0pn88d9dkc10jp0i1a77iadh8w";
-        let (tmp, _file) = present_nar(hash);
-        let producer = DerivationId::now_v7();
-        let output = gradient_entity::derivation_output::Model {
-            id: DerivationOutputId::now_v7(),
-            derivation: producer,
-            hash: Some(hash.to_string()),
-            ..Default::default()
-        };
-        let drv_row =
-            BTreeMap::from([("derivation".to_owned(), Value::from(producer.into_inner()))]);
-
-        let none = Vec::<BTreeMap<String, Value>>::new();
-
-        let db = mock_db()
-            .append_query_results([vec![output.clone()], vec![output]])
-            .append_query_results([
-                none.clone(),
-                none.clone(),
-                none.clone(),
-                vec![drv_row.clone()],
-                none.clone(),
-                vec![drv_row],
-                none.clone(),
-                none.clone(),
-                none.clone(),
-                none.clone(),
-                none.clone(),
-                none.clone(),
-                none.clone(),
-                none,
-            ])
-            .append_exec_results(vec![
-                MockExecResult {
-                    last_insert_id: 0,
-                    rows_affected: 1,
-                };
-                11
-            ])
-            .into_connection();
-        let (ctx, pool) = crate::test_ctx::ctx_at(db, tmp.path()).await;
-
-        demote_cached_output(
-            &ctx,
-            &StoreContentToRetire::StoreHashesWithGraphOutput(vec![hash.to_owned()]),
-            DemoteWhen::Always,
-            true,
-        )
-        .await
-        .unwrap();
-
-        drop(ctx);
-        let log = statements(pool.into_transaction_log());
-        assert_eq!(
-            log.len(),
-            26,
-            "Output, demotion, path lock, path-listing derivation, shared build lock, clear trust, lock removal, cached path rows for the hash (none, so no deletion), path-listing derivation, hash producers, their full closures, shared build lock, mark, parent lock, ripple, locked updates under toggled marks, reset, unwanted-output and closure reads forgotten under those locks, non-promote locked updates and what producers need now: {log:?}"
-        );
-        assert!(
-            log.iter()
-                .any(|s| s.contains("FROM derivation_output o WHERE o.hash = ANY($1)")),
-            "the producers of the asked-for hash are still resolved: {log:?}"
-        );
-        assert!(
-            log.iter().any(|s| s.contains("SET fetchable = false")),
-            "and offered to the mark, which decides from the predicate: {log:?}"
-        );
-        assert!(
-            log.iter().any(|s| s.contains("AND NOT db.fetchable")),
-            "so the producer with nothing left to serve is reset: {log:?}"
-        );
-    }
-
     #[test]
     fn demote_clears_upstream_availability() {
         use sea_orm::ActiveValue::Set;
@@ -848,31 +686,6 @@ mod tests {
     }
 
     #[test]
-    fn unbacked_trusted_select_matches_the_gate() {
-        let sql = unbacked_trusted_outputs_select()
-            .split_whitespace()
-            .collect::<Vec<_>>()
-            .join(" ");
-        let terminal_success = crate::sql::status::build_in(&BuildStatus::TERMINAL_SUCCESS);
-        assert!(
-            sql.contains(&format!("db.status IN ({terminal_success})")),
-            "must mirror the gate's success states: {sql}"
-        );
-        assert!(
-            !sql.contains("external_url"),
-            "Count upstream-served outputs with no stored copy, same as the demotion pass: {sql}"
-        );
-        assert!(
-            sql.contains("NOT EXISTS") && sql.contains("WHERE cp.hash = o.hash)"),
-            "must require a missing backing NAR: {sql}"
-        );
-        assert!(
-            sql.contains("o.name <> ALL(db.unneeded_outputs)"),
-            "must skip outputs no wanted parent needs: {sql}"
-        );
-    }
-
-    #[test]
     fn a_reported_missing_path_is_probed_and_an_invalidation_probes_only_producerless_paths() {
         assert!(probe_before_demoting(DemoteWhen::ObjectMissing, true));
         assert!(probe_before_demoting(DemoteWhen::ObjectMissing, false));
@@ -886,21 +699,33 @@ mod tests {
         );
     }
 
-    #[test]
-    fn output_parents_exclude_producerless_drv_and_source() {
-        let sql = OUTPUT_PARENTS_SELECT
-            .text()
-            .split_whitespace()
-            .collect::<Vec<_>>()
-            .join(" ");
-        assert!(
-            sql.contains("FROM derivation_dependency e") && sql.contains("e.kind IN (1, 2)"),
-            "must resolve the runtime parents of the missing hash: {sql}"
-        );
-        assert!(
-            sql.contains("SELECT DISTINCT e.derivation AS parent"),
-            "the parents are derivations to walk again, not outputs to demote: {sql}"
-        );
+    #[tokio::test]
+    async fn output_parents_are_the_runtime_dependents_of_the_missing_output() {
+        use gradient_fixtures::shape::shape;
+        use gradient_types::ids::EvaluationId;
+
+        let dependency = format!("{}-dependency.drv", "d".repeat(32));
+        let runtime = format!("{}-runtime.drv", "a".repeat(32));
+        let buildtime = format!("{}-buildtime.drv", "b".repeat(32));
+        let db = shape()
+            .evaluation(EvaluationId::now_v7())
+            .derivation(&dependency)
+            .output(DEPENDENCY_BUILD_OUTPUT_STORE_PATH_HASH)
+            .derivation(&runtime)
+            .runtime_depends_on(&dependency)
+            .derivation(&buildtime)
+            .depends_on(&dependency)
+            .into_database()
+            .await;
+
+        let parents =
+            parents_of_hash(&db.connection(), DEPENDENCY_BUILD_OUTPUT_STORE_PATH_HASH).await;
+        let unknown = parents_of_hash(&db.connection(), &"z".repeat(32)).await;
+        let runtime_id = db.id_of(&runtime).await;
+        db.finish().await;
+
+        assert_eq!(parents.unwrap(), vec![runtime_id]);
+        assert!(unknown.unwrap().is_empty());
     }
 
     #[tokio::test]

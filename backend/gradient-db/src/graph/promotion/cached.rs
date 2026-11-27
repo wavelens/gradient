@@ -117,35 +117,108 @@ crate::sql_fn! {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use gradient_types::EvaluationId;
 
-    #[test]
-    fn substitute_created_shared_builds_moves_only_created_rows() {
-        let sql = substitute_created_shared_builds_sql()
-            .split_whitespace()
-            .collect::<Vec<_>>()
-            .join(" ");
-        assert!(sql.contains(&format!(
-            "SET status = {}",
-            crate::sql::status::build(BuildStatus::Substituted)
-        )));
-        assert!(sql.contains(&format!(
-            "db.status = {}",
-            crate::sql::status::build(BuildStatus::Created)
-        )));
-        assert!(sql.contains(
-            "RETURNING db.derivation, old.status AS from_status, db.status AS to_status"
-        ));
+    fn path(key: &str) -> String {
+        format!("/nix/store/{}-cached.drv", key.repeat(32))
     }
 
-    #[test]
-    fn the_cached_repair_leaves_a_shared_build_whose_assignment_row_is_open() {
-        let norm = |s: String| s.split_whitespace().collect::<Vec<_>>().join(" ");
-        let gate = norm(
-            crate::scheduling::assignment_record::no_open_assignment_predicate(
-                &crate::scheduling::assignment_record::build_job_key_sql("db.id"),
-            ),
-        );
+    #[tokio::test]
+    async fn test_substitute_created_shared_builds_moves_only_created_builds_to_substituted() {
+        let db = gradient_fixtures::shape::shape()
+            .evaluation(EvaluationId::now_v7())
+            .derivation(&path("1"))
+            .derivation(&path("2"))
+            .build_status(BuildStatus::Queued)
+            .derivation(&path("3"))
+            .into_database()
+            .await;
+        let (created, queued) = (db.id_of(&path("1")).await, db.id_of(&path("2")).await);
 
-        assert!(norm(repair_cached_shared_builds_for_eval_sql()).contains(&gate));
+        let changes = substitute_created_shared_builds(&db.connection(), &[created, queued])
+            .await
+            .unwrap();
+        let rows = [
+            db.shared_build(&path("1")).await,
+            db.shared_build(&path("2")).await,
+            db.shared_build(&path("3")).await,
+        ];
+        db.finish().await;
+
+        assert_eq!(changes.len(), 1);
+        assert_eq!(
+            (changes[0].derivation, changes[0].from, changes[0].to),
+            (created, BuildStatus::Created, BuildStatus::Substituted)
+        );
+        assert_eq!(
+            rows.map(|row| (row.status, row.substituted)),
+            [
+                (BuildStatus::Substituted, true),
+                (BuildStatus::Queued, false),
+                (BuildStatus::Created, false),
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn repair_cached_shared_builds_for_eval_only_completes_builds_with_all_outputs_stored() {
+        use gradient_entity::build_attempt::AttemptOutcome;
+
+        let (evaluation, other_evaluation) = (EvaluationId::now_v7(), EvaluationId::now_v7());
+        let stored = |shape: gradient_fixtures::shape::Shape, key: &str, status: BuildStatus| {
+            shape
+                .derivation(&path(key))
+                .output(&key.repeat(32))
+                .build_status(status)
+                .job()
+                .cached_path(&key.repeat(32), key)
+        };
+        let shape = gradient_fixtures::shape::shape().evaluation(evaluation);
+        let shape = stored(shape, "1", BuildStatus::Created);
+        let shape = stored(shape, "2", BuildStatus::Queued);
+        let shape = stored(shape, "4", BuildStatus::Completed);
+        let db = shape
+            .derivation(&path("3"))
+            .output(&"3".repeat(32))
+            .job()
+            .derivation(&path("5"))
+            .output(&"5".repeat(32))
+            .build_status(BuildStatus::Building)
+            .job()
+            .attempt(AttemptOutcome::Running, None)
+            .open_assignment()
+            .cached_path(&"5".repeat(32), "5")
+            .derivation(&path("6"))
+            .job()
+            .evaluation(other_evaluation)
+            .derivation(&path("7"))
+            .output(&"7".repeat(32))
+            .job()
+            .cached_path(&"7".repeat(32), "7")
+            .into_database()
+            .await;
+
+        let changes = repair_cached_shared_builds_for_eval(&db.connection(), evaluation)
+            .await
+            .unwrap();
+        let mut statuses = Vec::new();
+        for key in ["1", "2", "3", "4", "5", "6", "7"] {
+            statuses.push(db.shared_build(&path(key)).await.status);
+        }
+        db.finish().await;
+
+        assert_eq!(changes.len(), 2);
+        assert_eq!(
+            statuses,
+            [
+                BuildStatus::Completed,
+                BuildStatus::Completed,
+                BuildStatus::Created,
+                BuildStatus::Completed,
+                BuildStatus::Building,
+                BuildStatus::Created,
+                BuildStatus::Created,
+            ]
+        );
     }
 }

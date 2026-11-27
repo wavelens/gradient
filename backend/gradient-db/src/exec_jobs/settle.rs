@@ -150,24 +150,72 @@ pub async fn fail_open<C: ConnectionTrait>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use gradient_fixtures::mock::{all_statements, mock_db};
+    use gradient_fixtures::shape::shape;
+    use gradient_types::{EExecJob, EvaluationId};
 
     #[tokio::test]
-    async fn a_created_job_queues_once_its_builds_are_cached() {
-        let db = mock_db()
-            .append_query_results([Vec::<MExecJob>::new()])
-            .append_query_results([Vec::<MExecJob>::new()])
-            .into_connection();
+    async fn waiting_queues_created_exec_jobs_with_completed_program_build_fails_created_exec_jobs_with_failed_program_build_and_leaves_created_exec_jobs_with_building_program_build()
+     {
+        let evaluation = EvaluationId::now_v7();
+        let db = shape()
+            .evaluation(evaluation)
+            .derivation("/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-done.drv")
+            .build_status(BuildStatus::Completed)
+            .entry_point("apps.x86_64-linux.done")
+            .derivation("/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-broken.drv")
+            .build_status(BuildStatus::FailedPermanent)
+            .entry_point("apps.x86_64-linux.broken")
+            .derivation("/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-pending.drv")
+            .build_status(BuildStatus::Building)
+            .entry_point("apps.x86_64-linux.pending")
+            .into_database()
+            .await;
+        let conn = db.connection();
+        let mut job_of = std::collections::HashMap::new();
+        for name in ["done", "broken", "pending"] {
+            let point = db
+                .entry_point(evaluation, &format!("apps.x86_64-linux.{name}"))
+                .await
+                .expect("the entry point");
+            let job = crate::rows::insert::<EExecJob, _>(
+                &conn,
+                MExecJob {
+                    id: ExecJobId::now_v7(),
+                    evaluation,
+                    entry_point: point.id,
+                    program_derivation: point.derivation,
+                    requirement: serde_json::json!({}),
+                    spec: serde_json::json!({}),
+                    created_at: gradient_types::now(),
+                    ..Default::default()
+                },
+            )
+            .await
+            .expect("the exec job is written");
+            job_of.insert(name, job.id);
+        }
 
-        waiting(&db).await.unwrap();
+        let settled = waiting(&conn).await.expect("settle the waiting exec jobs");
+        let statuses: Vec<ExecJobStatus> = {
+            let mut rows = db.rows::<EExecJob>().await;
+            rows.sort_by_key(|row| row.id == job_of["pending"]);
+            rows.iter().map(|row| row.status).collect()
+        };
+        db.finish().await;
 
-        let log = all_statements(db.into_transaction_log());
-        let queue = &log[0].sql;
-        assert!(queue.starts_with("UPDATE exec_job"), "{queue}");
-        assert!(queue.contains("b.status IN (3, 7)"), "{queue}");
-        assert!(queue.contains("RETURNING"), "{queue}");
-        let fail = &log[1].sql;
-        assert!(fail.contains("b.status IN (4, 5, 6, 9)"), "{fail}");
-        assert!(fail.contains("'the program build failed'"), "{fail}");
+        assert_eq!(
+            (
+                settled.queued.iter().map(|job| job.id).collect::<Vec<_>>(),
+                settled.failed.iter().map(|job| job.id).collect::<Vec<_>>(),
+                settled.failed[0].message.clone(),
+                statuses.last().copied(),
+            ),
+            (
+                vec![job_of["done"]],
+                vec![job_of["broken"]],
+                Some("the program build failed".to_owned()),
+                Some(ExecJobStatus::Created),
+            )
+        );
     }
 }

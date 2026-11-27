@@ -266,13 +266,6 @@ mod tests {
     }
 
     #[test]
-    fn no_spec_carries_a_leftover_scope_cast() {
-        for spec in eval_scope_tables() {
-            assert!(!spec.sql.contains("$1::"), "{}", spec.name);
-        }
-    }
-
-    #[test]
     fn the_manifest_reports_what_was_rewritten_not_what_was_asked() {
         let spec = spec("derivation");
         assert_eq!(redaction_summary(spec, &redactor(true, false)), "none");

@@ -788,3 +788,43 @@ fn sorted_tallies(mut tallies: Vec<UpstreamTally>) -> Vec<UpstreamTally> {
     tallies.sort_by(|a, b| a.url.cmp(&b.url));
     tallies
 }
+
+#[tokio::test]
+async fn p16_upstream_probe_sweep_returns_walked_unprobed_shared_builds_named_by_job_in_ascending_derivation_order_and_starts_strictly_after_last_derivation_id()
+ {
+    let e1 = EvaluationId::now_v7();
+    let case = SchedulerCase::start(
+        shape()
+            .evaluation(e1)
+            .derivation(A)
+            .walked()
+            .entry_point(&attr_of(A))
+            .job()
+            .output(A_OUT)
+            .derivation(B)
+            .walked()
+            .entry_point(&attr_of(B))
+            .job()
+            .output(B_OUT)
+            .derivation(C)
+            .walked()
+            .output(C_OUT)
+            .build_status(BuildStatus::Skipped)
+            .derivation(D)
+            .entry_point(&attr_of(D))
+            .job()
+            .output(D_OUT),
+    )
+    .await;
+    assert!(!case.db.derivation(D).await.walked);
+    let mut named = vec![case.db.id_of(A).await, case.db.id_of(B).await];
+    named.sort_unstable();
+
+    assert_eq!(case.unanswered_need_after(None).await, named);
+    assert_eq!(
+        case.unanswered_need_after(Some(named[0])).await,
+        vec![named[1]]
+    );
+    assert!(case.unanswered_need_after(Some(named[1])).await.is_empty());
+    case.finish().await;
+}

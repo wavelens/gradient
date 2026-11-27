@@ -168,21 +168,38 @@ mod tests {
         assert!(!carries_debug_info("debug-tool-1.0"));
     }
 
-    #[test]
-    fn the_backfill_predicate_matches_its_partial_index() {
-        let sql = PENDING_SQL
-            .text()
-            .split_whitespace()
-            .collect::<Vec<_>>()
-            .join(" ");
-        assert!(
-            sql.contains("WHERE NOT debug_info_indexed AND package LIKE '%-debug'"),
-            "predicate must match the partial index verbatim: {sql}"
-        );
-        assert!(
-            sql.contains("ORDER BY created_at"),
-            "oldest first, on the index's ordering column: {sql}"
-        );
+    #[tokio::test]
+    async fn the_backfill_selects_only_unscanned_debug_outputs() {
+        use gradient_fixtures::shape::shape;
+        use gradient_types::EvaluationId;
+
+        let hash = |digit: char| digit.to_string().repeat(32);
+        let db = shape()
+            .evaluation(EvaluationId::now_v7())
+            .cached_path(&hash('1'), "hello-debug")
+            .cached_path(&hash('2'), "hello-debug")
+            .cached_path(&hash('3'), "hello")
+            .cached_path(&hash('4'), "hello-debug")
+            .into_database()
+            .await;
+        db.execute(&format!(
+            "UPDATE cached_path SET debug_info_indexed = true WHERE hash = '{}'",
+            hash('4')
+        ))
+        .await;
+
+        let mut pending: Vec<String> = pending_debug_index(&db.connection(), 10)
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|path| path.hash)
+            .collect();
+        let limited = pending_debug_index(&db.connection(), 1).await.unwrap();
+        db.finish().await;
+
+        pending.sort();
+        assert_eq!(pending, [hash('1'), hash('2')]);
+        assert_eq!(limited.len(), 1);
     }
 
     #[tokio::test]

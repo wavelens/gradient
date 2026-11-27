@@ -443,7 +443,6 @@ pub async fn delete_by_id<C: ConnectionTrait>(db: &C, id: UserId) -> Result<(), 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use gradient_fixtures::mock::{mock_db, raw_statements};
 
     fn build_user_insert_sql_with_old_schema_columns(users: &[MUser]) -> String {
         let rows = users
@@ -471,83 +470,69 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn email_lookup_for_claims_ignores_case() {
-        let db = mock_db()
-            .append_query_results([Vec::<MUser>::new()])
-            .into_connection();
+    async fn test_real_db_user_lookups_by_email_ignoring_case_password_login_routing_by_at_sign_and_username_search_escaping_wildcards_and_ordering()
+     {
+        let db = gradient_fixtures::database::TestDatabase::create().await;
+        let conn = db.connection();
+        for (username, email) in [
+            ("alice", "Alice@Example.com"),
+            ("bob", "bob@example.com"),
+            ("x@y", "other@example.com"),
+            ("robert", "bob"),
+            ("zz-A_B%", "z@example.com"),
+            ("a_b%first", "f@example.com"),
+            ("a_bx", "g@example.com"),
+            ("axb%", "h@example.com"),
+        ] {
+            let account = MUser {
+                id: UserId::now_v7(),
+                username: username.into(),
+                name: username.into(),
+                email: email.into(),
+                active: true,
+                ..Default::default()
+            };
+            crate::rows::insert::<EUser, _>(&conn, account)
+                .await
+                .expect("the account is written");
+        }
+        let username_of = |user: Option<MUser>| user.map(|u| u.username);
 
-        by_email_ignoring_case(&db, "Alice@Example.com")
-            .await
-            .expect("query");
+        let by_mixed_case = by_email_ignoring_case(&conn, "alice@EXAMPLE.com").await;
+        let email_login = find_user_for_password_login(&conn, "x@y").await;
+        let email_login_of_other_account =
+            find_user_for_password_login(&conn, "other@example.com").await;
+        let username_login = find_user_for_password_login(&conn, "bob").await;
+        let found = search_by_username(&conn, "a_b%", 10).await.unwrap();
+        let limited = search_by_username(&conn, "a_b%", 1).await.unwrap();
 
-        let statements = raw_statements(db.into_transaction_log());
-        let [select] = statements.as_slice() else {
-            panic!("expected one statement, got {statements:?}");
-        };
-        assert!(
-            select.sql.contains("LOWER(\"user\".\"email\")"),
-            "{}",
-            select.sql
+        assert_eq!(
+            username_of(by_mixed_case.unwrap()).as_deref(),
+            Some("alice")
         );
-        let values = format!("{:?}", select.values);
-        assert!(values.contains("\"alice@example.com\""), "{values}");
-    }
-
-    #[tokio::test]
-    async fn password_login_lookup_with_at_sign_queries_only_email_and_without_only_username() {
-        let db = mock_db()
-            .append_query_results([Vec::<MUser>::new(), Vec::<MUser>::new()])
-            .into_connection();
-
-        find_user_for_password_login(&db, "a@b")
-            .await
-            .expect("query");
-        find_user_for_password_login(&db, "alice")
-            .await
-            .expect("query");
-
-        let statements = raw_statements(db.into_transaction_log());
-        let [by_email, by_username] = statements.as_slice() else {
-            panic!("expected two statements, got {statements:?}");
-        };
-        assert!(by_email.sql.contains("\"email\""), "{}", by_email.sql);
-        assert!(
-            !by_email.sql.contains("LOWER(\"user\".\"username\")"),
-            "{}",
-            by_email.sql
+        assert_eq!(
+            username_of(email_login.unwrap()),
+            None,
+            "a name with an at sign is looked up as an email only"
         );
-        assert!(
-            by_username.sql.contains("LOWER(\"user\".\"username\")"),
-            "{}",
-            by_username.sql
+        assert_eq!(
+            username_of(email_login_of_other_account.unwrap()).as_deref(),
+            Some("x@y")
         );
-        assert!(
-            !by_username.sql.contains("LOWER(\"user\".\"email\")"),
-            "{}",
-            by_username.sql
+        assert_eq!(
+            username_of(username_login.unwrap()).as_deref(),
+            Some("bob"),
+            "a name without an at sign is looked up as a username only"
         );
-    }
-
-    #[tokio::test]
-    async fn search_by_username_is_case_insensitive_escapes_wildcards_and_orders_by_username() {
-        let db = mock_db()
-            .append_query_results([Vec::<MUser>::new()])
-            .into_connection();
-
-        search_by_username(&db, "a_b%", 10).await.expect("query");
-
-        let statements = raw_statements(db.into_transaction_log());
-        let [select] = statements.as_slice() else {
-            panic!("expected one statement, got {statements:?}");
-        };
-        assert!(select.sql.contains("ILIKE"), "{}", select.sql);
-        assert!(
-            select.sql.contains("ORDER BY \"user\".\"username\" ASC"),
-            "{}",
-            select.sql
+        assert_eq!(
+            found
+                .iter()
+                .map(|u| u.username.as_str())
+                .collect::<Vec<_>>(),
+            ["a_b%first", "zz-A_B%"]
         );
-        let values = format!("{:?}", select.values);
-        assert!(values.contains(r#""%a\\_b\\%%""#), "{values}");
+        assert_eq!(limited.len(), 1);
+        db.finish().await;
     }
 
     #[tokio::test]

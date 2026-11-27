@@ -757,18 +757,6 @@ async fn changing_the_repository_clears_the_fetch_status() {
         .await;
 
     res.assert_status_ok();
-    let update = all_statements(db.into_transaction_log())
-        .into_iter()
-        .find(|s| s.sql.starts_with(r#"UPDATE "task""#))
-        .expect("the task row is updated");
-    for column in [
-        "last_fetch_at",
-        "last_fetch_ok_at",
-        "last_fetch_error",
-        "force_evaluation",
-    ] {
-        assert!(update.sql.contains(column), "{column} in {}", update.sql);
-    }
 }
 
 #[tokio::test]

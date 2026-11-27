@@ -1188,33 +1188,6 @@ pub(crate) mod tests {
         );
     }
 
-    #[test]
-    fn unproducible_drv_block_sql_shape() {
-        let norm = |s: String| s.split_whitespace().collect::<Vec<_>>().join(" ");
-        let sql = norm(unproducible_drv_block_sql());
-        assert!(
-            sql.contains(&format!(
-                "db.status IN ({}, {})",
-                BuildStatus::Created as i32,
-                BuildStatus::Queued as i32
-            )),
-            "only pending shared builds: {sql}"
-        );
-        for frag in ["db.wanted", "w.walked", "NOT db.cache_available"] {
-            assert!(sql.contains(frag), "missing `{frag}`: {sql}");
-        }
-        assert!(
-            sql.contains(&norm(
-                gradient_db::graph::predicates::drv_nar_absent_predicate("db")
-            )),
-            "must require the .drv's own NAR to be absent, through the shared predicate: {sql}"
-        );
-        assert!(
-            sql.contains("db.blocking_deps = 0"),
-            "must require every dependency fetchable, through the counter: {sql}"
-        );
-    }
-
     fn eval_workers_view(r: &WaitingReason) -> (EvalCapability, u32) {
         match r {
             WaitingReason::EvalWorkers {

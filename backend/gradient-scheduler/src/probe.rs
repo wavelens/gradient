@@ -187,7 +187,10 @@ async fn sweep_due(swept: &Mutex<Instant>) -> bool {
 /// The request channel is in memory. A process stopping between the commit and the send is leaving
 /// shared builds nothing will ever ask about. The need is stopping at an unanswered one, and
 /// nothing below it would ever build again.
-async fn unanswered_need(db: &WorkerDb, after: Option<DerivationId>) -> Result<Vec<DerivationId>> {
+pub(crate) async fn unanswered_need(
+    db: &WorkerDb,
+    after: Option<DerivationId>,
+) -> Result<Vec<DerivationId>> {
     Ok(unanswered_need_query(after)
         .all(db)
         .await
@@ -477,7 +480,6 @@ pub(crate) async fn planned_round(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sea_orm::DatabaseBackend;
 
     #[test]
     fn a_shared_build_with_an_unanswered_output_is_asked_again() {
@@ -504,37 +506,5 @@ mod tests {
     async fn the_sweep_runs_at_most_once_an_interval() {
         let swept = Mutex::new(Instant::now());
         assert!(!sweep_due(&swept).await, "a fresh mark is not due");
-    }
-
-    #[test]
-    fn the_sweep_reads_only_walked_shared_builds_an_evaluation_names() {
-        use sea_orm::QueryTrait as _;
-        let sql = unanswered_need_query(None)
-            .build(DatabaseBackend::Postgres)
-            .to_string();
-        assert!(sql.contains(r#""derivation"."walked" = TRUE"#), "{sql}");
-        assert!(
-            sql.contains(
-                r#""derivation_build"."id" IN (SELECT "derivation_build" FROM "build_job")"#
-            ),
-            "{sql}"
-        );
-    }
-
-    #[test]
-    fn the_sweep_query_for_unasked_builds_continues_after_last_derivation_id_in_order() {
-        use sea_orm::QueryTrait as _;
-        let last = DerivationId::now_v7();
-        let sql = unanswered_need_query(Some(last))
-            .build(DatabaseBackend::Postgres)
-            .to_string();
-        assert!(
-            sql.contains(&format!(r#""derivation_build"."derivation" > '{last}'"#)),
-            "{sql}"
-        );
-        assert!(
-            sql.contains(r#"ORDER BY "derivation_build"."derivation" ASC"#),
-            "{sql}"
-        );
     }
 }

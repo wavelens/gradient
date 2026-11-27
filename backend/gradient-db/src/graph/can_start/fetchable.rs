@@ -303,9 +303,9 @@ mod tests {
     use super::*;
     use crate::graph::can_start::lock::lock_seed_shared_builds;
     use crate::graph::can_start::queue::unpromote_ungated;
-    use crate::graph::can_start::repair::RECOUNT_BLOCKING_DEPS;
-    use crate::graph::can_start::test_rows::{drv, exec, norm, transition_row};
+    use crate::graph::can_start::test_rows::{drv, exec, transition_row};
     use gradient_fixtures::mock::{empty_db, mock_db, statements};
+    use gradient_types::EvaluationId;
     use sea_orm::Value;
     use std::collections::BTreeMap;
 
@@ -316,83 +316,122 @@ mod tests {
         ])
     }
 
-    #[test]
-    fn the_build_gate_counts_build_edges_only() {
-        for sql in [
-            SEED_BLOCKING_DEPS.to_string(),
-            RECOUNT_BLOCKING_DEPS.to_string(),
-            UNBLOCK_PARENTS.text().into_owned(),
-            BLOCK_PARENTS.to_string(),
-        ] {
-            assert!(sql.contains("e.kind IN (0, 2)"), "{sql}");
+    fn gate_path(key: &str) -> String {
+        format!("/nix/store/{}-gate.drv", key.repeat(32))
+    }
+
+    async fn reset_gate_counters(db: &gradient_fixtures::database::TestDatabase) {
+        db.execute(
+            "UPDATE derivation_build SET fetchable = false, missing_runtime_deps = 0, blocking_deps = 7",
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn blocking_dependency_counter_counts_build_and_both_edges_not_runtime_only() {
+        let [build, runtime, both, parent] = ["1", "2", "3", "4"];
+        let completed = |shape: gradient_fixtures::shape::Shape, key: &str| {
+            shape
+                .derivation(&gate_path(key))
+                .output(&key.repeat(32))
+                .build_status(BuildStatus::Completed)
+                .cached_path(&key.repeat(32), key)
+        };
+        let shape = gradient_fixtures::shape::shape().evaluation(EvaluationId::now_v7());
+        let shape = [build, runtime, both].into_iter().fold(shape, completed);
+        let db = shape
+            .derivation(&gate_path(parent))
+            .depends_on(&gate_path(build))
+            .runtime_depends_on(&gate_path(runtime))
+            .both_depends_on(&gate_path(both))
+            .into_database()
+            .await;
+        reset_gate_counters(&db).await;
+        let connection = db.connection();
+        let parent_id = db.id_of(&gate_path(parent)).await;
+        let mut counted = Vec::new();
+
+        let txn = connection.begin().await.unwrap();
+        let lock = lock_seed_shared_builds(&txn, &[parent_id]).await.unwrap();
+        seed_blocking_deps(&lock).await.unwrap();
+        drop(lock);
+        txn.commit().await.unwrap();
+        counted.push(db.shared_build(&gate_path(parent)).await.blocking_deps);
+
+        db.execute("UPDATE derivation_build SET blocking_deps = 7")
+            .await;
+        crate::graph::can_start::recount_blocking_deps_for_derivation_ids(
+            &connection,
+            &[parent_id],
+        )
+        .await
+        .unwrap();
+        counted.push(db.shared_build(&gate_path(parent)).await.blocking_deps);
+
+        let mut dependencies = Vec::new();
+        for key in [build, runtime, both] {
+            dependencies.push(db.id_of(&gate_path(key)).await);
         }
+        advance_fetchable(&connection, &dependencies).await.unwrap();
+        counted.push(db.shared_build(&gate_path(parent)).await.blocking_deps);
+
+        for (key, hash) in [(runtime, runtime), (build, build)] {
+            let txn = connection.begin().await.unwrap();
+            txn.execute_unprepared(&format!(
+                "DELETE FROM cached_path WHERE hash = '{}'",
+                hash.repeat(32)
+            ))
+            .await
+            .unwrap();
+            let id = db.id_of(&gate_path(key)).await;
+            lost_fetchability(&lock_shared_builds(&txn, &[id]).await.unwrap())
+                .await
+                .unwrap();
+            txn.commit().await.unwrap();
+            counted.push(db.shared_build(&gate_path(parent)).await.blocking_deps);
+        }
+        db.finish().await;
+
+        assert_eq!(counted, [2, 2, 0, 0, 1]);
     }
 
-    #[test]
-    fn the_count_treats_a_dependency_with_no_shared_build_as_blocking() {
-        let sql = norm(&blocking_dependency_count("db"));
-        assert_eq!(
-            sql,
-            norm(
-                "(SELECT count(*) FROM derivation_dependency e \
-                 LEFT JOIN derivation_build dep ON dep.derivation = e.dependency \
-                 WHERE e.derivation = db.derivation \
-                 AND e.kind IN (0, 2) \
-                 AND (dep.derivation IS NULL OR NOT dep.fetchable \
-                 OR (dep.unneeded_outputs <> '{}' AND (e.dependency_outputs IS NULL \
-                 OR e.dependency_outputs && dep.unneeded_outputs))))"
-            )
+    #[tokio::test]
+    async fn fetchable_dependency_does_not_decrement_parent_counter_for_edge_read_as_blocked_through_unneeded_output()
+     {
+        let [dependency, parent] = ["1", "2"];
+        let dev_hash = "3".repeat(32);
+        let db = gradient_fixtures::shape::shape()
+            .evaluation(EvaluationId::now_v7())
+            .derivation(&gate_path(dependency))
+            .output(&dependency.repeat(32))
+            .unneeded_output(&dev_hash, "dev")
+            .build_status(BuildStatus::Completed)
+            .cached_path(&dependency.repeat(32), "dependency")
+            .derivation(&gate_path(parent))
+            .depends_on_outputs(&gate_path(dependency), &["dev"])
+            .into_database()
+            .await;
+        reset_gate_counters(&db).await;
+        let connection = db.connection();
+        let (dependency_id, parent_id) = (
+            db.id_of(&gate_path(dependency)).await,
+            db.id_of(&gate_path(parent)).await,
         );
-    }
 
-    #[test]
-    fn a_ripple_moves_only_the_edges_the_count_reads_through_the_flag() {
-        let unneeded = norm(&builds_with_unneeded_output_predicate("e", "dep"));
-        let sql = UNBLOCK_PARENTS.text().into_owned();
-        assert!(
-            norm(&sql).contains(&format!("AND NOT {unneeded} GROUP BY e.derivation")),
-            "an edge blocked by an unneeded output never moved with the flag: {sql}"
-        );
-    }
+        let txn = connection.begin().await.unwrap();
+        let lock = lock_seed_shared_builds(&txn, &[parent_id]).await.unwrap();
+        seed_blocking_deps(&lock).await.unwrap();
+        drop(lock);
+        txn.commit().await.unwrap();
+        let seeded = db.shared_build(&gate_path(parent)).await.blocking_deps;
+        advance_fetchable(&connection, &[dependency_id])
+            .await
+            .unwrap();
+        let moved = db.shared_build(&gate_path(dependency)).await.fetchable;
+        let after = db.shared_build(&gate_path(parent)).await.blocking_deps;
+        db.finish().await;
 
-    #[test]
-    fn blocking_parent_builds_recounts_blocking_dependency_count() {
-        let sql = norm(&BLOCK_PARENTS);
-        assert!(
-            sql.contains(&norm(&blocking_dependency_count("p"))),
-            "{sql}"
-        );
-    }
-
-    #[test]
-    fn the_seed_counts_the_column_every_mark_adjusts_parents_by() {
-        let seed = norm(&SEED_BLOCKING_DEPS);
-        assert!(
-            seed.contains(&norm(&blocking_dependency_count("db"))),
-            "{seed}"
-        );
-        assert!(
-            !seed.contains(&norm(&fetchable_predicate("dep"))),
-            "a dependency whose column lags the predicate is left out of the seed and \
-             then subtracted again when its mark lands: {seed}"
-        );
-    }
-
-    #[test]
-    fn the_seed_overwrites_and_never_adjusts() {
-        let sql = norm(&SEED_BLOCKING_DEPS);
-        assert!(
-            sql.starts_with("UPDATE derivation_build db SET blocking_deps = (SELECT count(*)"),
-            "{sql}"
-        );
-        assert!(
-            !sql.contains("blocking_deps + ") && !sql.contains("blocking_deps - "),
-            "the seed is absolute, not an adjustment: {sql}"
-        );
-        assert!(
-            sql.contains("WHERE db.derivation = ANY($1::uuid[])"),
-            "{sql}"
-        );
+        assert_eq!((seeded, moved, after), (1, true, 1));
     }
 
     #[tokio::test]
@@ -409,40 +448,6 @@ mod tests {
         assert!(promote(&db, &[]).await.unwrap().is_empty());
         assert!(unpromote_ungated(&db, &[]).await.unwrap().is_empty());
         assert!(statements(db.into_transaction_log()).is_empty());
-    }
-
-    #[tokio::test]
-    async fn a_flip_and_its_ripple_share_the_locking_transaction() {
-        let x = DerivationId::now_v7();
-        let d = DerivationId::now_v7();
-        let db = mock_db()
-            .append_exec_results([exec(1), exec(0), exec(1)])
-            .append_query_results([vec![drv(x)]])
-            .append_query_results([vec![ripple_row(d, false)]])
-            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
-            .into_connection();
-
-        let txn = db.begin().await.unwrap();
-        let lock = lock_shared_builds(&txn, &[x]).await.unwrap();
-        became_fetchable(&lock).await.unwrap();
-        txn.commit().await.unwrap();
-
-        let raw = db.into_transaction_log();
-        assert_eq!(raw.len(), 1, "one transaction for the whole flip: {raw:?}");
-
-        let inside: Vec<&str> = raw[0].statements().iter().map(|s| s.sql.as_str()).collect();
-        assert_eq!(
-            inside.len(),
-            10,
-            "BEGIN, lock, mark, ripple, then the need update of the marked build in a \
-             savepoint (work_mem, lock, walk), COMMIT: {inside:?}"
-        );
-        assert!(
-            inside[1].contains("ORDER BY derivation FOR NO KEY UPDATE"),
-            "an unordered locker deadlocks against every ordered one: {inside:?}"
-        );
-        assert!(inside[2].contains("SET fetchable = true"), "{inside:?}");
-        assert!(inside[3].contains("blocking_deps - c.n"), "{inside:?}");
     }
 
     #[tokio::test]
@@ -474,25 +479,6 @@ mod tests {
             (changes[0].from, changes[0].to),
             (BuildStatus::Created, BuildStatus::Queued)
         );
-
-        let log = statements(db.into_transaction_log());
-        assert_eq!(
-            log.len(),
-            7,
-            "lock, mark, ripple, promote, then the need update of the marked build: {log:?}"
-        );
-        assert!(
-            log[1].contains(&flipped.to_string()) && log[1].contains(&untouched.to_string()),
-            "the mark is offered both shared builds: {log:?}"
-        );
-        assert!(
-            log[2].contains(&flipped.to_string()) && !log[2].contains(&untouched.to_string()),
-            "the ripple takes only the shared build the mark returned: {log:?}"
-        );
-        assert!(
-            log[3].contains(&d1.to_string()) && !log[3].contains(&d2.to_string()),
-            "only the parent that reached zero is a candidate: {log:?}"
-        );
     }
 
     #[tokio::test]
@@ -509,7 +495,6 @@ mod tests {
         txn.commit().await.unwrap();
 
         assert!(changes.is_empty());
-        assert_eq!(statements(db.into_transaction_log()).len(), 2, "lock, mark");
     }
 
     #[tokio::test]
@@ -534,61 +519,6 @@ mod tests {
         assert_eq!(
             (changes[0].from, changes[0].to),
             (BuildStatus::Queued, BuildStatus::Created)
-        );
-
-        let log = statements(db.into_transaction_log());
-        assert_eq!(
-            log.len(),
-            7,
-            "lock, mark, parent lock, ripple, then the raised, locked update below the flipped build: {log:?}"
-        );
-        assert!(
-            log[1].contains("SET fetchable = false") && log[1].contains("db.fetchable AND NOT"),
-            "{log:?}"
-        );
-        assert!(
-            log[2].contains("ORDER BY p.derivation FOR NO KEY UPDATE")
-                && log[2].contains(&x.to_string()),
-            "{log:?}"
-        );
-        assert!(
-            log[4].contains("SET LOCAL work_mem")
-                && log[5].contains(&x.to_string())
-                && log[6].contains("region(evaluation, derivation, builder)"),
-            "the update is rooted at the shared build the mark flipped: {log:?}"
-        );
-        assert!(
-            log[3].contains("SET blocking_deps = c.n,")
-                && log[3].contains("status = CASE WHEN c.n > 0 AND d.status = 1 AND NOT EXISTS"),
-            "{log:?}"
-        );
-        assert!(
-            log[3].contains("updated_at = CASE WHEN c.n > 0 AND d.status = 1 AND NOT EXISTS"),
-            "a parent that only counted up keeps its updated_at: a FailedTransient \
-             row's retry backoff is measured from that column, so bumping it here \
-             restarts the window a dependency's regression had nothing to do with: {log:?}"
-        );
-    }
-
-    #[test]
-    fn a_ripple_up_counts_an_in_flight_shared_build_without_unqueueing_it() {
-        let gate = norm(
-            &crate::scheduling::assignment_record::no_open_assignment_predicate(
-                &crate::scheduling::assignment_record::build_job_key_sql("d.id"),
-            ),
-        );
-        let sql = norm(&BLOCK_PARENTS);
-        for column in ["status", "updated_at"] {
-            assert!(
-                sql.contains(&format!(
-                    "{column} = CASE WHEN c.n > 0 AND d.status = 1 AND {gate} THEN"
-                )),
-                "{sql}"
-            );
-        }
-        assert!(
-            sql.contains("SET blocking_deps = c.n,") && sql.contains("AND d.blocking_deps <> c.n"),
-            "{sql}"
         );
     }
 
@@ -705,6 +635,103 @@ mod tests {
         assert_eq!(
             blocking_deps, 2,
             "Both parent dependencies are no longer fetchable. The parent must wait for two dependencies. A count of 1 can let the parent start with unavailable inputs."
+        );
+    }
+
+    #[tokio::test]
+    async fn parent_with_dependency_without_shared_build_row_counts_dependency_as_blocking() {
+        let [present, missing, parent] = ["1", "2", "3"];
+        let db = gradient_fixtures::shape::shape()
+            .evaluation(EvaluationId::now_v7())
+            .derivation(&gate_path(present))
+            .output(&present.repeat(32))
+            .build_status(BuildStatus::Completed)
+            .cached_path(&present.repeat(32), "present")
+            .derivation(&gate_path(missing))
+            .output(&missing.repeat(32))
+            .build_status(BuildStatus::Completed)
+            .cached_path(&missing.repeat(32), "missing")
+            .derivation(&gate_path(parent))
+            .depends_on(&gate_path(present))
+            .depends_on(&gate_path(missing))
+            .into_database()
+            .await;
+        db.execute("UPDATE derivation_build SET fetchable = true, blocking_deps = 7")
+            .await;
+        let (missing_id, parent_id) = (
+            db.id_of(&gate_path(missing)).await,
+            db.id_of(&gate_path(parent)).await,
+        );
+        db.execute(&format!(
+            "DELETE FROM derivation_build WHERE derivation = '{missing_id}'"
+        ))
+        .await;
+        let connection = db.connection();
+
+        let txn = connection.begin().await.unwrap();
+        let lock = lock_seed_shared_builds(&txn, &[parent_id]).await.unwrap();
+        seed_blocking_deps(&lock).await.unwrap();
+        drop(lock);
+        txn.commit().await.unwrap();
+        let blocking_deps = db.shared_build(&gate_path(parent)).await.blocking_deps;
+        db.finish().await;
+
+        assert_eq!(blocking_deps, 1);
+    }
+
+    #[tokio::test]
+    async fn queued_parent_with_open_assignment_keeps_status_while_without_assignment_returns_to_created_when_dependency_loses_fetchability()
+     {
+        let [dependency, busy, idle] = ["1", "2", "3"];
+        let db = gradient_fixtures::shape::shape()
+            .evaluation(EvaluationId::now_v7())
+            .derivation(&gate_path(dependency))
+            .output(&dependency.repeat(32))
+            .build_status(BuildStatus::Completed)
+            .cached_path(&dependency.repeat(32), "dependency")
+            .derivation(&gate_path(busy))
+            .depends_on(&gate_path(dependency))
+            .build_status(BuildStatus::Queued)
+            .job()
+            .open_assignment()
+            .derivation(&gate_path(idle))
+            .depends_on(&gate_path(dependency))
+            .build_status(BuildStatus::Queued)
+            .job()
+            .into_database()
+            .await;
+        db.execute(
+            "UPDATE derivation_build SET fetchable = (status = 3), missing_runtime_deps = 0, \
+             blocking_deps = 0",
+        )
+        .await;
+        let dependency_id = db.id_of(&gate_path(dependency)).await;
+        let connection = db.connection();
+
+        let txn = connection.begin().await.unwrap();
+        txn.execute_unprepared(&format!(
+            "DELETE FROM cached_path WHERE hash = '{}'",
+            dependency.repeat(32)
+        ))
+        .await
+        .unwrap();
+        lost_fetchability(&lock_shared_builds(&txn, &[dependency_id]).await.unwrap())
+            .await
+            .unwrap();
+        txn.commit().await.unwrap();
+        let (busy_row, idle_row) = (
+            db.shared_build(&gate_path(busy)).await,
+            db.shared_build(&gate_path(idle)).await,
+        );
+        db.finish().await;
+
+        assert_eq!(
+            (busy_row.status, busy_row.blocking_deps),
+            (BuildStatus::Queued, 1)
+        );
+        assert_eq!(
+            (idle_row.status, idle_row.blocking_deps),
+            (BuildStatus::Created, 1)
         );
     }
 }

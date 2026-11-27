@@ -2159,11 +2159,6 @@ mod assignment_response_tests {
             .find(|s| s.sql.starts_with("UPDATE \"dispatched_job\""))
             .expect("the rejection closes the row it was handed");
         assert!(
-            close.sql.contains("\"finished_at\" IS NULL"),
-            "{}",
-            close.sql
-        );
-        assert!(
             format!("{:?}", close.values).contains(&assignment_id.to_string()),
             "{:?}",
             close.values

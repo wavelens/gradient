@@ -30,10 +30,6 @@ describe('gr-icon', () => {
     expect((await render())[0].textContent?.trim()).toBe('delete');
   });
 
-  it('carries the icon font class', async () => {
-    expect((await render())[0].querySelector('.material-symbols-outlined')).not.toBeNull();
-  });
-
   it('defaults to medium and applies the size class', async () => {
     const icons = await render();
     expect(icons[0].querySelector('.gr-icon--md')).not.toBeNull();

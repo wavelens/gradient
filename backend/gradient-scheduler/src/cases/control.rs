@@ -383,6 +383,12 @@ impl SchedulerCase {
         self.probe.sweep().await.expect("the probe sweep runs");
     }
 
+    pub async fn unanswered_need_after(&self, after: Option<DerivationId>) -> Vec<DerivationId> {
+        crate::probe::unanswered_need(&self.scheduler.db.worker_db, after)
+            .await
+            .expect("the unanswered need reads")
+    }
+
     async fn derivation_ids(&self, paths: &[&str]) -> Vec<DerivationId> {
         let mut ids = Vec::new();
         for path in paths {

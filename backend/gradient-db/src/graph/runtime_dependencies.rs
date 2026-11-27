@@ -147,77 +147,185 @@ mod tests {
     use super::*;
     use gradient_fixtures::mock::{empty_db, mock_db};
 
-    #[test]
-    fn the_insert_upgrades_a_build_edge_to_both_and_skips_self() {
-        let sql = INSERT_RUNTIME_DEPENDENCIES.text();
-        assert!(
-            sql.contains(
-                "ON CONFLICT (derivation, dependency) DO UPDATE SET kind = 2 WHERE derivation_dependency.kind = 0"
-            ),
-            "{sql}"
-        );
-        assert!(sql.contains("WHERE d.dependency <> $1"), "{sql}");
+    fn drv_path(key: &str) -> String {
+        format!("/nix/store/{}-runtime.drv", key.repeat(32))
     }
 
-    #[test]
-    fn neither_writer_links_a_derivation_to_a_twin_sharing_its_output() {
-        let insert = INSERT_RUNTIME_DEPENDENCIES.text();
-        assert!(
-            insert.contains("JOIN derivation_output twin ON twin.hash = own.hash")
-                && insert.contains("WHERE own.derivation = $1 AND twin.derivation = d.dependency"),
-            "{insert}"
-        );
-        let adopt = ADOPT_REFERENCED_OUTPUTS.text();
-        assert!(
-            adopt.contains("WHERE own.derivation = p.derivation AND own.hash = o.hash"),
-            "{adopt}"
+    #[tokio::test]
+    async fn insert_runtime_dependencies_skips_self_twin_and_cycle_edges_and_upgrades_build_time_edge()
+     {
+        use gradient_entity::derivation_dependency::EdgeKind;
+
+        let [build_input, producer, twin, parent, cyclic] = ["1", "2", "3", "4", "5"];
+        let hash = |key: &str| key.repeat(32);
+        let db = gradient_fixtures::shape::shape()
+            .evaluation(gradient_types::EvaluationId::now_v7())
+            .derivation(&drv_path(build_input))
+            .output(&hash(build_input))
+            .derivation(&drv_path(producer))
+            .output(&hash(producer))
+            .derivation(&drv_path(twin))
+            .output(&hash(parent))
+            .derivation(&drv_path(parent))
+            .output(&hash(parent))
+            .depends_on(&drv_path(build_input))
+            .derivation(&drv_path(cyclic))
+            .output(&hash(cyclic))
+            .depends_on(&drv_path(parent))
+            .into_database()
+            .await;
+        let mut ids = Vec::new();
+        for key in [parent, producer, twin, cyclic, build_input] {
+            ids.push(db.id_of(&drv_path(key)).await);
+        }
+
+        let written = insert_runtime_dependencies(&db.connection(), ids[0], &ids)
+            .await
+            .unwrap();
+        let mut edges = Vec::new();
+        for key in [parent, producer, twin, cyclic, build_input] {
+            edges.push(
+                db.edge(&drv_path(parent), &drv_path(key))
+                    .await
+                    .map(|edge| edge.kind),
+            );
+        }
+        db.finish().await;
+
+        assert_eq!(written, 2);
+        assert_eq!(
+            edges,
+            [
+                None,
+                Some(EdgeKind::Runtime),
+                None,
+                None,
+                Some(EdgeKind::Both)
+            ]
         );
     }
 
-    #[test]
-    fn adoption_matches_both_token_forms_against_both_reference_columns() {
-        let sql = ADOPT_REFERENCED_OUTPUTS.text();
-        assert!(
-            sql.contains(
-                "ARRAY[o.hash || '-' || o.package, '/nix/store/' || o.hash || '-' || o.package]"
-            ),
-            "{sql}"
-        );
-        assert!(
-            sql.contains(r#"string_to_array(cp."references", ' ') && t.tokens"#),
-            "{sql}"
-        );
-        assert!(
-            sql.contains("string_to_array(ro.references_list, ' ') && t.tokens"),
-            "{sql}"
-        );
-        assert!(
-            sql.contains(
-                "WHERE own.derivation = p.derivation AND own.hash = o.hash)\n        OFFSET 0) r"
-            ),
-            "unfenced, the producer lookup and its twin check seq-scan every output: {sql}"
-        );
-        assert!(
-            sql.contains("SELECT DISTINCT a.referrer, a.producer, 1"),
-            "a parent naming two outputs of one producer must land one row, or the upsert touches it twice: {sql}"
-        );
-    }
+    #[tokio::test]
+    async fn adopt_referenced_outputs_links_referrers_for_stored_or_recorded_reference_token_forms_skips_twins_and_creates_one_edge_for_two_named_producer_outputs()
+     {
+        use gradient_entity::derivation_dependency::EdgeKind;
 
-    #[test]
-    fn a_walked_derivation_adopts_the_references_its_own_cached_nar_names() {
-        let sql = ADOPT_REFERENCED_OUTPUTS.text();
-        assert!(
-            sql.contains(concat!(
-                "    JOIN cached_path cp ON cp.hash = o.hash\n",
-                "    CROSS JOIN LATERAL (SELECT array_agg(tw.derivation) AS twins\n",
-                "                        FROM derivation_output tw WHERE tw.hash = o.hash) tw\n",
-                "    CROSS JOIN LATERAL unnest(string_to_array(cp.\"references\", ' ')) AS t(token)\n",
-                "    JOIN derivation_output p\n",
-                "      ON p.hash = split_part(regexp_replace(t.token, '^/nix/store/', ''), '-', 1)\n",
-                "     AND p.derivation <> ALL(tw.twins)\n",
-                "    WHERE o.derivation = ANY($1::uuid[])",
-            )),
-            "a twin must be excluded once per output, not probed once per reference: {sql}"
+        let [
+            producer,
+            stored_plain,
+            stored_full,
+            recorded_plain,
+            recorded_full,
+        ] = ["1", "2", "3", "4", "5"];
+        let [twin, unrelated, walked, own_input] = ["6", "7", "8", "9"];
+        let hash = |key: &str| key.repeat(32);
+        let twin_side_hash = "a".repeat(32);
+        let dev_hash = "b".repeat(32);
+        let db = gradient_fixtures::shape::shape()
+            .evaluation(gradient_types::EvaluationId::now_v7())
+            .derivation(&drv_path(producer))
+            .output(&hash(producer))
+            .named_output(&dev_hash, "dev")
+            .derivation(&drv_path(stored_plain))
+            .output(&hash(stored_plain))
+            .cached_path(&hash(stored_plain), "stored-plain")
+            .derivation(&drv_path(stored_full))
+            .output(&hash(stored_full))
+            .cached_path(&hash(stored_full), "stored-full")
+            .derivation(&drv_path(recorded_plain))
+            .output(&hash(recorded_plain))
+            .derivation(&drv_path(recorded_full))
+            .output(&hash(recorded_full))
+            .derivation(&drv_path(twin))
+            .output(&hash(producer))
+            .named_output(&twin_side_hash, "dev")
+            .cached_path(&twin_side_hash, "twin-side")
+            .derivation(&drv_path(unrelated))
+            .output(&hash(unrelated))
+            .cached_path(&hash(unrelated), "unrelated")
+            .derivation(&drv_path(own_input))
+            .output(&hash(own_input))
+            .derivation(&drv_path(walked))
+            .output(&hash(walked))
+            .cached_path(&hash(walked), "walked")
+            .into_database()
+            .await;
+        let token = async |name: &str| {
+            let output = db.output_of(&drv_path(producer), name).await;
+            format!(
+                "{}-{}",
+                output.hash.expect("a hash"),
+                output.package.expect("a package")
+            )
+        };
+        let (out, dev) = (token("out").await, token("dev").await);
+        let cached = |hash: String, references: String| {
+            format!("UPDATE cached_path SET \"references\" = '{references}' WHERE hash = '{hash}';")
+        };
+        let recorded = |hash: String, references: String| {
+            format!(
+                "UPDATE derivation_output SET references_list = '{references}' WHERE hash = '{hash}';"
+            )
+        };
+        db.execute(
+            &[
+                cached(hash(stored_plain), format!("{out} /nix/store/{dev}")),
+                cached(hash(stored_full), format!("/nix/store/{out}")),
+                recorded(hash(recorded_plain), out.clone()),
+                recorded(hash(recorded_full), format!("/nix/store/{out}")),
+                cached(twin_side_hash.clone(), out.clone()),
+                cached(hash(unrelated), format!("{}-elsewhere", hash("c"))),
+                cached(
+                    hash(walked),
+                    format!("{}-walked {}-input", hash(walked), hash(own_input)),
+                ),
+            ]
+            .concat(),
+        )
+        .await;
+        let ids = [
+            db.id_of(&drv_path(producer)).await,
+            db.id_of(&drv_path(walked)).await,
+        ];
+
+        let adopted = adopt_referenced_outputs(&db.connection(), &ids)
+            .await
+            .unwrap();
+        let mut edges = Vec::new();
+        for (from, to) in [
+            (stored_plain, producer),
+            (stored_full, producer),
+            (recorded_plain, producer),
+            (recorded_full, producer),
+            (twin, producer),
+            (unrelated, producer),
+            (walked, own_input),
+            (walked, walked),
+        ] {
+            edges.push(
+                db.edge(&drv_path(from), &drv_path(to))
+                    .await
+                    .map(|edge| edge.kind),
+            );
+        }
+        let mut expected_adopted = Vec::new();
+        for key in [
+            stored_plain,
+            stored_full,
+            recorded_plain,
+            recorded_full,
+            walked,
+        ] {
+            expected_adopted.push(db.id_of(&drv_path(key)).await);
+        }
+        expected_adopted.sort_unstable();
+        db.finish().await;
+
+        assert_eq!(adopted, expected_adopted);
+        let linked = Some(EdgeKind::Runtime);
+        assert_eq!(
+            edges,
+            [linked, linked, linked, linked, None, None, linked, None]
         );
     }
 

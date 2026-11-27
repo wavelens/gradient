@@ -162,18 +162,57 @@ pub async fn of_evaluation<C: ConnectionTrait>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sea_orm::{DatabaseBackend, QueryTrait};
 
-    fn entry_point_sql(search: Option<&str>) -> String {
-        built(EvaluationId::now_v7(), search)
-            .build(DatabaseBackend::Postgres)
-            .to_string()
-    }
+    #[tokio::test]
+    async fn test_built_entry_points_page_and_count_with_search_ranking_and_paging() {
+        use gradient_entity::build::BuildStatus;
+        use gradient_fixtures::shape::shape;
 
-    #[test]
-    fn a_search_term_narrows_entry_points_to_matching_attributes() {
-        let sql = entry_point_sql(Some(" Hello "));
-        assert!(str::contains(&sql, r#""eval" ILIKE '%Hello%'"#), "{sql}");
+        let evaluation = EvaluationId::now_v7();
+        let drv = |letter: &str| format!("{}-{letter}.drv", letter.repeat(32));
+        let db = shape()
+            .evaluation(evaluation)
+            .derivation(&drv("a"))
+            .build_status(BuildStatus::Completed)
+            .job()
+            .entry_point("pkg.alpha")
+            .derivation(&drv("b"))
+            .build_status(BuildStatus::FailedPermanent)
+            .job()
+            .entry_point("pkg.zeta")
+            .derivation(&drv("c"))
+            .build_status(BuildStatus::DependencyFailed)
+            .job()
+            .entry_point("pkg.mid")
+            .derivation(&drv("d"))
+            .entry_point("pkg.hidden")
+            .into_database()
+            .await;
+        let conn = db.connection();
+        let attrs = |entry_points: Vec<MEntryPoint>| -> Vec<String> {
+            entry_points.into_iter().map(|e| e.eval).collect()
+        };
+
+        let everything = built_page(&conn, evaluation, None, 0, 10).await.unwrap();
+        let blank = count_built(&conn, evaluation, Some("  ")).await.unwrap();
+        let searched = built_page(&conn, evaluation, Some(" ALPHA "), 0, 10)
+            .await
+            .unwrap();
+        let searched_count = count_built(&conn, evaluation, Some(" ALPHA "))
+            .await
+            .unwrap();
+        let second = built_page(&conn, evaluation, None, 1, 1).await.unwrap();
+        let unknown = count_built(&conn, EvaluationId::now_v7(), None)
+            .await
+            .unwrap();
+        db.finish().await;
+
+        assert_eq!(attrs(everything), ["pkg.zeta", "pkg.mid", "pkg.alpha"]);
+        assert_eq!(blank, 3, "an entry point without a build job is not built");
+        assert_eq!(attrs(searched), ["pkg.alpha"]);
+        assert_eq!(searched_count, 1);
+        assert_eq!(attrs(second), ["pkg.mid"]);
+        assert_eq!(unknown, 0);
     }
 
     #[tokio::test]
@@ -216,24 +255,5 @@ mod tests {
         expected.sort();
         assert_eq!(read, expected);
         db.finish().await;
-    }
-
-    #[test]
-    fn a_blank_search_term_keeps_every_entry_point() {
-        assert!(!str::contains(&entry_point_sql(Some("  ")), "ILIKE"));
-        assert!(!str::contains(&entry_point_sql(None), "ILIKE"));
-    }
-
-    #[test]
-    fn sql_entry_point_order_ranks_failed_builds_first_failed_dependency_second_other_builds_last()
-    {
-        let sql = failure_rank_sql();
-        assert!(
-            str::contains(
-                &sql,
-                "WHEN db.status IN (4, 8, 9) THEN 0 WHEN db.status = 6 THEN 1 ELSE 2"
-            ),
-            "{sql}"
-        );
     }
 }

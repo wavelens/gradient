@@ -50,43 +50,61 @@ pub(super) fn median(mut values: Vec<u64>) -> Option<u64> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use gradient_fixtures::mock::mock_db;
+    use gradient_entity::evaluation::EvaluationStatus;
+    use gradient_fixtures::shape::shape;
 
-    fn metric(total_thunks: i64) -> MEvaluationMetric {
-        MEvaluationMetric {
-            total_thunks,
-            ..Default::default()
+    #[tokio::test]
+    async fn test_expected_thunks_is_median_of_newest_ten_nonzero_metrics_of_task_only() {
+        let evaluations: Vec<EvaluationId> = (0..13).map(|_| EvaluationId::now_v7()).collect();
+        let completed = EvaluationStatus::Completed;
+        let mut seed = shape()
+            .evaluation(evaluations[0])
+            .evaluation_status(completed);
+        for &evaluation in &evaluations[1..12] {
+            seed = seed
+                .evaluation(evaluation)
+                .same_task_as(evaluations[0])
+                .evaluation_status(completed);
         }
-    }
+        let db = seed
+            .evaluation(evaluations[12])
+            .evaluation_status(completed)
+            .into_database()
+            .await;
+        let thunks: [i64; 13] = [
+            1_000_000, 100, 200, 300, 400, 500, 600, 700, 800, 900, 1000, 0, 5_000_000,
+        ];
+        for (age, (evaluation, total)) in evaluations.iter().zip(thunks).enumerate() {
+            db.execute(&format!(
+                "UPDATE evaluation SET created_at = created_at + interval '{age} minutes' \
+                 WHERE id = '{evaluation}'"
+            ))
+            .await;
+            crate::rows::insert::<evaluation_metric::Entity, _>(
+                &db.connection(),
+                MEvaluationMetric {
+                    id: gradient_entity::ids::EvaluationMetricId::now_v7(),
+                    evaluation: *evaluation,
+                    total_thunks: total,
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+        }
+        let task = db.task_of(evaluations[0]).await;
+        let other_task = db.task_of(evaluations[12]).await;
 
-    #[tokio::test]
-    async fn the_median_of_the_recent_evaluations_gives_the_expected_thunks() {
-        let db = mock_db()
-            .append_query_results([vec![
-                metric(30_000_000),
-                metric(450_000_000),
-                metric(160_000_000),
-            ]])
-            .into_connection();
+        let expected = expected_thunks(&db.connection(), task).await.unwrap();
+        let other = expected_thunks(&db.connection(), other_task).await.unwrap();
+        let unknown = expected_thunks(&db.connection(), TaskId::now_v7())
+            .await
+            .unwrap();
+        db.finish().await;
 
-        let expected = expected_thunks(&db, TaskId::now_v7()).await.unwrap();
-
-        assert_eq!(expected, Some(160_000_000));
-        let log = db.into_transaction_log();
-        assert_eq!(log.len(), 1);
-        let sql = format!("{:?}", log[0]);
-        assert!(sql.contains("INNER JOIN"), "{sql}");
-        assert!(sql.contains("ORDER BY"), "{sql}");
-        assert!(!sql.contains("\"status\""), "{sql}");
-    }
-
-    #[tokio::test]
-    async fn a_task_without_evaluation_metrics_has_no_expected_thunks() {
-        let db = mock_db()
-            .append_query_results([Vec::<MEvaluationMetric>::new()])
-            .into_connection();
-
-        assert_eq!(expected_thunks(&db, TaskId::now_v7()).await.unwrap(), None);
+        assert_eq!(expected, Some(550));
+        assert_eq!(other, Some(5_000_000));
+        assert_eq!(unknown, None);
     }
 
     #[test]

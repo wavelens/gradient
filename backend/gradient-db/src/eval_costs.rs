@@ -217,147 +217,92 @@ async fn delete_stale(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use gradient_fixtures::mock::{exec_ok, mock_db, raw_statements};
-    use sea_orm::sea_query::ValueType;
-    use sea_orm::{DatabaseConnection, Statement};
+    use gradient_entity::ids::EvaluationId;
 
     fn path(index: usize) -> Vec<String> {
         vec!["packages".into(), format!("child{index}")]
     }
 
-    fn accepting_db() -> DatabaseConnection {
-        mock_db()
-            .append_exec_results((0..16).map(|_| exec_ok()))
-            .into_connection()
-    }
-
-    async fn recorded(sets: &[EvalSetCost], subtrees: &[EvalSubtreeCost]) -> Vec<Statement> {
-        let db = accepting_db();
-        record_eval_costs(&db, TaskId::now_v7(), sets, subtrees)
-            .await
-            .expect("record");
-        raw_statements(db.into_transaction_log())
-    }
-
-    fn starting_with<'a>(statements: &'a [Statement], prefix: &str) -> Vec<&'a Statement> {
-        statements
-            .iter()
-            .filter(|statement| statement.sql.starts_with(prefix))
-            .collect()
+    fn set(index: usize, startup_ms: Option<u64>, peak_rss_mb: u64) -> EvalSetCost {
+        EvalSetCost {
+            path: path(index),
+            startup_ms,
+            peak_rss_mb,
+        }
     }
 
     #[tokio::test]
-    async fn costs_of_many_subtrees_take_one_statement_per_chunk() {
-        let sets: Vec<EvalSetCost> = (0..3)
-            .map(|index| EvalSetCost {
-                path: path(index),
-                startup_ms: Some(100),
-                peak_rss_mb: 512,
-            })
-            .collect();
-        let subtrees: Vec<EvalSubtreeCost> = (0..2500)
+    async fn test_record_eval_costs_averages_values_keeps_largest_peak_and_stored_startup_chunks_many_rows_and_deletes_only_stale_rows_of_same_task()
+     {
+        let [first, second] = [(); 2].map(|_| EvaluationId::now_v7());
+        let db = gradient_fixtures::shape::shape()
+            .evaluation(first)
+            .evaluation(second)
+            .into_database()
+            .await;
+        let conn = db.connection();
+        let (task, other_task) = (db.task_of(first).await, db.task_of(second).await);
+        let many_subtrees: Vec<EvalSubtreeCost> = (0..2501)
             .map(|index| EvalSubtreeCost {
                 path: path(index),
-                attrs: 2,
+                attrs: if index == 2500 { 0 } else { 2 },
                 eval_ms: 30,
             })
             .collect();
 
-        let statements = recorded(&sets, &subtrees).await;
-
-        assert_eq!(statements.len(), 6, "{statements:?}");
-        assert_eq!(
-            starting_with(&statements, "INSERT INTO \"eval_subtree_cost\"").len(),
-            3
-        );
-        assert_eq!(
-            starting_with(&statements, "INSERT INTO \"eval_set_cost\"").len(),
-            1
-        );
-        assert_eq!(starting_with(&statements, "DELETE FROM").len(), 2);
-    }
-
-    #[tokio::test]
-    async fn a_missing_startup_keeps_the_stored_value() {
-        let sets = [EvalSetCost {
-            path: path(0),
-            startup_ms: None,
-            peak_rss_mb: 512,
-        }];
-
-        let statements = recorded(&sets, &[]).await;
-
-        let upsert = starting_with(&statements, "INSERT INTO \"eval_set_cost\"")[0];
-        assert!(
-            upsert.sql.contains(
-                "\"startup_ms\" = coalesce(\"eval_set_cost\".\"startup_ms\" * 0.5 + \
-                 \"excluded\".\"startup_ms\" * 0.5, \"eval_set_cost\".\"startup_ms\", \
-                 \"excluded\".\"startup_ms\")"
-            ),
-            "{}",
-            upsert.sql
-        );
-        let values = format!("{:?}", upsert.values);
-        assert!(values.contains("Double(None)"), "{values}");
-    }
-
-    #[tokio::test]
-    async fn the_seat_peak_keeps_the_largest_value() {
-        let sets = [EvalSetCost {
-            path: path(0),
-            startup_ms: None,
-            peak_rss_mb: 900,
-        }];
-
-        let statements = recorded(&sets, &[]).await;
-
-        let upsert = starting_with(&statements, "INSERT INTO \"eval_set_cost\"")[0];
-        assert!(
-            upsert.sql.contains(
-                "\"max_peak_rss_mb\" = greatest(\"eval_set_cost\".\"max_peak_rss_mb\", \
-                 \"excluded\".\"max_peak_rss_mb\")"
-            ),
-            "{}",
-            upsert.sql
-        );
-        assert!(
-            upsert.sql.contains(
-                "\"peak_rss_mb\" = \"eval_set_cost\".\"peak_rss_mb\" * 0.5 + \
-                 \"excluded\".\"peak_rss_mb\" * 0.5"
-            ),
-            "{}",
-            upsert.sql
-        );
-        let values = format!("{:?}", upsert.values);
-        assert_eq!(values.matches("Double(Some(900.0))").count(), 2, "{values}");
-    }
-
-    #[tokio::test]
-    async fn stale_estimates_are_deleted() {
-        let task = TaskId::now_v7();
-        let db = accepting_db();
-        let before = gradient_types::now();
-
-        record_eval_costs(&db, task, &[], &[])
+        for owner in [task, other_task] {
+            record_eval_costs(
+                &conn,
+                owner,
+                &[set(0, Some(100), 512), set(1, None, 100)],
+                &many_subtrees,
+            )
             .await
-            .expect("record");
-        let after = gradient_types::now();
-
-        let statements = raw_statements(db.into_transaction_log());
-        let deletes = starting_with(&statements, "DELETE FROM");
-        assert_eq!(deletes.len(), 2);
-        for delete in deletes {
-            assert!(delete.sql.contains("\"task\" = $1"), "{}", delete.sql);
-            assert!(delete.sql.contains("\"updated_at\" < $2"), "{}", delete.sql);
-
-            let values = delete.values.as_ref().expect("bound values");
-            assert_eq!(values.0[0], sea_orm::Value::from(task.into_inner()));
-            let cutoff = <NaiveDateTime as ValueType>::try_from(values.0[1].clone())
-                .expect("a timestamp cutoff");
-            assert!(
-                before - STALE_AFTER <= cutoff && cutoff <= after - STALE_AFTER,
-                "{cutoff}"
-            );
+            .unwrap();
         }
+        db.execute(&format!(
+            "UPDATE eval_set_cost SET updated_at = updated_at - interval '40 days' \
+             WHERE task = '{other_task}' OR (task = '{task}' AND path = ARRAY['packages','child1'])"
+        ))
+        .await;
+        db.execute(&format!(
+            "UPDATE eval_subtree_cost SET updated_at = updated_at - interval '40 days' \
+             WHERE task = '{other_task}' OR (task = '{task}' AND path = ARRAY['packages','child0'])"
+        ))
+        .await;
+        record_eval_costs(&conn, task, &[set(0, None, 900)], &[])
+            .await
+            .unwrap();
+        record_eval_costs(&conn, task, &[set(0, Some(200), 100)], &[])
+            .await
+            .unwrap();
+
+        let costs = load_eval_costs(&conn, task).await.unwrap();
+        let other = load_eval_costs(&conn, other_task).await.unwrap();
+        let sets = db.rows::<ESetCost>().await;
+        let samples = sets
+            .iter()
+            .find(|row| row.task == task)
+            .map(|row| row.samples);
+        db.finish().await;
+
+        assert_eq!(
+            costs.sets,
+            vec![SetCost {
+                path: path(0),
+                startup_ms: Some(150.0),
+                peak_rss_mb: 403.0,
+                max_peak_rss_mb: 900.0,
+            }]
+        );
+        assert_eq!(samples, Some(3));
+        assert_eq!(costs.subtrees.len(), 2499);
+        assert!(costs.subtrees.iter().all(|s| s.path != path(0)));
+        assert!(costs.subtrees.iter().all(|s| s.path != path(2500)));
+        assert_eq!(
+            (other.sets.len(), other.subtrees.len()),
+            (2, 2500),
+            "the other task keeps its stale rows"
+        );
     }
 }

@@ -8,8 +8,6 @@ mod board;
 mod claim;
 mod membership;
 mod recovery;
-#[cfg(test)]
-mod test_rows;
 
 pub use board::{ClusterJobView, cluster_job_view, clusters_of_assignments};
 pub use claim::{

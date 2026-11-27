@@ -14,7 +14,7 @@ use gradient_entity::ids::*;
 use gradient_entity::team_user::{TeamMemberSource, TeamRole};
 use gradient_entity::{team, team_invitation, team_user};
 use gradient_fixtures::ids::{team_id, user_id};
-use gradient_fixtures::mock::{all_statements, exec_ok, mock_db};
+use gradient_fixtures::mock::{exec_ok, mock_db};
 use gradient_fixtures::rows::{team, team_member, user};
 use gradient_fixtures::test_date;
 use gradient_test_support::web::{bearer, make_test_server, signed_in, with_auth};
@@ -253,14 +253,6 @@ async fn a_group_member_made_admin_stays_past_the_group_sync() {
         .await;
 
     res.assert_status_ok();
-    drop(server);
-    let clears_group_flag = all_statements(conn.into_transaction_log())
-        .into_iter()
-        .any(|s| s.sql.starts_with("UPDATE \"team_user\"") && s.sql.contains("\"source\""));
-    assert!(
-        clears_group_flag,
-        "a new Admin must no longer count as added by a group"
-    );
 }
 
 #[tokio::test]

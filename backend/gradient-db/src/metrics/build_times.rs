@@ -282,35 +282,126 @@ pub async fn durations_per_hour<C: ConnectionTrait>(
 mod tests {
     use super::*;
 
-    const SCOPE: &str = "'11111111-1111-1111-1111-111111111111'";
+    #[tokio::test]
+    async fn expensive_jobs_prefer_the_worker_measured_build_time() {
+        use gradient_entity::build::BuildStatus;
+        use gradient_entity::build_attempt::AttemptOutcome;
+        use gradient_fixtures::shape::shape;
+        use gradient_types::EvaluationId;
 
-    #[test]
-    fn expensive_jobs_are_one_row_per_derivation_build() {
-        let sql = expensive_jobs_sql(30, Some(SCOPE));
-        assert!(sql.contains("DISTINCT ON (b.id)"), "sql = {sql}");
-        assert!(
-            sql.contains(&format!("pr.project IN ({SCOPE})")),
-            "sql = {sql}"
-        );
+        let now = chrono::Utc::now().naive_utc();
+        let db = shape()
+            .evaluation(EvaluationId::now_v7())
+            .derivation("/nix/store/0123456789abcdfghijklmnpqrsvwxyz-measured.drv")
+            .job()
+            .shared_build_option(|b| {
+                b.status = BuildStatus::Completed;
+                b.created_at = now;
+            })
+            .attempt(AttemptOutcome::Built, None)
+            .derivation_metric(|m| {
+                m.build_time_ms = Some(90_000);
+                m.created_at = now;
+            })
+            .derivation("/nix/store/0c7kxbq0fdq6pnxpzhg5yvbbrylx4v3f-unmeasured.drv")
+            .job()
+            .shared_build_option(|b| {
+                b.status = BuildStatus::Completed;
+                b.created_at = now;
+            })
+            .attempt(AttemptOutcome::Built, None)
+            .into_database()
+            .await;
+        db.execute(
+            "UPDATE build_attempt SET build_started_at = build_finished_at - interval '10 seconds'",
+        )
+        .await;
+
+        let builds = expensive_builds(&db.connection(), 30, None)
+            .await
+            .expect("the expensive builds read");
+
+        db.finish().await;
+        let times: Vec<_> = builds
+            .iter()
+            .map(|b| (b.name.as_str(), b.build_time_ms))
+            .collect();
+        assert_eq!(times, [("measured", 90_000), ("unmeasured", 10_000)]);
     }
 
-    #[test]
-    fn expensive_jobs_prefer_the_worker_measured_build_time() {
-        let sql = expensive_jobs_sql(30, None);
-        assert!(sql.contains("FROM derivation_metric dm"), "sql = {sql}");
-        assert!(
-            sql.contains("coalesce(m.build_time_ms, EXTRACT(EPOCH FROM (ba.build_finished_at - ba.build_started_at))"),
-            "sql = {sql}"
-        );
-    }
+    #[tokio::test]
+    async fn expensive_build_list_only_shows_callers_project_builds_and_worker_names_from_visible_registrations()
+     {
+        use gradient_entity::build::BuildStatus;
+        use gradient_fixtures::shape::shape;
+        use gradient_types::EvaluationId;
 
-    #[test]
-    fn expensive_jobs_name_the_worker_within_the_callers_scope() {
-        let sql = expensive_jobs_sql(30, Some(SCOPE));
-        assert!(sql.contains("AS worker_name"), "sql = {sql}");
-        assert!(
-            sql.contains(&format!("wr.peer_id IN ({SCOPE})")),
-            "sql = {sql}"
+        let now = chrono::Utc::now().naive_utc();
+        let (mine, other) = (EvaluationId::now_v7(), EvaluationId::now_v7());
+        let db = shape()
+            .evaluation(mine)
+            .worker_registration("w1")
+            .derivation("/nix/store/0123456789abcdfghijklmnpqrsvwxyz-mine.drv")
+            .job()
+            .shared_build_option(|b| {
+                b.status = BuildStatus::Completed;
+                b.created_at = now;
+            })
+            .derivation_metric(|m| {
+                m.build_time_ms = Some(60_000);
+                m.created_at = now;
+                m.worker_id = "w1".into();
+            })
+            .evaluation(other)
+            .worker_registration("w1")
+            .derivation("/nix/store/0c7kxbq0fdq6pnxpzhg5yvbbrylx4v3f-other.drv")
+            .job()
+            .shared_build_option(|b| {
+                b.status = BuildStatus::Completed;
+                b.created_at = now;
+            })
+            .derivation_metric(|m| {
+                m.build_time_ms = Some(90_000);
+                m.created_at = now;
+                m.worker_id = "w1".into();
+            })
+            .into_database()
+            .await;
+        let mine_project = db.project_of(mine).await.into_inner();
+        let other_project = db.project_of(other).await.into_inner();
+        for (project, name, created) in [
+            (mine_project, "Mine", "2020-01-01"),
+            (other_project, "Other", "2021-01-01"),
+        ] {
+            db.execute(&format!(
+                "UPDATE worker_registration SET display_name = '{name}', created_at = '{created}' \
+                 WHERE peer_id = '{project}'"
+            ))
+            .await;
+        }
+        let conn = db.connection();
+        let named = |builds: Vec<ExpensiveBuild>| -> Vec<(String, Option<String>)> {
+            builds
+                .into_iter()
+                .map(|b| (b.name, b.worker_name))
+                .collect()
+        };
+
+        let scoped = expensive_builds(&conn, 30, Some(&format!("'{mine_project}'")))
+            .await
+            .expect("the scoped read");
+        let everyone = expensive_builds(&conn, 30, None)
+            .await
+            .expect("the unscoped read");
+
+        db.finish().await;
+        assert_eq!(named(scoped), [("mine".into(), Some("Mine".into()))]);
+        assert_eq!(
+            named(everyone),
+            [
+                ("other".into(), Some("Other".into())),
+                ("mine".into(), Some("Other".into()))
+            ]
         );
     }
 
@@ -391,53 +482,193 @@ mod tests {
         db.finish().await;
     }
 
-    #[test]
-    fn top_projects_carry_the_project_name() {
-        assert!(top_projects_by_buildtime_sql(30).contains("p.name AS project_name"));
-    }
+    #[tokio::test]
+    async fn top_projects_by_build_time_counts_each_completed_build_once_using_worker_time_else_attempt_time()
+     {
+        use gradient_entity::build::BuildStatus;
+        use gradient_entity::build_attempt::AttemptOutcome;
+        use gradient_fixtures::shape::shape;
+        use gradient_types::EvaluationId;
 
-    #[test]
-    fn top_projects_count_each_build_once_per_project() {
-        let sql = top_projects_by_buildtime_sql(30);
-        assert!(
-            sql.contains("SELECT DISTINCT pr.project FROM build_job bj")
-                && sql.contains("WHERE bj.derivation_build = b.id"),
-            "sql = {sql}"
+        const SHARED: &str = "/nix/store/0123456789abcdfghijklmnpqrsvwxyz-shared.drv";
+        let now = chrono::Utc::now().naive_utc();
+        let (first, second, other) = (
+            EvaluationId::now_v7(),
+            EvaluationId::now_v7(),
+            EvaluationId::now_v7(),
         );
-        assert!(sql.contains("FROM shared_build a"), "sql = {sql}");
-        assert!(!sql.contains("count(*) FROM build_job"), "sql = {sql}");
+        let db = shape()
+            .evaluation(first)
+            .derivation(SHARED)
+            .job()
+            .shared_build_option(|b| {
+                b.status = BuildStatus::Completed;
+                b.created_at = now;
+            })
+            .derivation_metric(|m| {
+                m.build_time_ms = Some(60_000);
+                m.created_at = now;
+            })
+            .derivation("/nix/store/0c7kxbq0fdq6pnxpzhg5yvbbrylx4v3f-timed.drv")
+            .job()
+            .shared_build_option(|b| {
+                b.status = BuildStatus::Completed;
+                b.created_at = now;
+            })
+            .attempt(AttemptOutcome::Built, None)
+            .derivation("/nix/store/0c0f6hb8s2q2wbdrhl5ch9fwr8v2rq7x-queued.drv")
+            .job()
+            .shared_build_option(|b| {
+                b.status = BuildStatus::Queued;
+                b.created_at = now;
+            })
+            .derivation_metric(|m| {
+                m.build_time_ms = Some(500_000);
+                m.created_at = now;
+            })
+            .derivation("/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-old.drv")
+            .job()
+            .shared_build_option(|b| {
+                b.status = BuildStatus::Completed;
+                b.created_at = now - chrono::Duration::days(40);
+            })
+            .derivation_metric(|m| {
+                m.build_time_ms = Some(500_000);
+                m.created_at = now;
+            })
+            .evaluation(second)
+            .same_task_as(first)
+            .evaluation_status(gradient_entity::evaluation::EvaluationStatus::Completed)
+            .derivation(SHARED)
+            .job()
+            .evaluation(other)
+            .derivation(SHARED)
+            .job()
+            .into_database()
+            .await;
+        db.execute(
+            "UPDATE build_attempt SET build_started_at = build_finished_at - interval '10 seconds'",
+        )
+        .await;
+        let (first_project, other_project) = (
+            db.project_of(first).await.into_inner(),
+            db.project_of(other).await.into_inner(),
+        );
+
+        let totals: Vec<_> = top_projects(&db.connection(), 30)
+            .await
+            .expect("the top projects read")
+            .into_iter()
+            .map(|p| (p.project, p.total_build_ms, p.build_count))
+            .collect();
+
+        db.finish().await;
+        assert_eq!(
+            totals,
+            [(first_project, 70_000, 2), (other_project, 60_000, 1)]
+        );
     }
 
-    #[test]
-    fn top_projects_and_expensive_jobs_share_the_build_time_source() {
-        for sql in [
-            top_projects_by_buildtime_sql(30),
-            expensive_jobs_sql(30, None),
-        ] {
-            assert!(sql.contains(&latest_build_metric_cte(30)), "sql = {sql}");
-            assert!(sql.contains(BUILD_TIME_MS), "sql = {sql}");
+    #[tokio::test]
+    async fn duration_heatmap_counts_only_latest_attempt_of_each_completed_build_once_within_project()
+     {
+        use gradient_entity::build::BuildStatus;
+        use gradient_entity::build_attempt::AttemptOutcome;
+        use gradient_fixtures::shape::shape;
+        use gradient_types::EvaluationId;
+
+        const LATEST: &str = "/nix/store/0123456789abcdfghijklmnpqrsvwxyz-retried.drv";
+        let (mine, shared_with_mine, other) = (
+            EvaluationId::now_v7(),
+            EvaluationId::now_v7(),
+            EvaluationId::now_v7(),
+        );
+        let completed = |s: gradient_fixtures::shape::Shape, path: &str| {
+            s.derivation(path)
+                .job()
+                .build_status(BuildStatus::Completed)
+                .attempt(AttemptOutcome::Built, None)
+        };
+        let seed = completed(shape().evaluation(mine), LATEST).attempt(AttemptOutcome::Built, None);
+        let seed = completed(
+            seed,
+            "/nix/store/0c7kxbq0fdq6pnxpzhg5yvbbrylx4v3f-stale.drv",
+        );
+        let seed = seed
+            .derivation("/nix/store/0c0f6hb8s2q2wbdrhl5ch9fwr8v2rq7x-unfinished.drv")
+            .job()
+            .build_status(BuildStatus::Queued)
+            .attempt(AttemptOutcome::Built, None)
+            .evaluation(shared_with_mine)
+            .same_task_as(mine)
+            .evaluation_status(gradient_entity::evaluation::EvaluationStatus::Completed)
+            .derivation(LATEST)
+            .job()
+            .evaluation(other);
+        let db = completed(
+            seed,
+            "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-foreign.drv",
+        )
+        .into_database()
+        .await;
+        let place = |id: gradient_entity::ids::BuildAttemptId, hours_ago: i64, seconds: i64| {
+            format!(
+                "UPDATE build_attempt SET \
+                 build_finished_at = (now() AT TIME ZONE 'UTC') - interval '{hours_ago} hours', \
+                 build_started_at = (now() AT TIME ZONE 'UTC') - interval '{hours_ago} hours' \
+                   - interval '{seconds} seconds' \
+                 WHERE id = '{}'",
+                id.into_inner()
+            )
+        };
+        let retried = db.attempts(LATEST).await;
+        let timings = [
+            (retried[0].id, 2, 5),
+            (retried[1].id, 1, 20),
+            (
+                db.attempts("/nix/store/0c7kxbq0fdq6pnxpzhg5yvbbrylx4v3f-stale.drv")
+                    .await[0]
+                    .id,
+                30,
+                20,
+            ),
+            (
+                db.attempts("/nix/store/0c0f6hb8s2q2wbdrhl5ch9fwr8v2rq7x-unfinished.drv")
+                    .await[0]
+                    .id,
+                1,
+                20,
+            ),
+            (
+                db.attempts("/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-foreign.drv")
+                    .await[0]
+                    .id,
+                1,
+                20,
+            ),
+        ];
+        for (attempt, hours_ago, seconds) in timings {
+            db.execute(&place(attempt, hours_ago, seconds)).await;
         }
-    }
+        let conn = db.connection();
+        let per_band = |hours: Vec<DurationCount>| {
+            let mut bands = std::collections::BTreeMap::new();
+            for h in hours {
+                *bands.entry(h.band).or_insert(0) += h.count;
+            }
+            bands
+        };
+        let project = db.project_of(mine).await.into_inner();
 
-    #[test]
-    fn the_durations_heatmap_counts_each_build_once() {
-        let sql = super::board_durations_heatmap_sql(24, Some("'p'"));
-        assert!(
-            sql.contains("FROM build_attempt ba JOIN derivation_build b"),
-            "{sql}"
-        );
-        assert!(
-            sql.contains("NOT EXISTS (SELECT 1 FROM build_attempt later"),
-            "{sql}"
-        );
-        assert!(
-            sql.contains("EXISTS (SELECT 1 FROM build_job bj")
-                && sql.contains("pr.project IN ('p')"),
-            "{sql}"
-        );
-        assert!(
-            !sql.contains("FROM build_job bj JOIN derivation_build"),
-            "{sql}"
-        );
+        let scoped = durations_per_hour(&conn, 24, Some(&format!("'{project}'")))
+            .await
+            .expect("the scoped heatmap");
+        let everyone = durations_per_hour(&conn, 24, None)
+            .await
+            .expect("the unscoped heatmap");
+
+        db.finish().await;
+        assert_eq!(per_band(scoped), [(1, 1)].into());
+        assert_eq!(per_band(everyone), [(1, 2)].into());
     }
 }

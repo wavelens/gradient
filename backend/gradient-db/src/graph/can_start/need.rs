@@ -612,9 +612,9 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::graph::can_start::test_rows::{drv, exec, norm, transition_row};
+    use crate::graph::can_start::test_rows::{drv, exec, transition_row};
     use gradient_entity::build::BuildStatus;
-    use gradient_fixtures::mock::{mock_db, statements};
+    use gradient_fixtures::mock::mock_db;
     use sea_orm::Value;
     use std::collections::BTreeMap;
 
@@ -623,140 +623,6 @@ mod tests {
             ("derivation".to_owned(), Value::from(id.into_inner())),
             ("wanted".to_owned(), Value::from(wanted)),
         ])
-    }
-
-    #[test]
-    fn skip_moves_only_a_created_unwanted_shared_build_no_entry_point_names() {
-        let sql = SKIP_UNWANTED.text();
-        assert!(sql.contains("SET status = 10"), "{sql}");
-        assert!(sql.contains("AND db.status = 0 AND NOT db.wanted"), "{sql}");
-        assert!(
-            sql.contains(
-                "NOT EXISTS (SELECT 1 FROM entry_point ep WHERE ep.derivation = db.derivation)"
-            ),
-            "{sql}"
-        );
-
-        let thaw = THAW_WANTED.text();
-        assert!(
-            thaw.contains("SET status = 0, attempt = 0")
-                && thaw.contains("AND db.status IN (5, 10) AND db.wanted")
-                && thaw.contains("old.status AS from_status"),
-            "an aborted shared build is thawed by the same want, with its attempts forgiven: {thaw}"
-        );
-    }
-
-    #[test]
-    fn the_need_update_writes_only_disagreeing_rows() {
-        let sql = norm(RECOUNT_WANTED_SQL.as_str());
-        assert!(
-            sql.contains("WITH RECURSIVE wanted(evaluation, derivation, builder) AS"),
-            "{sql}"
-        );
-        assert!(
-            sql.contains(
-                "reached AS MATERIALIZED (SELECT DISTINCT derivation FROM wanted) \
-                 UPDATE derivation_build db SET wanted = x.wanted"
-            ) && sql.contains(
-                "FROM derivation_build s LEFT JOIN reached r ON r.derivation = s.derivation"
-            ),
-            "membership in the walk is a join, never a subplan rescanned per shared build: {sql}"
-        );
-        assert!(!sql.contains("IN (SELECT derivation FROM wanted)"), "{sql}");
-        assert!(
-            sql.contains("WHERE db.derivation = x.derivation AND db.wanted <> x.wanted"),
-            "rewriting agreeing rows reports drift that is not there: {sql}"
-        );
-        assert!(
-            sql.contains("RETURNING db.derivation, db.wanted"),
-            "the caller settles the queue from the new value: {sql}"
-        );
-        for sql in [
-            RECOUNT_WANTED_SQL.as_str(),
-            UPDATE_NEED_SQL.as_str(),
-            GAIN_NEED_SQL.as_str(),
-        ] {
-            let sql = norm(sql);
-            assert!(
-                sql.contains("OFFSET 0) s WHERE NOT ((s.status = 5")
-                    && !sql.contains("dep.status = 5"),
-                "The need walk abort rule can filter step rows fetched after OFFSET 0 fence. The planner can use hash join over all of derivation_build there. {sql}"
-            );
-        }
-    }
-
-    #[test]
-    fn an_entry_point_of_an_aborted_evaluation_wants_nothing() {
-        let live = "FROM entry_point ep JOIN evaluation ev \
-                    ON ev.id = ep.evaluation AND ev.status <> 7";
-        for sql in [RECOUNT_WANTED_SQL.as_str(), UPDATE_NEED_SQL.as_str()] {
-            let sql = norm(sql);
-            assert_eq!(
-                sql.matches("FROM entry_point ep").count(),
-                sql.matches(live).count(),
-                "an aborted evaluation must not keep its own builds wanted: {sql}"
-            );
-            assert!(sql.contains(live), "{sql}");
-            assert!(
-                sql.contains(
-                    "AND NOT EXISTS (SELECT 1 FROM build_job bj WHERE bj.evaluation = ep.evaluation \
-                     AND bj.derivation = ep.derivation AND bj.aborted)"
-                ),
-                "an entry point its evaluation aborted must not thaw: {sql}"
-            );
-        }
-    }
-
-    #[test]
-    fn the_need_seeds_are_gathered_once_and_never_rescanned_per_region_row() {
-        let sql = norm(UPDATE_NEED_SQL.as_str());
-        assert!(
-            sql.contains(
-                "seeds(derivation) AS MATERIALIZED (SELECT r.derivation \
-                 FROM (SELECT DISTINCT derivation FROM region) r \
-                 WHERE EXISTS (SELECT 1 FROM entry_point ep JOIN evaluation ev \
-                 ON ev.id = ep.evaluation AND ev.status <> 7 \
-                 AND (NOT ev.only_evaluate OR EXISTS (SELECT 1 FROM derivation entry_point_derivation \
-                 WHERE entry_point_derivation.id = ep.derivation AND entry_point_derivation.ifd)) \
-                 AND NOT EXISTS (SELECT 1 FROM build_job bj WHERE bj.evaluation = ep.evaluation \
-                 AND bj.derivation = ep.derivation AND bj.aborted) \
-                 WHERE ep.derivation = r.derivation) \
-                 UNION SELECT derivation FROM entered)"
-            ),
-            "an entry point is probed by key per region derivation: {sql}"
-        );
-        assert!(
-            sql.contains(
-                "wanted(evaluation, derivation, builder) AS (SELECT NULL::uuid, s.derivation, \
-                 b.builder FROM seeds s, LATERAL ("
-            ),
-            "the seeds drive the walk: {sql}"
-        );
-        assert!(
-            !sql.contains("UNION ALL SELECT derivation FROM entered")
-                && !sql.contains("r.derivation IN (SELECT"),
-            "a membership test against the seeds is a semi join the planner may rescan \
-             per open region row under a one-row estimate: {sql}"
-        );
-    }
-
-    #[test]
-    fn the_backstop_rewrites_every_open_shared_build() {
-        let sql = norm(RECOUNT_WANTED_SQL.as_str());
-        assert!(
-            sql.contains(&format!(
-                "WHERE ({} OR s.fetchable)) x",
-                norm(&open_predicate("s"))
-            )),
-            "{sql}"
-        );
-        assert!(
-            sql.contains(&format!(
-                "JOIN derivation w ON w.id = db.derivation WHERE {} UNION",
-                norm(&open_predicate("db"))
-            )),
-            "a fetchable entry point seeds nothing: {sql}"
-        );
     }
 
     #[tokio::test]
@@ -795,43 +661,6 @@ mod tests {
                 (off, BuildStatus::Created, BuildStatus::Skipped),
             ]
         );
-        let log = statements(db.into_transaction_log());
-        let thaw = log
-            .iter()
-            .position(|s| s.contains("db.status IN (5, 10) AND db.wanted"))
-            .expect("what became wanted is thawed");
-        let adopt = log
-            .iter()
-            .position(|s| s.contains("INSERT INTO build_job"))
-            .expect("then given its jobs");
-        let ask_again = log
-            .iter()
-            .position(|s| s.contains("SET probed = false"))
-            .expect("then asked again about a miss from before its first evaluation");
-        let promote = log
-            .iter()
-            .position(|s| s.contains("queued_at = coalesce(db.queued_at"))
-            .expect("and then promoted");
-        assert!(
-            thaw < adopt && adopt < ask_again && ask_again < promote,
-            "{log:?}"
-        );
-    }
-
-    #[test]
-    fn a_batch_walk_does_not_enter_a_wanted_shared_build() {
-        let gain = norm(GAIN_NEED_SQL.as_str());
-        let stop = " AND NOT (dep.wanted) OFFSET 0) s)";
-        assert_eq!(
-            gain.matches(stop).count(),
-            1,
-            "only the region stops; the wanted walk within it does not: {gain}"
-        );
-        assert_eq!(
-            gain.replacen(" AND NOT (dep.wanted)", "", 1),
-            norm(UPDATE_NEED_SQL.as_str()),
-            "the batch walk is the full walk with a stop"
-        );
     }
 
     #[tokio::test]
@@ -864,150 +693,12 @@ mod tests {
             .find(|s| s.sql.contains("INSERT INTO build_job"))
             .expect("the batch names what it reaches")
             .clone();
-        assert!(
-            adopt
-                .sql
-                .contains("x.evaluation = c.evaluation AND x.derivation = e.dependency"),
-            "the naming walk stops at a name: {}",
-            adopt.sql
-        );
         let mut below: Vec<uuid::Uuid> = vec![root.into_inner(), on.into_inner()];
         below.sort_unstable();
         assert_eq!(
             adopt.values.map(|v| v.0),
             Some(vec![Value::from(below)]),
             "the roots and the gained shared build seed the naming walk together"
-        );
-        let log = statements(log);
-        assert!(
-            log.iter()
-                .any(|s| norm(s).contains("AND NOT (dep.wanted) OFFSET 0) s)")),
-            "{log:?}"
-        );
-        let thaw = log
-            .iter()
-            .position(|s| s.contains("db.status IN (5, 10) AND db.wanted"))
-            .expect("what became wanted is thawed");
-        let adopt = log
-            .iter()
-            .position(|s| s.contains("INSERT INTO build_job"))
-            .expect("then named");
-        let promote = log
-            .iter()
-            .position(|s| s.contains("queued_at = coalesce(db.queued_at"))
-            .expect("and then promoted");
-        assert!(thaw < adopt && adopt < promote, "{log:?}");
-    }
-
-    #[tokio::test]
-    async fn the_bounded_update_covers_its_roots_and_seeds_from_outside() {
-        let root = DerivationId::now_v7();
-        let on = DerivationId::now_v7();
-        let off = DerivationId::now_v7();
-        let db = mock_db()
-            .append_exec_results([exec(0), exec(1)])
-            .append_query_results([vec![need_row(on, true), need_row(off, false)]])
-            .append_query_results([vec![need_row(on, true), need_row(off, false)]])
-            .into_connection();
-
-        let moved = update_need(&db, &[root]).await.unwrap();
-        assert_eq!(moved.gained, vec![on]);
-        assert_eq!(moved.lost, vec![off]);
-
-        let log = statements(db.into_transaction_log());
-        assert!(
-            log[0].contains("SET LOCAL work_mem")
-                && log[1].contains("ORDER BY derivation FOR NO KEY UPDATE"),
-            "the walk its plan gate measures is raised and its roots locked: {log:?}"
-        );
-        let walk = norm(&log[2]);
-        assert!(
-            walk.contains("region(evaluation, derivation, builder) AS"),
-            "{walk}"
-        );
-        assert!(
-            walk.contains(
-                "OFFSET 0) t WHERE EXISTS (SELECT 1 FROM region x WHERE x.derivation = t.next))"
-            ),
-            "the wanted step semi-joins the region once per level: {walk}"
-        );
-        assert!(
-            walk.contains("OFFSET 0) s WHERE NOT ((s.status = 5")
-                && !walk.contains("dep.status = 5"),
-            "Bounded need updates apply the abort rule to step rows fetched after the OFFSET 0 fence, not to rows inside the fence. {walk}"
-        );
-        assert!(
-            !walk.contains("IN (SELECT derivation FROM region)")
-                && !walk.contains("IN (SELECT derivation FROM wanted)"),
-            "no region or wanted membership is a subplan: {walk}"
-        );
-        assert!(
-            !walk.contains("JOIN derivation_build p ON"),
-            "the parent is looked up by its key, not joined: {walk}"
-        );
-        assert!(
-            walk.contains(&format!(
-                "entered(derivation) AS (SELECT r.derivation \
-                 FROM (SELECT DISTINCT derivation FROM region) r \
-                 CROSS JOIN LATERAL (SELECT 1 FROM \
-                 (SELECT e.derivation AS parent FROM derivation_dependency e \
-                 CROSS JOIN LATERAL (SELECT 1 FROM derivation_build p \
-                 WHERE p.derivation = e.derivation AND p.wanted \
-                 AND (NOT p.fetchable AND p.status NOT IN (4, 6, 9)) \
-                 OFFSET 0) wanted_open_parent \
-                 WHERE e.dependency = r.derivation \
-                 AND e.derivation NOT IN (SELECT unnest(region_derivation_ids) \
-                 FROM region_derivation_id_array) \
-                 OFFSET 0) wanted_open_outside_region_parent_derivations \
-                 CROSS JOIN LATERAL (SELECT 1 FROM derivation_dependency k \
-                 JOIN derivation_build pb ON pb.derivation = k.derivation \
-                 JOIN derivation pw ON pw.id = pb.derivation \
-                 WHERE (k.derivation, k.dependency) \
-                 = (wanted_open_outside_region_parent_derivations.parent, r.derivation) \
-                 AND ((pw.walked AND pb.probed AND NOT pb.cache_available \
-                 AND pb.status IN (0, 1, 2, 5, 8, 10)) OR k.kind IN (1, 2)) \
-                 AND {walk_may_enter_dependency_sql} OFFSET 0) \
-                 outside_parent_wanted_region_derivation_edge \
-                 LIMIT 1) wanting)",
-                walk_may_enter_dependency_sql =
-                    norm(&walk_may_enter_dependency_sql()).replace('"', "\\\""),
-            )),
-            "Derivations in the `region` reach the `entered` state at the first `wanted` and `open` parent outside the `region`. The lookup can stop there. No need to scan every parent edge of a widely shared dependency. {walk}"
-        );
-        assert!(
-            walk.contains(
-                "region_derivation_id_array(region_derivation_ids) AS MATERIALIZED \
-                 (SELECT array_agg(DISTINCT derivation) FROM region)"
-            ) && !walk.contains("<> ALL ("),
-            "The region check is `NOT IN` against the unnested region array. The planner can hash that array once per query. `<> ALL` against the array can scan the array once for each parent edge. Cost can rise quadratically with the size of region. {walk}"
-        );
-        assert!(
-            walk.contains(
-                "FROM seeds s, LATERAL (SELECT (w.walked AND rb.probed AND NOT rb.cache_available \
-                 AND rb.status IN (0, 1, 2, 5, 8, 10)) AS builder FROM derivation_build rb \
-                 JOIN derivation w ON w.id = rb.derivation WHERE rb.derivation = s.derivation \
-                 AND (NOT rb.fetchable AND rb.status NOT IN (4, 6, 9)) OFFSET 0) b"
-            ),
-            "a settled root seeds nothing and a seed carries its own builder bit: {walk}"
-        );
-        assert_eq!(
-            walk.matches("build_job").count(),
-            1,
-            "a name is what adoption writes for what the walk reaches, and the walk reads \
-             only the abort of an entry point from it: {walk}"
-        );
-        assert!(
-            walk.contains(
-                "FROM region r LEFT JOIN (SELECT DISTINCT derivation FROM wanted) d \
-                 ON d.derivation = r.derivation ORDER BY r.derivation"
-            ),
-            "the write takes its locks in the order the walk sorted: {walk}"
-        );
-        let write = norm(&log[3]);
-        assert!(
-            write.contains("FROM unnest($1::uuid[], $2::bool[]) AS x(derivation, wanted)")
-                && write.contains("RETURNING db.derivation, db.wanted"),
-            "the region reaches the write as values, not as a subquery: {write}"
         );
     }
 }

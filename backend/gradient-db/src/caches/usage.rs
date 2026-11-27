@@ -138,10 +138,26 @@ mod tests {
         );
     }
 
-    #[test]
-    fn an_emptied_cache_recounts_to_zero() {
-        let sql = STORE_CACHE_USAGE.text();
-        assert!(sql.contains("FROM cache c LEFT JOIN unnest"), "{sql}");
-        assert!(sql.contains("coalesce(x.bytes, 0)"), "{sql}");
+    #[tokio::test]
+    async fn an_emptied_cache_recounts_to_zero() {
+        use gradient_fixtures::shape::shape;
+        use gradient_types::ids::EvaluationId;
+
+        let cache = CacheId::now_v7();
+        let db = shape()
+            .evaluation(EvaluationId::now_v7())
+            .into_cache(cache)
+            .full()
+            .into_database()
+            .await;
+        let usage = format!("SELECT bytes::text FROM cache_usage WHERE cache = '{cache}'");
+
+        recount_cache_usage(&db.connection()).await.unwrap();
+        assert_eq!(db.texts(&usage).await, vec![(1_i64 << 30).to_string()]);
+
+        db.execute("DELETE FROM cached_path_signature").await;
+        recount_cache_usage(&db.connection()).await.unwrap();
+        assert_eq!(db.texts(&usage).await, vec!["0".to_owned()]);
+        db.finish().await;
     }
 }

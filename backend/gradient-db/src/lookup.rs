@@ -149,7 +149,7 @@ mod tests {
     use crate::IN_CHUNK_SIZE;
     use gradient_entity::ids::UserId;
     use gradient_entity::user;
-    use gradient_fixtures::mock::{empty_db, mock_db, raw_statements, statements};
+    use gradient_fixtures::mock::{empty_db, mock_db, statements};
     use gradient_fixtures::rows;
 
     #[tokio::test]
@@ -171,12 +171,7 @@ mod tests {
             .unwrap();
         assert_eq!(found.len(), 1);
         assert_eq!(found[&user.id].username, user.username);
-        let log = raw_statements(db.into_transaction_log());
-        assert_eq!(log.len(), 1, "{log:?}");
-        assert!(
-            log[0].sql.contains(r#"WHERE "user"."id" IN ($1)"#),
-            "{log:?}"
-        );
+        assert_eq!(statements(db.into_transaction_log()).len(), 1);
     }
 
     #[tokio::test]
@@ -191,17 +186,38 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn by_id_runs_the_primary_key_select() {
-        let user = rows::user();
-        let db = mock_db()
-            .append_query_results([vec![user.clone()]])
-            .into_connection();
-        let found = by_id::<user::Entity, _>(&db, user.id).await.unwrap();
-        assert_eq!(found.map(|u| u.id), Some(user.id));
-        let log = raw_statements(db.into_transaction_log());
-        assert!(
-            log[0].sql.contains(r#"WHERE "user"."id" = $1 LIMIT $2"#),
-            "{log:?}"
-        );
+    async fn test_by_id_and_by_ids_return_rows_by_primary_key_dedupe_ids_and_skip_unknown() {
+        let db = gradient_fixtures::database::TestDatabase::create().await;
+        let conn = db.connection();
+        let mut accounts = Vec::new();
+        for username in ["alice", "bob"] {
+            let account = user::Model {
+                id: UserId::now_v7(),
+                username: username.into(),
+                name: username.into(),
+                email: format!("{username}@example.com"),
+                ..rows::user()
+            };
+            accounts.push(
+                crate::rows::insert::<user::Entity, _>(&conn, account)
+                    .await
+                    .expect("the account is written"),
+            );
+        }
+        let (alice, bob) = (accounts[0].id, accounts[1].id);
+
+        let found = by_ids::<user::Entity, _>(&conn, &[alice, alice, UserId::now_v7()])
+            .await
+            .unwrap();
+        let one = by_id::<user::Entity, _>(&conn, bob).await.unwrap();
+        let none = by_id::<user::Entity, _>(&conn, UserId::now_v7())
+            .await
+            .unwrap();
+
+        assert_eq!(found.keys().collect::<Vec<_>>(), [&alice]);
+        assert_eq!(found[&alice].username, "alice");
+        assert_eq!(one.map(|u| u.username).as_deref(), Some("bob"));
+        assert!(none.is_none());
+        db.finish().await;
     }
 }

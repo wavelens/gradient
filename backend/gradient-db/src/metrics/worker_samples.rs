@@ -131,27 +131,90 @@ pub async fn fleet_per_hour<C: ConnectionTrait>(
 
 #[cfg(test)]
 mod tests {
-    #[test]
-    fn worker_telemetry_is_scoped_through_the_workers_serving_the_projects() {
-        for sql in [
-            super::board_network_sql(Some("'p'")),
-            super::board_fleet_sql(24, Some("'p'")),
+    use super::*;
+
+    #[tokio::test]
+    async fn worker_network_speeds_and_hourly_fleet_counts_only_include_callers_project_workers() {
+        use gradient_entity::ids::WorkerSampleId;
+        use gradient_entity::worker_sample::{self, WorkerSampleState};
+        use gradient_fixtures::shape::shape;
+        use gradient_types::EvaluationId;
+        use sea_orm::{EntityTrait, IntoActiveModel};
+
+        let (mine, other) = (EvaluationId::now_v7(), EvaluationId::now_v7());
+        let db = shape()
+            .evaluation(mine)
+            .worker_registration("wa")
+            .evaluation(other)
+            .worker_registration("wa")
+            .worker_registration("wb")
+            .add_team_worker_with_team_grants_for_evaluation_projects("wt", &[mine])
+            .into_database()
+            .await;
+        let mine_project = db.project_of(mine).await.into_inner();
+        let other_project = db.project_of(other).await.into_inner();
+        for (project, name, created) in [
+            (mine_project, "Alpha", "2020-01-01"),
+            (other_project, "Beta", "2021-01-01"),
         ] {
-            assert!(!sql.contains(" AND project IN"), "{sql}");
-            assert!(
-                sql.contains("worker_registration WHERE peer_id IN ('p')"),
-                "{sql}"
-            );
-            assert!(sql.contains("team_project tp"), "{sql}");
+            db.execute(&format!(
+                "UPDATE worker_registration SET display_name = '{name}', created_at = '{created}' \
+                 WHERE peer_id = '{project}'"
+            ))
+            .await;
         }
-        let network = super::board_network_sql(Some("'p'"));
-        assert!(
-            network.contains("wr.worker_id = s.worker_id AND wr.peer_id IN ('p')"),
-            "{network}"
+        let at = chrono::Utc::now().naive_utc() - chrono::Duration::minutes(1);
+        let sample = |worker: &str, state: WorkerSampleState| worker_sample::Model {
+            id: WorkerSampleId::now_v7(),
+            worker_id: worker.into(),
+            at,
+            upload_speed_mbps: Some(10.0),
+            max_concurrent_builds: 1,
+            state,
+            capabilities: serde_json::json!({ "build": true }),
+            ..Default::default()
+        };
+        worker_sample::Entity::insert_many(
+            [
+                sample("wa", WorkerSampleState::Active),
+                sample("wt", WorkerSampleState::Draining),
+                sample("wb", WorkerSampleState::Active),
+                sample("wx", WorkerSampleState::Active),
+            ]
+            .map(IntoActiveModel::into_active_model),
+        )
+        .exec_without_returning(&db.connection())
+        .await
+        .expect("the samples are written");
+        let conn = db.connection();
+        let scope = format!("'{mine_project}'");
+
+        let scoped_speeds = latest_speeds(&conn, Some(&scope)).await.expect("speeds");
+        let all_speeds = latest_speeds(&conn, None).await.expect("speeds");
+        let scoped_fleet = fleet_per_hour(&conn, 24, Some(&scope))
+            .await
+            .expect("fleet");
+        let all_fleet = fleet_per_hour(&conn, 24, None).await.expect("fleet");
+
+        db.finish().await;
+        let named: Vec<_> = scoped_speeds
+            .into_iter()
+            .map(|w| (w.worker_id, w.worker_name))
+            .collect();
+        assert_eq!(
+            named,
+            [
+                (Some("wa".to_owned()), Some("Alpha".to_owned())),
+                (Some("wt".to_owned()), Some("wt".to_owned())),
+            ]
         );
-        assert!(
-            network.contains("tw.worker_id = s.worker_id AND tw.team IN"),
-            "{network}"
-        );
+        assert_eq!(all_speeds.len(), 4);
+        let counts = |fleet: Vec<FleetCount>| -> (i64, i64) {
+            fleet
+                .iter()
+                .fold((0, 0), |(c, d), h| (c + h.connected, d + h.draining))
+        };
+        assert_eq!(counts(scoped_fleet), (2, 1));
+        assert_eq!(counts(all_fleet), (4, 1));
     }
 }

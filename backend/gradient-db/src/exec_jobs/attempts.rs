@@ -334,73 +334,113 @@ pub async fn set_guest_address<C: ConnectionTrait>(
 }
 
 #[cfg(test)]
-mod tests {
+pub(super) mod tests {
     use super::*;
-    use gradient_fixtures::mock::{all_statements, mock_db};
-    use sea_orm::MockExecResult;
+    use gradient_fixtures::database::TestDatabase;
+    use gradient_types::EvaluationId;
 
-    #[tokio::test]
-    async fn a_started_job_drops_its_wait_reason() {
-        let db = mock_db()
-            .append_exec_results([MockExecResult {
-                last_insert_id: 0,
-                rows_affected: 0,
-            }])
-            .into_connection();
-
-        let opened = open(
-            &db,
-            ExecJobId::now_v7(),
-            ExecJobAttemptId::now_v7(),
-            1,
-            DispatchedJobId::now_v7(),
-            "w1",
-            2,
-            None,
+    pub(in crate::exec_jobs) async fn two_queued_jobs() -> (TestDatabase, ExecJobId, ExecJobId) {
+        let db = gradient_fixtures::shape::shape()
+            .evaluation(EvaluationId::now_v7())
+            .derivation(&format!("{}-first.drv", "a".repeat(32)))
+            .entry_point("first")
+            .derivation(&format!("{}-second.drv", "b".repeat(32)))
+            .entry_point("second")
+            .into_database()
+            .await;
+        db.execute(
+            "INSERT INTO exec_job (id, evaluation, entry_point, program_derivation, requirement, \
+             spec, retries_left, status, waiting_reason, created_at) \
+             SELECT gen_random_uuid(), e.evaluation, e.id, e.derivation, '{}'::jsonb, '{}'::jsonb, \
+             3, 0, '{\"kind\":\"draining\"}'::jsonb, now() AT TIME ZONE 'UTC' FROM entry_point e",
         )
-        .await
-        .unwrap();
-
-        assert!(!opened);
-        let log = all_statements(db.into_transaction_log());
-        assert!(
-            log[0].sql.contains("waiting_reason = NULL"),
-            "{}",
-            log[0].sql
-        );
+        .await;
+        let job_of = |attr: &'static str| {
+            let db = &db;
+            async move {
+                db.texts(&format!(
+                    "SELECT j.id::text FROM exec_job j JOIN entry_point e ON e.id = j.entry_point \
+                     WHERE e.eval = '{attr}'"
+                ))
+                .await[0]
+                    .parse::<uuid::Uuid>()
+                    .map(ExecJobId::new)
+                    .unwrap()
+            }
+        };
+        let (first, second) = (job_of("first").await, job_of("second").await);
+        (db, first, second)
     }
 
     #[tokio::test]
-    async fn closing_an_attempt_revokes_its_tokens() {
-        let attempt = ExecJobAttemptId::now_v7();
-        let job = MExecJob {
-            id: ExecJobId::now_v7(),
-            ..Default::default()
+    async fn opening_attempt_drops_wait_reason_refuses_reopen_and_closing_revokes_only_its_tokens()
+    {
+        let (db, first, second) = two_queued_jobs().await;
+        let conn = db.connection();
+        let (a1, a2) = (ExecJobAttemptId::now_v7(), ExecJobAttemptId::now_v7());
+        let open_attempt = |job, attempt| {
+            open(
+                &conn,
+                job,
+                attempt,
+                1,
+                DispatchedJobId::now_v7(),
+                "w1",
+                2,
+                None,
+            )
         };
-        let db = mock_db()
-            .append_query_results([vec![MExecJobAttempt {
-                id: attempt,
-                exec_job: job.id,
-                ..Default::default()
-            }]])
-            .append_exec_results([MockExecResult {
-                last_insert_id: 0,
-                rows_affected: 1,
-            }])
-            .append_query_results([vec![job]])
-            .into_connection();
 
-        close(&db, attempt, AttemptEndReason::Completed, None)
+        let opened = open_attempt(first, a1).await.unwrap();
+        let reopened = open_attempt(first, ExecJobAttemptId::now_v7())
             .await
-            .unwrap()
-            .expect("the attempt closes");
-
-        let log = all_statements(db.into_transaction_log());
+            .unwrap();
+        assert!(open_attempt(second, a2).await.unwrap());
+        let expires = gradient_types::now() + chrono::Duration::hours(1);
         assert!(
-            log.iter().any(|s| s
-                .sql
-                .starts_with("UPDATE exec_job_token SET revoked = true WHERE attempt = $1")),
-            "{log:?}"
+            super::super::tokens::insert(&conn, a1, "first", expires)
+                .await
+                .unwrap()
         );
+        assert!(
+            super::super::tokens::insert(&conn, a2, "second", expires)
+                .await
+                .unwrap()
+        );
+        let closed = close(&conn, a1, AttemptEndReason::Completed, None)
+            .await
+            .unwrap();
+        let closed_again = close(&conn, a1, AttemptEndReason::Completed, None)
+            .await
+            .unwrap();
+
+        let first_job = db.find::<EExecJob>(first).await.unwrap();
+        let tokens_of = |job| super::super::tokens::of_job(&conn, job);
+        assert!(opened && !reopened);
+        assert_eq!(
+            (first_job.status, first_job.waiting_reason),
+            (ExecJobStatus::Starting, None)
+        );
+        assert_eq!(closed.map(|(job, _)| job.id), Some(first));
+        assert!(closed_again.is_none());
+        assert_eq!(
+            tokens_of(first)
+                .await
+                .unwrap()
+                .iter()
+                .map(|t| t.revoked)
+                .collect::<Vec<_>>(),
+            [true]
+        );
+        assert_eq!(
+            tokens_of(second)
+                .await
+                .unwrap()
+                .iter()
+                .map(|t| t.revoked)
+                .collect::<Vec<_>>(),
+            [false]
+        );
+        db.finish().await;
     }
 }

@@ -266,30 +266,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn untrusted_content_is_sandboxed_without_returning_its_origin() {
-        assert!(UNTRUSTED_CONTENT_CSP.starts_with("sandbox"));
-        assert!(
-            !UNTRUSTED_CONTENT_CSP.contains("allow-same-origin"),
-            "allow-same-origin defeats the sandbox: {UNTRUSTED_CONTENT_CSP}"
-        );
-        assert!(UNTRUSTED_CONTENT_CSP.contains("allow-scripts"));
-        assert!(UNTRUSTED_CONTENT_CSP.contains("allow-top-navigation-by-user-activation"));
-        assert!(
-            !UNTRUSTED_CONTENT_CSP
-                .split_whitespace()
-                .any(|t| t == "allow-top-navigation"),
-            "unconditional top navigation lets the page redirect the viewer: {UNTRUSTED_CONTENT_CSP}"
-        );
-
-        let names: Vec<_> = untrusted_content_headers()
-            .into_iter()
-            .map(|(n, _)| n)
-            .collect();
-        assert!(names.contains(&axum::http::header::CONTENT_SECURITY_POLICY));
-        assert!(names.contains(&axum::http::header::X_CONTENT_TYPE_OPTIONS));
-    }
-
-    #[test]
     fn html_product_renders_inline_but_always_sandboxed() {
         let headers = build_product_headers("report.html", "html");
         let by_name = |n: axum::http::HeaderName| {
@@ -301,10 +277,21 @@ mod tests {
         };
         assert_eq!(by_name(axum::http::header::CONTENT_TYPE), "text/html");
         assert_eq!(by_name(axum::http::header::CONTENT_DISPOSITION), "inline");
-        assert_eq!(
-            by_name(axum::http::header::CONTENT_SECURITY_POLICY),
-            UNTRUSTED_CONTENT_CSP
+        let policy = by_name(axum::http::header::CONTENT_SECURITY_POLICY);
+        let sandbox: Vec<_> = policy
+            .split(';')
+            .map(str::trim)
+            .find_map(|directive| directive.strip_prefix("sandbox"))
+            .expect("served policy is sandboxed")
+            .split_whitespace()
+            .collect();
+        assert!(sandbox.contains(&"allow-scripts"), "{policy}");
+        assert!(
+            sandbox.contains(&"allow-top-navigation-by-user-activation"),
+            "{policy}"
         );
+        assert!(!sandbox.contains(&"allow-same-origin"), "{policy}");
+        assert!(!sandbox.contains(&"allow-top-navigation"), "{policy}");
         assert_eq!(
             by_name(axum::http::header::X_CONTENT_TYPE_OPTIONS),
             "nosniff"

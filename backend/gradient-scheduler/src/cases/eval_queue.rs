@@ -962,6 +962,47 @@ async fn q23_failed_drv_recovery_insertion_does_not_abort_stuck_evaluation_and_n
     case.finish().await;
 }
 
+#[tokio::test]
+async fn q24_blocked_unproducible_drv_does_not_spawn_recovery_when_cache_available_nar_present_deps_blocking_or_building()
+ {
+    let variants: [fn(Shape) -> Shape; 4] = [
+        |shape| shape.cache_available().build_status(BuildStatus::Queued),
+        |shape| shape.drv_cached().build_status(BuildStatus::Queued),
+        |shape| shape.build_status(BuildStatus::Building),
+        |shape| {
+            shape
+                .depends_on(B)
+                .derivation(B)
+                .walked()
+                .probed()
+                .output(B_OUT)
+                .build_status(BuildStatus::Building)
+        },
+    ];
+    for apply in variants {
+        let e1 = EvaluationId::now_v7();
+        let case = SchedulerCase::start(apply(
+            shape()
+                .evaluation(e1)
+                .evaluation_status(EvaluationStatus::Waiting)
+                .waiting_reason(WaitingReason::graph_stuck(1).to_json())
+                .derivation(A)
+                .walked()
+                .probed()
+                .entry_point(&attr_of(A))
+                .job()
+                .output(A_OUT),
+        ))
+        .await;
+        case.backdate_evaluation(e1, ago(121)).await;
+
+        case.recover_drv_stuck_evals().await;
+
+        assert!(recoveries_of(&case, e1).await.is_empty());
+        case.finish().await;
+    }
+}
+
 async fn recoveries_of(
     case: &SchedulerCase,
     evaluation: EvaluationId,
