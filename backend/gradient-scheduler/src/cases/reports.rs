@@ -24,6 +24,7 @@ use gradient_entity::{
 use gradient_fixtures::shape::{Shape, shape};
 use gradient_graph::read_derivation_from_trusted_nar::load_verified_trusted_derivation_record;
 use gradient_graph::{NarCommit, StoredContentProducer};
+use gradient_pool::session_port::SessionSignal;
 use gradient_test_support::cache_fixture::zstd_compressed_nar_of_bytes;
 use gradient_test_support::derivation_file_from_reported_facts::DerivationFileFromReportedFacts;
 use gradient_types::{EvalCapability, WaitingReason};
@@ -3080,6 +3081,63 @@ async fn evaluation_with_unuploaded_derivation_fails_and_records_no_report_deriv
         .expect("the eval result is handled");
     assert_derivation_file_not_uploaded_and_no_derivation_row_exists(&case, e1, &b_base).await;
     case.check("step 1").await;
+
+    case.finish().await;
+}
+
+#[tokio::test]
+async fn evaluation_failure_aborts_worker_and_closes_dispatch_after_confirmation() {
+    let e1 = EvaluationId::now_v7();
+    let case = SchedulerCase::start(shape().evalq(e1)).await;
+    let k1 = connect_worker_one_assign_evaluation_job_move_evaluation_to_evaluating_derivations_and_return_evaluation_job_key(&case, e1).await;
+    let a1 = case
+        .open_assignment(&k1)
+        .await
+        .expect("eval:E1 is dispatched")
+        .id;
+    let b_base =
+        test_derivation_store_file_name(&build_discovered_derivation_with_one_output(B, B_OUT));
+    let never_uploaded = DiscoveredDerivation {
+        drv_path: format!("/nix/store/{b_base}"),
+        ..build_discovered_derivation_with_one_output(B, B_OUT)
+    };
+    case.signals(W1);
+    case.check("step 0").await;
+
+    case.scheduler
+        .handle_eval_result(&k1, vec![never_uploaded], Vec::new(), Vec::new())
+        .await
+        .expect("the eval result is handled");
+    assert_eq!(
+        case.evaluation(e1).await.status,
+        EvaluationStatus::Failed,
+        "after 1: evaluation(E1).status"
+    );
+    let aborts: Vec<_> = case
+        .signals(W1)
+        .into_iter()
+        .filter_map(|signal| match signal {
+            SessionSignal::Abort { job_id, .. } => Some(job_id),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(aborts, vec![k1.clone()], "after 1: aborts sent to W1");
+    case.check("step 1").await;
+
+    case.fail(
+        W1,
+        &k1,
+        a1,
+        failure(BuildFailureKind::Aborted).error("aborted by server"),
+    )
+    .await;
+    assert_eq!(
+        case.assignment_outcomes(&k1).await,
+        vec![(a1, Some(DispatchedJobOutcome::Abandoned))],
+        "after 2: dj(eval:E1)"
+    );
+    assert_eq!(case.active(&k1).await, None, "after 2: active(eval:E1)");
+    case.check("step 2").await;
 
     case.finish().await;
 }

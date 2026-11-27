@@ -18,13 +18,14 @@ use gradient_entity::{cluster_job, cluster_member, eval_split};
 use gradient_fixtures::shape::shape;
 use gradient_pool::session_port::SessionSignal;
 use gradient_wire::types::{
-    BuildFailureKind, ClusterPeer, JobKind, SPLIT_COMPANION_ROLE, SPLIT_PRIMARY_ROLE,
+    BuildFailureKind, ClusterPeer, DiscoveredDerivation, JobKind, SPLIT_COMPANION_ROLE,
+    SPLIT_PRIMARY_ROLE,
 };
 
 use super::{
     A, A_OUT, B, B_OUT, CaseShapes, ClusterAssignment, D, D_OUT, SchedulerCase, SlotKind, ago,
-    eval_key, failure, output_nar, remove_jobs_available_for_requested_kinds_signals, w_all,
-    w_eval, w_network_eval,
+    attr_of, drv, eval_key, failure, output_nar, remove_jobs_available_for_requested_kinds_signals,
+    w_all, w_eval, w_network_eval, with_attr, with_output,
 };
 
 const W1: &str = "w1";
@@ -1340,6 +1341,107 @@ async fn k34_a_split_cluster_retried_after_its_place_deadline_is_not_dissolved()
             .is_some_and(|deadline| deadline > gradient_types::now()),
         "after 3: cluster_job(C) kept with a fresh dissolve_after, got {row:?}"
     );
+    case.check("step 3").await;
+
+    case.finish().await;
+}
+
+#[tokio::test]
+async fn k35_rejected_member_report_aborts_every_member_job_and_ends_cluster_job_and_attempt_as_aborted_with_all_dispatch_rows_closed()
+ {
+    let (c, e1, _) = cluster_ids();
+    let case = SchedulerCase::start(split_of_three(c, e1)).await;
+    case.connect(W1, w_network_eval()).await;
+    case.connect(W2, w_eval()).await;
+    case.assign_queued_evals().await;
+    case.idle(W1, JobKind::Flake).await;
+    case.idle(W2, JobKind::Flake).await;
+    case.plan_clusters().await;
+    let mut seated = Vec::new();
+    for worker in [W1, W2] {
+        let key = remove_jobs_available_for_requested_kinds_signals(case.signals(worker))
+            .into_iter()
+            .find_map(|signal| match signal {
+                SessionSignal::ClusterAssign { job_id } => Some(job_id),
+                _ => None,
+            })
+            .expect("each worker got a split member");
+        let assignment = case.take_cluster_assignment(worker, &key).await;
+        case.accept(worker, &key).await;
+        seated.push((worker, key, assignment.assignment_id));
+    }
+    let primary = eval_key(e1);
+    let (primary_worker, _, _) = seated
+        .iter()
+        .find(|(_, key, _)| *key == primary)
+        .expect("the primary member is seated");
+    case.advance_evaluation(
+        primary_worker,
+        &primary,
+        EvaluationStatus::EvaluatingDerivation,
+    )
+    .await;
+    case.signals(W1);
+    case.signals(W2);
+    case.check("step 1").await;
+
+    let never_uploaded = DiscoveredDerivation {
+        drv_path: "/nix/store/00000000000000000000000000000000-never-uploaded.drv".into(),
+        ..with_attr(with_output(drv(B, &[]), B_OUT), &attr_of(B))
+    };
+    case.scheduler
+        .handle_eval_result(&primary, vec![never_uploaded], Vec::new(), Vec::new())
+        .await
+        .expect("the eval result is handled");
+    assert_eq!(
+        case.evaluation(e1).await.status,
+        EvaluationStatus::Failed,
+        "after 2: evaluation(E1).status"
+    );
+    for (worker, key, _) in &seated {
+        let aborts: Vec<_> = case
+            .signals(worker)
+            .into_iter()
+            .filter_map(|signal| match signal {
+                SessionSignal::Abort { job_id, .. } => Some(job_id),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            aborts,
+            vec![key.clone()],
+            "after 2: aborts sent to {worker}"
+        );
+    }
+    case.check("step 2").await;
+
+    for (worker, key, assignment) in &seated {
+        case.fail(
+            worker,
+            key,
+            *assignment,
+            failure(BuildFailureKind::Aborted).error("aborted by server"),
+        )
+        .await;
+    }
+    assert_eq!(
+        case.cluster(c).await.status,
+        ClusterJobStatus::Aborted,
+        "after 3: cluster_job(C).status"
+    );
+    let attempt = only_attempt(&case, c).await;
+    assert_eq!(
+        (attempt.outcome, attempt.finished_at.is_some()),
+        (Some(ClusterAttemptOutcome::Aborted), true),
+        "after 3: cluster_attempt(C)[0]"
+    );
+    for (_, key, assignment) in &seated {
+        assert_eq!(
+            case.assignment_outcomes(key).await,
+            vec![(*assignment, Some(DispatchedJobOutcome::Abandoned))],
+            "after 3: dj({key})"
+        );
+    }
     case.check("step 3").await;
 
     case.finish().await;

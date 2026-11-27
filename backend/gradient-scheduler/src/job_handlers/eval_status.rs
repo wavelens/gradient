@@ -420,7 +420,9 @@ impl Scheduler {
                 .await
                 {
                     warn!(error = %e, %evaluation_id, "failed to fail the evaluation");
+                    return;
                 }
+                self.cancel_evaluation_jobs(evaluation_id, &[]).await;
             }
             Ok(None) => warn!(%evaluation_id, "evaluation not found for status update"),
             Err(e) => {
