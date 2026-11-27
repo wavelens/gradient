@@ -143,8 +143,12 @@ gradient_db::sql_fn! {
         select_outputs_trusted_by_projects_with_live_jobs_sql,
         params = [DerivationIds(64)],
         tier = Hot,
-        budget = gradient_db::sql::Budget::hot().buffers(4_000)
-            .because(gradient_db::store_path_content_variant_reader_choice::RAISED_QUERY_BUDGET_REASON_FOR_TRUSTED_OUTPUT_CHECK_AND_STORED_COPY_READER_BECAUSE_EVERY_LIVE_BUILD_JOB_TRIGGERS_TRUST_CHECK);
+        budget = gradient_db::sql::Budget::hot().buffers(4_000).amplification(150)
+            .because("Each live build job in the derivation process can trigger the trust check for its project. \
+                      The statement read 3758 buffers on an amplified dump with 1000 unfinished evaluations. \
+                      The end-to-end gate measured 107 rows scanned for each returned row. \
+                      Every output hash can have several stored copies. \
+                      The check must rank those copies.");
 }
 
 fn select_outputs_trusted_by_projects_with_live_jobs_sql() -> String {
