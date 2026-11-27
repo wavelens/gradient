@@ -11,8 +11,8 @@
 
 use crate::graph::predicates::{
     content_variant_trusted_by_all_projects_with_live_job_on_shared_build,
-    derivation_build_has_build_job_not_aborted_and_evaluation_not_finished_sql_predicate,
-    stored_copy_in_input_closure_or_trusted_by_every_project_with_live_job_on_shared_build_sql_condition,
+    shared_build_has_build_job_not_aborted_and_evaluation_not_aborted_sql_predicate,
+    stored_copy_in_input_closure_or_trusted_by_every_project_with_build_job_on_shared_build_sql_condition,
 };
 use crate::sql::Query;
 use crate::store_path_content_variant_trust::{
@@ -133,7 +133,7 @@ pub fn cached_path_subquery_for_store_hash_with_input_closure(
 ) -> String {
     trusted_variant_sql(
         hash,
-        &stored_copy_in_input_closure_or_trusted_by_every_project_with_live_job_on_shared_build_sql_condition(
+        &stored_copy_in_input_closure_or_trusted_by_every_project_with_build_job_on_shared_build_sql_condition(
             &format!("{CHOSEN}.id"),
             shared_build,
             &format!("{CHOSEN}.hash = ANY({input_closure_hashes})"),
@@ -238,7 +238,7 @@ crate::sql_fn! {
         ),
         &format!(
             "JOIN derivation_build reader_build ON reader_build.id = $2::uuid AND {}",
-            derivation_build_has_build_job_not_aborted_and_evaluation_not_finished_sql_predicate(
+            shared_build_has_build_job_not_aborted_and_evaluation_not_aborted_sql_predicate(
                 "reader_build"
             ),
         ),
@@ -1471,17 +1471,70 @@ mod tests {
         .await;
     }
 
-    #[tokio::test]
-    async fn stored_copy_not_used_directly_after_project_job_evaluation_finishes() {
-        assert_shared_build_worker_read_returns_no_stored_dependency_output_copy_after_running_sql_statement_on_stored_dependency_fixture(&format!(
-            "UPDATE evaluation SET status = {terminal}, building_started_at = now() \
+    fn sql_update_evaluation_status_for_evaluations_with_build_job_on_derivation_with_dependencies(
+        status: gradient_entity::evaluation::EvaluationStatus,
+    ) -> String {
+        format!(
+            "UPDATE evaluation SET status = {status}, building_started_at = now() \
              WHERE id IN (SELECT evaluation FROM build_job \
-                          WHERE derivation IN (SELECT derivation FROM derivation_dependency))",
-            terminal = crate::sql::status::eval_in(
-                &gradient_entity::evaluation::EvaluationStatus::TERMINAL[..1]
+                          WHERE derivation IN (SELECT derivation FROM derivation_dependency));",
+            status = crate::sql::status::eval(status),
+        )
+    }
+
+    #[tokio::test]
+    async fn stored_dependency_output_copy_is_still_returned_to_worker_after_parent_shared_build_job_evaluation_finishes()
+     {
+        let fixture = build_stored_dependency_fixture_and_apply_one_sql_change(
+            false,
+            |shape, _| shape,
+            &format!(
+                "{finish} UPDATE cached_path SET \"references\" = NULL \
+                 WHERE hash = '{DEPENDENCY_OUTPUT_STORE_PATH_HASH}'",
+                finish = sql_update_evaluation_status_for_evaluations_with_build_job_on_derivation_with_dependencies(
+                    gradient_entity::evaluation::EvaluationStatus::Completed
+                ),
             ),
-        ))
+        )
         .await;
+        let mut package_names = Vec::new();
+        for hash in [
+            DEPENDENCY_OUTPUT_STORE_PATH_HASH,
+            DEPENDENCY_OUTPUT_REFERENCE_STORE_PATH_HASH,
+        ] {
+            package_names.push(
+                read_store_path_content_variant_reader_choice_for_parent_build(
+                    &fixture,
+                    &StorePathInputClosureHashes::default(),
+                    hash,
+                )
+                .await
+                .package_name,
+            );
+        }
+        fixture.db.finish().await;
+        assert_eq!(
+            package_names,
+            vec![Some("dependency".to_owned()), None],
+            "The only evaluation for the parent build completed. A request to rebuild the retired output remains. Worker reads continue to serve the dependent outputs in the input closure. References outside the input closure stay unreadable. The project of the completed job doesn't trust them."
+        );
+    }
+
+    #[tokio::test]
+    async fn worker_read_returns_no_stored_copy_when_parent_build_job_is_aborted() {
+        assert_eq!(
+            build_stored_dependency_fixture_run_sql_and_return_three_dependency_output_reader_answers(
+                false,
+                |shape, _| shape,
+                &sql_update_evaluation_status_for_evaluations_with_build_job_on_derivation_with_dependencies(
+                    gradient_entity::evaluation::EvaluationStatus::Aborted
+                ),
+            )
+            .await
+            .package_name,
+            None,
+            "A cancelled evaluation made no request, so the worker read did not return the saved copy of that shared build."
+        );
     }
 
     #[tokio::test]

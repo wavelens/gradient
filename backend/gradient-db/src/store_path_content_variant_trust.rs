@@ -5197,7 +5197,7 @@ ORDER BY selected_content_variant_for_signing.cache, selected_content_variant_fo
                      JOIN derivation_build parent_build ON parent_build.derivation = '{parent}' \
                      WHERE cp.hash = '{DEPENDENCY_OUTPUT_STORE_PATH_HASH}' AND {usable}",
                     parent = fixture.parent,
-                    usable = crate::graph::predicates::stored_copy_in_input_closure_or_trusted_by_every_project_with_live_job_on_shared_build_sql_condition(
+                    usable = crate::graph::predicates::stored_copy_in_input_closure_or_trusted_by_every_project_with_build_job_on_shared_build_sql_condition(
                         "cp.id",
                         "parent_build",
                         &format!("cp.hash = ANY(ARRAY['{DEPENDENCY_OUTPUT_STORE_PATH_HASH}'])"),
