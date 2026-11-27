@@ -193,13 +193,18 @@ impl CommitStatusCheckWithIds {
     }
 }
 
-/// The Evaluation check is concluding once the evaluation is `Building`, red when an attribute
-/// failed to evaluate. A later `Failure` or `Error` is a per-Build concern.
-pub fn suppress_evaluation_failure(status: &CiStatus, reached_building: bool) -> bool {
-    reached_building && matches!(status, CiStatus::Failure | CiStatus::Error)
-}
-
-pub fn evaluation_check_status(status: CiStatus, any_attribute_failed: bool) -> CiStatus {
+/// The Evaluation check can show only evaluation progress after Evaluation reached Building. The
+/// result is green, or red if an attribute failed to evaluate. Later Failure or Error values come
+/// from builds and belong to per-build checks.
+pub fn evaluation_check_status(
+    status: CiStatus,
+    reached_building: bool,
+    any_attribute_failed: bool,
+) -> CiStatus {
+    let status = match status {
+        CiStatus::Failure | CiStatus::Error if reached_building => CiStatus::Success,
+        other => other,
+    };
     match status {
         CiStatus::Success if any_attribute_failed => CiStatus::Failure,
         other => other,
@@ -316,28 +321,23 @@ mod tests {
     }
 
     #[test]
-    fn suppresses_eval_failure_only_after_building() {
-        assert!(suppress_evaluation_failure(&CiStatus::Failure, true));
-        assert!(suppress_evaluation_failure(&CiStatus::Error, true));
-        assert!(!suppress_evaluation_failure(&CiStatus::Failure, false));
-        assert!(!suppress_evaluation_failure(&CiStatus::Success, true));
-        assert!(!suppress_evaluation_failure(&CiStatus::Pending, true));
-    }
-
-    #[test]
     fn a_failed_attribute_turns_the_evaluation_check_red() {
-        assert_eq!(
-            evaluation_check_status(CiStatus::Success, true),
-            CiStatus::Failure
-        );
-        assert_eq!(
-            evaluation_check_status(CiStatus::Success, false),
-            CiStatus::Success
-        );
-        assert_eq!(
-            evaluation_check_status(CiStatus::Running, true),
-            CiStatus::Running
-        );
+        for (status, reached_building, any_attribute_failed, expected) in [
+            (CiStatus::Success, true, true, CiStatus::Failure),
+            (CiStatus::Success, true, false, CiStatus::Success),
+            (CiStatus::Running, false, true, CiStatus::Running),
+            (CiStatus::Failure, false, false, CiStatus::Failure),
+            (CiStatus::Error, false, true, CiStatus::Error),
+            (CiStatus::Failure, true, false, CiStatus::Success),
+            (CiStatus::Failure, true, true, CiStatus::Failure),
+            (CiStatus::Error, true, false, CiStatus::Success),
+        ] {
+            assert_eq!(
+                evaluation_check_status(status.clone(), reached_building, any_attribute_failed),
+                expected,
+                "{status:?} reached_building={reached_building} any_attribute_failed={any_attribute_failed}"
+            );
+        }
     }
 
     #[test]
