@@ -31,7 +31,7 @@
   aspect-ratio: 16 / 9;
   max-width: 100%;
   max-height: 40vh;
-  margin-bottom: $space-block;
+  margin: 0 auto $space-block;
   overflow: hidden;
   border: 1px solid var(--gr-border-subtle);
   border-radius: $border-radius-md;
