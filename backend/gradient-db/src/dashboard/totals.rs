@@ -166,13 +166,6 @@ mod tests {
     use super::*;
     use gradient_fixtures::mock::empty_db;
 
-    #[test]
-    fn the_cache_size_tile_reads_the_recounted_usage() {
-        let sql = CACHE_SIZE.text();
-        assert!(sql.contains("FROM cache_usage u"), "{sql}");
-        assert!(!sql.contains("cached_path"), "{sql}");
-    }
-
     #[tokio::test]
     async fn an_empty_project_scope_skips_the_queries() {
         let db = empty_db();

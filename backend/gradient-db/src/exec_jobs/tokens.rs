@@ -95,24 +95,48 @@ pub async fn of_job<C: ConnectionTrait>(db: &C, job: ExecJobId) -> Result<Vec<Jo
 
 #[cfg(test)]
 mod tests {
+    use super::super::attempts::{open, tests::two_queued_jobs};
     use super::*;
-    use gradient_fixtures::mock::{all_statements, mock_db};
-    use gradient_types::MExecJobToken;
+    use gradient_types::DispatchedJobId;
 
     #[tokio::test]
-    async fn a_token_resolves_only_unrevoked_and_unexpired() {
-        let db = mock_db()
-            .append_query_results([Vec::<MExecJobToken>::new()])
-            .into_connection();
+    async fn job_token_resolves_only_while_unrevoked_and_unexpired() {
+        let (db, job, _) = two_queued_jobs().await;
+        let conn = db.connection();
+        let attempt = ExecJobAttemptId::now_v7();
+        open(
+            &conn,
+            job,
+            attempt,
+            1,
+            DispatchedJobId::now_v7(),
+            "w1",
+            2,
+            None,
+        )
+        .await
+        .unwrap();
+        let now = gradient_types::now();
+        for (hash, expires_at) in [
+            ("live", now + chrono::Duration::hours(1)),
+            ("revoked", now + chrono::Duration::hours(1)),
+            ("expired", now - chrono::Duration::hours(1)),
+        ] {
+            assert!(insert(&conn, attempt, hash, expires_at).await.unwrap());
+        }
+        db.execute("UPDATE exec_job_token SET revoked = true WHERE token_hash = 'revoked'")
+            .await;
 
-        let resolved = resolve(&db, "hash", gradient_types::now()).await.unwrap();
+        let live = resolve(&conn, "live", now).await.unwrap();
+        let revoked = resolve(&conn, "revoked", now).await.unwrap();
+        let expired = resolve(&conn, "expired", now).await.unwrap();
+        let unknown = resolve(&conn, "unknown", now).await.unwrap();
+        let listed = of_job(&conn, job).await.unwrap();
 
-        assert!(resolved.is_none());
-        let log = all_statements(db.into_transaction_log());
-        assert!(
-            log[0].sql.contains("NOT t.revoked") && log[0].sql.contains("t.expires_at > $2"),
-            "{}",
-            log[0].sql
-        );
+        assert_eq!(live.map(|t| (t.job, t.attempt)), Some((job, attempt)));
+        assert!(revoked.is_none() && expired.is_none() && unknown.is_none());
+        assert_eq!(listed.len(), 3);
+        assert_eq!(listed.iter().filter(|t| t.revoked).count(), 1);
+        db.finish().await;
     }
 }

@@ -303,100 +303,121 @@ async fn count(db: &DatabaseConnection, table: &str) -> Result<u64> {
 
 #[cfg(test)]
 mod tests {
-    use super::{Rewrite, Scale, TARGETS, clone_sql};
+    use super::{Scale, TARGETS, clone_sql, columns, execute};
+    use gradient_fixtures::database::TestDatabase;
+    use gradient_fixtures::shape::shape;
+    use sea_orm::{ConnectionTrait, DatabaseBackend, DatabaseConnection, Statement};
 
-    #[test]
-    fn a_clone_rewrites_the_key_and_copies_the_rest() {
-        let columns = ["id".to_string(), "hash".to_string(), "name".to_string()];
-        let sql = clone_sql(
-            "derivation",
-            &columns,
-            &[
-                ("id", Rewrite::Remap),
-                ("hash", Rewrite::Rehash),
-                ("name", Rewrite::Mark),
-            ],
-        );
+    const DEPENDENT: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-one.drv";
+    const DEPENDENCY: &str = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-two.drv";
 
-        assert!(
-            sql.starts_with("INSERT INTO derivation (\"id\", \"hash\", \"name\")"),
-            "{sql}"
-        );
-        assert!(
-            sql.contains("md5(t.\"id\"::text || g.i::text)::uuid"),
-            "{sql}"
-        );
-        assert!(
-            sql.contains("substr(md5(t.\"hash\" || g.i::text), 1, 32)"),
-            "{sql}"
-        );
-        assert!(
-            sql.contains("'amp' || g.i::text || '-' || t.\"name\""),
-            "{sql}"
-        );
-        assert!(sql.contains("generate_series(1, $1) g(i)"), "{sql}");
-        assert!(sql.ends_with("ON CONFLICT DO NOTHING"), "{sql}");
+    async fn scalar(db: &DatabaseConnection, sql: &str) -> i64 {
+        db.query_one_raw(Statement::from_string(DatabaseBackend::Postgres, sql))
+            .await
+            .expect("query")
+            .expect("a row")
+            .try_get_by_index(0)
+            .expect("a bigint")
     }
 
-    #[test]
-    fn a_reserved_word_is_a_usable_column_name() {
-        let sql = clone_sql("cached_path", &["references".to_string()], &[]);
-        assert!(
-            sql.starts_with("INSERT INTO cached_path (\"references\")")
-                && sql.contains("t.\"references\""),
-            "{sql}"
-        );
+    async fn clone_table(db: &TestDatabase, table: &str, copies: i32) {
+        let target = TARGETS
+            .iter()
+            .find(|target| target.table == table)
+            .expect("a target");
+        let connection = db.connection();
+        let columns = columns(&connection, table).await.expect("columns");
+        let sql = clone_sql(table, &columns, target.rewrite);
+        execute(&connection, &sql, copies).await.expect("clone");
     }
 
-    #[test]
-    fn an_unrewritten_column_is_copied_verbatim() {
-        let columns = ["id".to_string(), "created_at".to_string()];
-        let sql = clone_sql("derivation", &columns, &[("id", Rewrite::Remap)]);
-        assert!(sql.contains("t.\"created_at\""), "{sql}");
-    }
+    #[tokio::test]
+    async fn test_sql_gate_clone_statement_copies_rows_with_remapped_keys_rehashed_hashes_marked_names_and_remapped_references()
+     {
+        let (hash_a, hash_b) = ("a".repeat(32), "b".repeat(32));
+        let db = shape()
+            .derivation(DEPENDENT)
+            .depends_on(DEPENDENCY)
+            .derivation(DEPENDENCY)
+            .cached_path(&hash_a, "one")
+            .references(&[(&hash_b, "two")])
+            .cached_path(&hash_b, "two")
+            .into_database()
+            .await;
+        let connection = db.connection();
 
-    #[test]
-    fn a_foreign_key_lands_on_the_copy_of_the_row_it_named() {
-        let key = clone_sql("derivation", &["id".to_string()], &[("id", Rewrite::Remap)]);
-        let fk = clone_sql(
-            "derivation_build",
-            &["derivation".to_string()],
-            &[("derivation", Rewrite::Remap)],
+        clone_table(&db, "derivation", 2).await;
+        clone_table(&db, "derivation_dependency", 2).await;
+        clone_table(&db, "cached_path", 2).await;
+
+        assert_eq!(
+            scalar(&connection, "SELECT count(*) FROM derivation").await,
+            6
+        );
+        assert_eq!(
+            scalar(&connection, "SELECT count(DISTINCT hash) FROM derivation").await,
+            6
+        );
+        assert_eq!(
+            scalar(
+                &connection,
+                "SELECT count(*) FROM derivation WHERE name LIKE 'amp_-%'"
+            )
+            .await,
+            4
+        );
+        assert_eq!(
+            scalar(
+                &connection,
+                "SELECT count(DISTINCT created_at) FROM derivation"
+            )
+            .await,
+            1
+        );
+        assert_eq!(
+            scalar(&connection, "SELECT count(*) FROM derivation_dependency").await,
+            3
+        );
+        assert_eq!(
+            scalar(
+                &connection,
+                "SELECT count(*) FROM derivation_dependency e \
+                 JOIN derivation a ON a.id = e.derivation \
+                 JOIN derivation b ON b.id = e.dependency \
+                 WHERE a.name LIKE 'amp_-one' AND b.name = replace(a.name, 'one', 'two')"
+            )
+            .await,
+            2
         );
 
-        assert!(
-            key.contains("md5(t.\"id\"::text || g.i::text)::uuid"),
-            "{key}"
+        assert_eq!(
+            scalar(&connection, "SELECT count(*) FROM cached_path").await,
+            6
         );
-        assert!(
-            fk.contains("md5(t.\"derivation\"::text || g.i::text)::uuid"),
-            "{fk}"
+        assert_eq!(
+            scalar(&connection, "SELECT count(DISTINCT hash) FROM cached_path").await,
+            6
         );
-    }
-
-    #[test]
-    fn a_reference_lands_on_the_copy_of_the_path_it_named() {
-        let hash = clone_sql(
-            "cached_path",
-            &["hash".to_string()],
-            &[("hash", Rewrite::Rehash)],
+        assert_eq!(
+            scalar(
+                &connection,
+                "SELECT count(DISTINCT nar_size) FROM cached_path"
+            )
+            .await,
+            1
         );
-        let references = clone_sql(
-            "cached_path",
-            &["references".to_string()],
-            &[("references", Rewrite::References)],
+        assert_eq!(
+            scalar(
+                &connection,
+                "SELECT count(*) FROM cached_path a JOIN cached_path b \
+                 ON a.\"references\" = b.hash || '-two' \
+                 AND replace(a.package, 'one', 'two') = b.package \
+                 WHERE a.package LIKE 'amp_-one'"
+            )
+            .await,
+            2
         );
-
-        assert!(
-            hash.contains("substr(md5(t.\"hash\" || g.i::text), 1, 32)"),
-            "{hash}"
-        );
-        assert!(
-            references
-                .contains("substr(md5(substring(r.tok FROM '[0-9a-z]{32}') || g.i::text), 1, 32)")
-                && references.contains("unnest(string_to_array(t.\"references\", ' '))"),
-            "{references}"
-        );
+        db.finish().await;
     }
 
     #[test]

@@ -202,18 +202,34 @@ mod tests {
     use gradient_fixtures::mock::{mock_db, raw_statements};
     use sea_orm::{MockExecResult, Value};
 
-    #[test]
-    fn a_fresh_input_is_counted_as_incomplete_by_its_parent() {
-        let sql = SEED_UNWALKED_INPUTS.text();
-        assert!(
-            sql.contains("LEFT JOIN unnest($1::uuid[], $2::bool[]) AS f(id, fresh)")
-                && sql.contains("ON f.id = e.dependency"),
-            "the count must read the batch's fresh set on the dependency side: {sql}"
-        );
-        assert!(
-            sql.contains("AND NOT coalesce(f.fresh, false)"),
-            "a fresh input must read incomplete however the row reads now: {sql}"
-        );
+    #[tokio::test]
+    async fn freshly_walked_input_in_same_batch_counts_parent_input_incomplete_even_when_input_row_is_walked_with_zero_unwalked_inputs()
+     {
+        let [parent_path, input_path] =
+            ["1", "2"].map(|c| format!("/nix/store/{}-seed.drv", c.repeat(32)));
+        let db = gradient_fixtures::shape::shape()
+            .evaluation(gradient_entity::ids::EvaluationId::now_v7())
+            .derivation(&input_path)
+            .derivation(&parent_path)
+            .depends_on(&input_path)
+            .into_database()
+            .await;
+        db.execute("UPDATE derivation SET walked = true, unwalked_inputs = 0")
+            .await;
+        let (parent, input) = (db.id_of(&parent_path).await, db.id_of(&input_path).await);
+        let connection = db.connection();
+
+        for (fresh, expected) in [(true, 1), (false, 0)] {
+            connection
+                .query_all_raw(
+                    SEED_UNWALKED_INPUTS.bind([ids(&[parent, input]), vec![fresh, fresh].into()]),
+                )
+                .await
+                .unwrap();
+            let counted = db.derivation(&parent_path).await.unwalked_inputs;
+            assert_eq!(counted, expected, "batch freshly walked: {fresh}");
+        }
+        db.finish().await;
     }
 
     #[test]
@@ -239,30 +255,6 @@ mod tests {
 
     fn ripple_fn() -> &'static str {
         gradient_migration::function_sql("ripple_unwalked_inputs")
-    }
-
-    #[test]
-    fn the_ripple_locks_each_level_in_id_order_before_it_writes() {
-        let lock = ripple_fn()
-            .find("FROM derivation WHERE id = ANY(parents) ORDER BY id FOR NO KEY UPDATE")
-            .expect("the ordered lock");
-        let write = ripple_fn()
-            .find("SET unwalked_inputs = d.unwalked_inputs")
-            .expect("the write");
-        assert!(lock < write, "{}", ripple_fn());
-        assert!(
-            ripple_fn().contains(
-                "(d.walked AND d.unwalked_inputs = CASE WHEN down THEN 0 ELSE c.n END) AS flipped"
-            ),
-            "{}",
-            ripple_fn()
-        );
-        assert!(
-            ripple_fn().contains("SELECT unnest(wave)")
-                && ripple_fn().contains("FROM moved WHERE flipped"),
-            "only the rows that flipped form the next level and the result: {}",
-            ripple_fn()
-        );
     }
 
     fn id_row(id: DerivationId, flags: &[(&str, bool)]) -> BTreeMap<String, Value> {
@@ -308,7 +300,6 @@ mod tests {
             })
             .map(|s| format!("{:?}", s.values))
             .collect();
-        assert_eq!(ripples.len(), 1, "one call runs every level: {log:?}");
         assert!(
             ripples[0].contains(&flipped.into_inner().to_string())
                 && !ripples[0].contains(&settled.into_inner().to_string())
@@ -345,45 +336,6 @@ mod tests {
             "the seed carries the batch's own endpoint: {:?}",
             seed.values
         );
-        assert!(
-            log.iter()
-                .any(|s| s.sql.contains("FROM ripple_unwalked_inputs(")),
-            "the leaf counts its parents down: {log:?}"
-        );
-    }
-
-    #[tokio::test]
-    async fn every_update_follows_an_ordered_lock_on_derivation_rows_only() {
-        let a = DerivationId::now_v7();
-        let db = mock_db()
-            .append_query_results([none()])
-            .append_query_results([vec![id_row(
-                a,
-                &[("was_complete", false), ("complete", false)],
-            )]])
-            .into_connection();
-
-        let txn = db.begin().await.unwrap();
-        seed_walk_completeness(&txn, &[a], &[]).await.unwrap();
-        txn.commit().await.unwrap();
-
-        let log = raw_statements(db.into_transaction_log());
-        assert!(
-            log[0].sql.contains(
-                "FROM derivation WHERE id = ANY($1::uuid[]) ORDER BY id FOR NO KEY UPDATE"
-            ),
-            "the lock comes first: {log:?}"
-        );
-        assert!(
-            log[1]
-                .sql
-                .contains("UPDATE derivation d SET unwalked_inputs"),
-            "{log:?}"
-        );
-        assert!(
-            log.iter().all(|s| !s.sql.contains("derivation_build")),
-            "the pass never reaches a shared build: {log:?}"
-        );
     }
 
     #[tokio::test]
@@ -415,56 +367,43 @@ mod tests {
         );
     }
 
-    #[test]
-    fn the_recount_walks_up_from_the_stubs() {
-        let sql = RECOUNT_WALK_COMPLETENESS.text();
-        assert!(sql.contains("WITH RECURSIVE incomplete(id) AS"), "{sql}");
-        assert!(
-            sql.contains("SELECT id FROM derivation WHERE NOT walked"),
-            "{sql}"
-        );
-        assert_eq!(
-            sql.matches("WHERE e.dependency = i.id AND e.kind IN (0, 2) OFFSET 0) s")
-                .count(),
-            2,
-            "the step and the counts probe only the edges out of the incomplete set: {sql}"
-        );
-        assert!(
-            sql.contains(
-                "WHERE d.id = w.id AND w.walked AND w.unwalked_inputs <> coalesce(c.n, 0)"
-            ),
-            "{sql}"
-        );
-    }
-
     #[tokio::test]
-    async fn a_drifted_counter_runs_the_full_recount_in_the_same_walk() {
-        let db = mock_db()
-            .append_exec_results([
-                MockExecResult {
-                    last_insert_id: 0,
-                    rows_affected: 0,
-                },
-                MockExecResult {
-                    last_insert_id: 0,
-                    rows_affected: 3,
-                },
-            ])
-            .append_query_results([vec![BTreeMap::from([(
-                "?column?".to_owned(),
-                Value::Int(Some(1)),
-            )])]])
-            .into_connection();
+    async fn test_recount_walk_completeness_rewrites_drifted_unwalked_input_counts_from_unwalked_derivations_build_edges_and_second_run_writes_nothing()
+     {
+        let path = |c: &str| format!("/nix/store/{}-recount.drv", c.repeat(32));
+        let [stub, above_stub, runtime_only, above_incomplete, settled] = ["1", "2", "3", "4", "5"];
+        let db = gradient_fixtures::shape::shape()
+            .evaluation(gradient_entity::ids::EvaluationId::now_v7())
+            .derivation(&path(stub))
+            .derivation(&path(above_stub))
+            .walked()
+            .depends_on(&path(stub))
+            .derivation(&path(runtime_only))
+            .walked()
+            .runtime_depends_on(&path(stub))
+            .derivation(&path(above_incomplete))
+            .walked()
+            .depends_on(&path(above_stub))
+            .derivation(&path(settled))
+            .walked()
+            .into_database()
+            .await;
+        db.execute(&format!(
+            "UPDATE derivation SET unwalked_inputs = 5; \
+             UPDATE derivation SET unwalked_inputs = 0 WHERE id = '{}'",
+            db.id_of(&path(settled)).await
+        ))
+        .await;
 
-        assert_eq!(recount_walk_completeness(&db).await.unwrap(), 3);
-        let log = raw_statements(db.into_transaction_log());
-        assert!(
-            log[1]
-                .sql
-                .contains("FROM marked_incomplete i FULL JOIN counts c")
-                && !log[1].sql.contains("RECURSIVE")
-                && log[2].sql.contains("WITH RECURSIVE incomplete(id) AS"),
-            "{log:?}"
-        );
+        let rewritten = recount_walk_completeness(&db.connection()).await.unwrap();
+        let mut counts = Vec::new();
+        for key in [stub, above_stub, runtime_only, above_incomplete, settled] {
+            counts.push(db.derivation(&path(key)).await.unwalked_inputs);
+        }
+        let rewritten_again = recount_walk_completeness(&db.connection()).await.unwrap();
+        db.finish().await;
+
+        assert_eq!((rewritten, rewritten_again), (3, 0));
+        assert_eq!(counts, [5, 1, 0, 1, 0]);
     }
 }

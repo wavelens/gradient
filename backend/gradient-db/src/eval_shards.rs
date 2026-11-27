@@ -379,14 +379,6 @@ async fn queue_again(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use gradient_fixtures::mock::{all_statements, mock_db};
-    use sea_orm::{MockExecResult, Statement};
-    use std::collections::BTreeMap;
-
-    fn norm(s: &str) -> String {
-        s.split_whitespace().collect::<Vec<_>>().join(" ")
-    }
-
     fn shard(evaluation: EvaluationId, seq: i32, children: &[&str]) -> MEvalShard {
         MEvalShard {
             id: EvalShardId::now_v7(),
@@ -402,182 +394,111 @@ mod tests {
         }
     }
 
-    fn exec(rows_affected: u64) -> MockExecResult {
-        MockExecResult {
-            last_insert_id: 0,
-            rows_affected,
+    fn new_shard(children: &[&str]) -> NewShard {
+        NewShard {
+            pattern: "packages.*".into(),
+            children: Some(children.iter().map(|c| c.to_string()).collect()),
+            predicted_ms: 10.0,
         }
     }
 
-    fn split_lock(evaluation: EvaluationId) -> Vec<BTreeMap<&'static str, Value>> {
-        vec![BTreeMap::from([(
-            "evaluation",
-            Value::Uuid(Some(evaluation.into_inner())),
-        )])]
-    }
+    #[tokio::test]
+    async fn test_shard_queue_take_order_lease_finish_by_wrong_job_requeue_held_shards_split_on_loss_and_fail_on_second_loss()
+     {
+        let evaluation = EvaluationId::now_v7();
+        let db = gradient_fixtures::shape::shape()
+            .evaluation(evaluation)
+            .into_database()
+            .await;
+        let conn = db.connection();
+        insert_shards(
+            &conn,
+            evaluation,
+            &[new_shard(&["x"]), new_shard(&["y", "z", "w"])],
+            None,
+        )
+        .await
+        .unwrap();
+        insert_shards(&conn, evaluation, &[new_shard(&["m"])], Some("job-B"))
+            .await
+            .unwrap();
 
-    fn last(seq: i32) -> Vec<BTreeMap<&'static str, Value>> {
-        vec![BTreeMap::from([("seq", Value::Int(Some(seq)))])]
-    }
+        let seq_of = |shard: Option<MEvalShard>| shard.map(|s| s.seq);
+        let first = seq_of(take_shard(&conn, evaluation, "job-A").await.unwrap());
+        let own_reported = seq_of(take_shard(&conn, evaluation, "job-B").await.unwrap());
+        let second = take_shard(&conn, evaluation, "job-A").await.unwrap();
+        let drained = take_shard(&conn, evaluation, "job-A").await.unwrap();
+        let by_seq = |seq: i32| {
+            let db = &db;
+            async move {
+                db.rows::<EEvalShard>()
+                    .await
+                    .into_iter()
+                    .find(|s| s.seq == seq)
+                    .expect("the shard exists")
+            }
+        };
+        let (split_id, single_id) = (by_seq(2).await.id, by_seq(1).await.id);
 
-    fn statement<'a>(statements: &'a [Statement], prefix: &str) -> Vec<&'a Statement> {
-        statements
+        let by_wrong_job = finish_shard(&conn, single_id, "job-B", &[new_shard(&["late"])])
+            .await
+            .unwrap();
+        let shards_after_wrong_job = db.rows::<EEvalShard>().await.len();
+        let by_owner = finish_shard(&conn, single_id, "job-A", &[new_shard(&["late"])])
+            .await
+            .unwrap();
+        let held = requeue_shards_of(&conn, "job-A", &[split_id])
+            .await
+            .unwrap();
+        let held_state = by_seq(2).await.state;
+        let split_failures = requeue_shards_of(&conn, "job-A", &[]).await.unwrap();
+        let single_failures = requeue_shards_of(&conn, "job-B", &[]).await.unwrap();
+        let requeued_attempts = (by_seq(3).await.attempts, by_seq(3).await.state);
+        let retaken = seq_of(take_shard(&conn, evaluation, "job-B").await.unwrap());
+        let failed = requeue_shards_of(&conn, "job-B", &[]).await.unwrap();
+
+        let mut shards = db.rows::<EEvalShard>().await;
+        shards.sort_by_key(|s| s.seq);
+        let summary: Vec<_> = shards
             .iter()
-            .filter(|s| s.sql.starts_with(prefix))
-            .collect()
-    }
+            .map(|s| (s.seq, s.state, s.attempts, s.children.clone().unwrap()))
+            .collect();
+        let late = shards.iter().find(|s| s.seq == 4).unwrap();
+        db.finish().await;
 
-    #[tokio::test]
-    async fn concurrent_takes_get_different_shards() {
-        let evaluation = EvaluationId::now_v7();
-        let db = mock_db()
-            .append_query_results([
-                vec![shard(evaluation, 1, &["a"])],
-                vec![shard(evaluation, 2, &["b"])],
-            ])
-            .into_connection();
-
-        let first = take_shard(&db, evaluation, "job-A").await.expect("take");
-        let second = take_shard(&db, evaluation, "job-B").await.expect("take");
-
-        assert_ne!(first.expect("a shard").id, second.expect("a shard").id);
-        let statements = all_statements(db.into_transaction_log());
-        let sql = norm(&statements[0].sql);
-        assert!(sql.starts_with("UPDATE eval_shard SET state = 1"), "{sql}");
-        assert!(sql.contains("LIMIT 1 FOR UPDATE SKIP LOCKED"), "{sql}");
-    }
-
-    #[tokio::test]
-    async fn the_reporting_member_gets_its_deferred_sets_first() {
-        let evaluation = EvaluationId::now_v7();
-        let mut deferred = shard(evaluation, 2, &["x"]);
-        deferred.reported_by_job = Some("job-B".into());
-        let db = mock_db()
-            .append_query_results([vec![deferred]])
-            .into_connection();
-
-        let taken = take_shard(&db, evaluation, "job-B")
-            .await
-            .expect("take")
-            .expect("a shard");
-
-        assert_eq!(taken.seq, 2);
-        let statements = all_statements(db.into_transaction_log());
-        let sql = norm(&statements[0].sql);
-        assert!(
-            sql.contains(
-                "ORDER BY CASE WHEN reported_by_job = $2 THEN 0 WHEN reported_by_job IS NULL THEN 1 ELSE 2 END, seq"
-            ),
-            "{sql}"
+        assert_eq!((first, own_reported), (Some(1), Some(3)));
+        assert_eq!(second.map(|s| s.seq), Some(2));
+        assert!(drained.is_none());
+        assert!(!by_wrong_job && by_owner);
+        assert_eq!(shards_after_wrong_job, 3);
+        assert_eq!(late.reported_by_job.as_deref(), Some("job-A"));
+        assert!(held.is_empty() && held_state == EvalShardState::Running);
+        assert!(split_failures.is_empty() && single_failures.is_empty());
+        assert_eq!(
+            retaken,
+            Some(3),
+            "the reporting job gets its own shard first"
         );
-        assert!(
-            format!("{:?}", statements[0].values).contains("job-B"),
-            "{:?}",
-            statements[0].values
-        );
-    }
-
-    #[tokio::test]
-    async fn finishing_a_shard_of_another_job_changes_nothing() {
-        let deferred = [NewShard {
-            pattern: "packages.*".into(),
-            children: Some(vec!["late".into()]),
-            predicted_ms: 10.0,
-        }];
-        let db = mock_db()
-            .append_query_results([Vec::<MEvalShard>::new()])
-            .into_connection();
-
-        let finished = finish_shard(&db, EvalShardId::now_v7(), "job-A", &deferred)
-            .await
-            .expect("finish");
-
-        assert!(!finished);
-        let statements = all_statements(db.into_transaction_log());
-        assert_eq!(statements.len(), 1, "{statements:?}");
-        let sql = &statements[0].sql;
-        assert!(sql.contains("\"taken_job\" = $"), "{sql}");
-        assert!(statement(&statements, "INSERT").is_empty());
-    }
-
-    #[tokio::test]
-    async fn a_lost_shard_with_children_is_split_in_halves() {
-        let evaluation = EvaluationId::now_v7();
-        let db = mock_db()
-            .append_query_results([vec![shard(evaluation, 1, &["a", "b", "c"])]])
-            .append_query_results([split_lock(evaluation)])
-            .append_query_results([last(1)])
-            .append_exec_results([exec(1), exec(2)])
-            .into_connection();
-
-        let failed = requeue_shards_of(&db, "job-A", &[]).await.expect("requeue");
-
-        assert!(failed.is_empty());
-        let statements = all_statements(db.into_transaction_log());
-        let running = &statement(&statements, "SELECT")[0].sql;
-        assert!(running.ends_with("FOR NO KEY UPDATE"), "{running}");
-        let closed = format!("{:?}", statement(&statements, "UPDATE")[0].values);
-        let split = format!("SmallInt(Some({}))", i16::from(EvalShardState::Split));
-        assert!(closed.contains(&split), "{closed}");
-        let inserts = statement(&statements, "INSERT INTO \"eval_shard\"");
-        assert_eq!(inserts.len(), 1);
-        let values = format!("{:?}", inserts[0].values);
-        assert!(
-            values.contains("[String(Some(\"a\"))]")
-                && values.contains("[String(Some(\"b\")), String(Some(\"c\"))]"),
-            "{values}"
-        );
-        assert!(values.contains("SmallInt(Some(1))"), "{values}");
-        assert!(values.contains("Int(Some(2))") && values.contains("Int(Some(3))"));
-        assert_eq!(statements.last().map(|s| s.sql.as_str()), Some("COMMIT"));
-    }
-
-    #[tokio::test]
-    async fn a_lost_single_child_shard_fails_on_its_second_loss() {
-        let evaluation = EvaluationId::now_v7();
-        let mut lost = shard(evaluation, 3, &["hello"]);
-        lost.attempts = 1;
-        let db = mock_db()
-            .append_query_results([vec![lost]])
-            .append_exec_results([exec(1)])
-            .into_connection();
-
-        let failed = requeue_shards_of(&db, "job-A", &[]).await.expect("requeue");
-
+        assert_eq!(requeued_attempts, (1, EvalShardState::Queued));
         assert_eq!(
             failed,
             vec![FailedShard {
                 evaluation,
                 pattern: "packages.*".into(),
-                children: Some(vec!["hello".into()]),
+                children: Some(vec!["m".into()]),
             }]
         );
-        let statements = all_statements(db.into_transaction_log());
-        let values = format!("{:?}", statement(&statements, "UPDATE")[0].values);
-        let state = format!("SmallInt(Some({}))", i16::from(EvalShardState::Failed));
-        assert!(values.contains(&state), "{values}");
-        assert!(statement(&statements, "INSERT").is_empty());
-    }
-
-    #[tokio::test]
-    async fn shards_the_member_still_holds_stay_running() {
-        let held = EvalShardId::now_v7();
-        let db = mock_db()
-            .append_query_results([Vec::<MEvalShard>::new()])
-            .into_connection();
-
-        let failed = requeue_shards_of(&db, "job-A", &[held])
-            .await
-            .expect("requeue");
-
-        assert!(failed.is_empty());
-        let statements = all_statements(db.into_transaction_log());
-        let running = &statement(&statements, "SELECT")[0];
-        assert!(running.sql.contains("\"id\" NOT IN ($"), "{}", running.sql);
-        assert!(
-            format!("{:?}", running.values).contains(&held.to_string()),
-            "{:?}",
-            running.values
+        let strings = |items: &[&str]| items.iter().map(|c| c.to_string()).collect::<Vec<_>>();
+        assert_eq!(
+            summary,
+            vec![
+                (1, EvalShardState::Done, 0, strings(&["x"])),
+                (2, EvalShardState::Split, 1, strings(&["y", "z", "w"])),
+                (3, EvalShardState::Failed, 2, strings(&["m"])),
+                (4, EvalShardState::Queued, 0, strings(&["late"])),
+                (5, EvalShardState::Queued, 1, strings(&["y"])),
+                (6, EvalShardState::Queued, 1, strings(&["z", "w"])),
+            ]
         );
     }
 

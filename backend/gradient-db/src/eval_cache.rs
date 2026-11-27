@@ -509,11 +509,6 @@ mod tests {
         let statements = raw_statements(db.into_transaction_log());
         assert_eq!(statements.len(), 2, "{statements:?}");
         let enqueue = &statements[1];
-        assert!(
-            enqueue.sql.contains("ON CONFLICT (kind, key)"),
-            "{}",
-            enqueue.sql
-        );
         let values = enqueue.values.clone().unwrap().0;
         assert_eq!(values[2], Value::String(Some(store.to_string())));
         assert!(

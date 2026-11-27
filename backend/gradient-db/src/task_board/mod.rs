@@ -331,41 +331,59 @@ mod tests {
         assert_eq!(db.into_transaction_log().len(), 2);
     }
 
-    fn norm(s: &str) -> String {
-        s.split_whitespace().collect::<Vec<_>>().join(" ")
-    }
+    #[tokio::test]
+    async fn test_entry_point_dep_counts_counts_closure_job_statuses_excluding_root() {
+        use gradient_fixtures::shape::shape;
 
-    #[test]
-    fn the_walk_joins_a_materialised_edge_set_once() {
-        let sql = norm(DEP_COUNTS_SQL);
+        let (evaluation, other_evaluation) = (EvaluationId::now_v7(), EvaluationId::now_v7());
+        let drv = |letter: &str| format!("{}-{letter}.drv", letter.repeat(32));
+        let db = shape()
+            .evaluation(evaluation)
+            .derivation(&drv("a"))
+            .build_status(BuildStatus::Queued)
+            .job()
+            .entry_point("root")
+            .derivation(&drv("b"))
+            .build_status(BuildStatus::Completed)
+            .job()
+            .derivation(&drv("c"))
+            .build_status(BuildStatus::Completed)
+            .job()
+            .derivation(&drv("d"))
+            .build_status(BuildStatus::Building)
+            .job()
+            .derivation(&drv("g"))
+            .build_status(BuildStatus::FailedPermanent)
+            .derivation(&drv("f"))
+            .build_status(BuildStatus::Queued)
+            .derivation(&drv("a"))
+            .depends_on(&drv("b"))
+            .depends_on(&drv("c"))
+            .derivation(&drv("c"))
+            .depends_on(&drv("d"))
+            .depends_on(&drv("g"))
+            .depends_on(&drv("f"))
+            .evaluation(other_evaluation)
+            .derivation(&drv("f"))
+            .job()
+            .into_database()
+            .await;
+        let root = db.entry_points(evaluation).await[0].id;
+        let root_drv = db.id_of(&drv("a")).await.into_inner();
 
-        assert!(sql.contains("edges AS MATERIALIZED ("), "{sql}");
-        assert!(
-            sql.contains(
-                "SELECT c.ep, e.dependency FROM closure c JOIN edges e ON e.derivation = c.drv"
-            ),
-            "the recursive term must read the hoisted edges: {sql}"
+        let counts = entry_point_dep_counts(&db.connection(), evaluation, &[(root, root_drv)])
+            .await
+            .unwrap();
+        let none = entry_point_dep_counts(&db.connection(), evaluation, &[])
+            .await
+            .unwrap();
+        db.finish().await;
+
+        assert_eq!(
+            counts[&root],
+            HashMap::from([(BuildStatus::Completed, 2), (BuildStatus::Building, 1)]),
+            "the root, a dependency without a job and a job of another evaluation are not counted"
         );
-
-        let recursive = sql.split("closure(ep, drv) AS (").nth(1).expect("the walk");
-        assert!(
-            !recursive.contains("derivation_dependency"),
-            "the recursive term probes the edge table per pair: {recursive}"
-        );
-    }
-
-    #[test]
-    fn the_evaluations_jobs_are_read_once_and_joined_by_hash() {
-        let sql = norm(DEP_COUNTS_SQL);
-
-        assert_eq!(sql.matches("build_job").count(), 1, "{sql}");
-        assert!(
-            sql.contains("jobs AS MATERIALIZED ( SELECT bj.derivation, b.status FROM build_job bj"),
-            "{sql}"
-        );
-        assert!(
-            sql.contains("JOIN jobs j ON j.derivation = c.drv"),
-            "the closure must join the hoisted jobs, not probe build_job per pair: {sql}"
-        );
+        assert!(none.is_empty());
     }
 }

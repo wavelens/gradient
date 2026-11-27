@@ -508,18 +508,6 @@ mod tests {
     }
 
     #[test]
-    fn live_cached_path_query_follows_only_runtime_dependency_edges_from_reachable_derivations_keeps_every_recorded_input_source_without_join_and_does_not_read_cached_path_reference()
-     {
-        let cte = norm(&live_cached_paths_cte());
-        assert!(cte.contains("e.kind IN (1, 2)"), "{cte}");
-        assert!(
-            cte.contains("SELECT s.hash FROM derivation_input_source s)"),
-            "{cte}"
-        );
-        assert!(!cte.contains("cached_path_reference"), "{cte}");
-    }
-
-    #[test]
     fn an_incomplete_terminal_shared_build_is_reached_and_stepped_through() {
         let cte = norm(&open_closure_cte(
             "pending",

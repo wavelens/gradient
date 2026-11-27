@@ -660,119 +660,6 @@ fn cascade_sql(target: RollupGranularity, source: RollupGranularity, window: &st
 mod tests {
     use super::*;
 
-    fn all_rollup_sql() -> Vec<String> {
-        build_counts()
-            .iter()
-            .map(build_count_sql)
-            .chain(BUILD_DURATIONS.iter().map(build_duration_sql))
-            .chain(eval_counts().iter().map(eval_count_sql))
-            .chain(CACHE_TRAFFIC.iter().map(cache_traffic_sql))
-            .chain(
-                FINISHED_EXEC_JOB_ROLLUP_METRICS
-                    .iter()
-                    .map(build_recent_exec_job_status_count_rollup_sql),
-            )
-            .chain(
-                WORKER_TIME_ROLLUP_METRICS
-                    .iter()
-                    .map(|m| build_worker_time_metric_rollup_sql(m, 120)),
-            )
-            .chain([
-                build_builds_created_per_task_rollup_sql(),
-                build_duration_attempt_sql(),
-                dispatch_wait_sql(),
-                phase_duration_sql(),
-                cache_storage_sql(),
-                upstream_latency_sql(),
-                upstream_hits_sql(),
-                upstream_misses_sql(),
-            ])
-            .chain(CASCADES.iter().map(|(t, s, w)| cascade_sql(*t, *s, w)))
-            .collect()
-    }
-
-    #[test]
-    fn build_table_rollups_avoid_moved_columns() {
-        let counts = build_counts();
-        let sqls = counts
-            .iter()
-            .map(build_count_sql)
-            .chain(BUILD_DURATIONS.iter().map(build_duration_sql));
-        for sql in sqls {
-            assert!(!sql.contains("build_started_at"), "stale column: {sql}");
-            assert!(!sql.contains("build_finished_at"), "stale column: {sql}");
-        }
-    }
-
-    #[test]
-    fn duration_rollup_seeds_from_attempts_finished_in_the_window() {
-        let sql = build_duration_attempt_sql();
-
-        assert!(sql.contains("FROM build_attempt ba"), "{sql}");
-        assert!(
-            sql.contains(
-                "WHERE ba.build_finished_at >= (now() AT TIME ZONE 'UTC') - interval '15 minutes'"
-            ),
-            "{sql}"
-        );
-        assert!(
-            sql.contains("NOT EXISTS ( SELECT 1 FROM build_attempt later"),
-            "{sql}"
-        );
-        assert!(!sql.contains("LATERAL"), "{sql}");
-        assert!(sql.contains("ba.build_started_at IS NOT NULL"), "{sql}");
-    }
-
-    #[test]
-    fn upserts_never_group_by_scope() {
-        for sql in all_rollup_sql() {
-            let group_by = sql
-                .split("GROUP BY")
-                .nth(1)
-                .unwrap_or_else(|| panic!("no GROUP BY: {sql}"));
-            let group_by = group_by.split("ON CONFLICT").next().unwrap();
-            assert!(
-                !group_by.contains("scope,") && !group_by.contains(" scope "),
-                "grouping by scope splits one conflict key: {group_by}"
-            );
-        }
-    }
-
-    #[test]
-    fn upserts_refresh_scope_on_conflict() {
-        for sql in all_rollup_sql() {
-            let update = sql
-                .split("DO UPDATE SET")
-                .nth(1)
-                .unwrap_or_else(|| panic!("no DO UPDATE: {sql}"));
-            assert!(
-                update.contains("scope = EXCLUDED.scope"),
-                "stale scope shape never self-heals: {sql}"
-            );
-        }
-    }
-
-    #[test]
-    fn cascade_carries_the_newest_scope() {
-        let sql = cascade_sql(RollupGranularity::Day, RollupGranularity::Hour, "2 days");
-        assert!(sql.contains("(array_agg(scope ORDER BY bucket_start DESC))[1]"));
-    }
-
-    #[test]
-    fn rollup_rebuilds_whole_target_buckets_from_truncated_bucket_start() {
-        let sql = cascade_sql(
-            RollupGranularity::Hour,
-            RollupGranularity::Minute,
-            "3 hours",
-        );
-        assert!(
-            sql.contains(
-                "bucket_start >= date_trunc('hour', (now() AT TIME ZONE 'UTC') - interval '3 hours')"
-            ),
-            "{sql}"
-        );
-    }
-
     #[tokio::test]
     async fn test_build_count_counts_each_shared_build_once_for_multiple_evaluations() {
         use gradient_entity::evaluation::EvaluationStatus;
@@ -996,54 +883,261 @@ mod tests {
         );
         db.finish().await;
     }
+    #[tokio::test]
+    async fn dispatch_wait_measures_each_dispatch_from_its_own_readiness() {
+        use chrono::Duration as ChronoDuration;
+        use gradient_types::EvaluationId;
 
-    #[test]
-    fn every_reported_phase_reaches_its_series() {
-        let sql = phase_duration_sql();
-        let bound: i16 = sql
-            .split("p.phase BETWEEN 0 AND ")
-            .nth(1)
-            .and_then(|rest| rest.split_whitespace().next())
-            .and_then(|n| n.parse().ok())
-            .expect("a bounded phase filter");
-        let names: Vec<&str> = sql
-            .split("ARRAY[")
-            .nth(1)
-            .and_then(|rest| rest.split(']').next())
-            .expect("a phase name array")
-            .split(',')
-            .map(|n| n.trim_matches('\''))
+        let at = gradient_types::now();
+        let build = |wait: Option<i64>| {
+            move |a: &mut gradient_entity::dispatched_job::Model| {
+                a.kind = DispatchedJobKind::Build;
+                a.job_id = Some(a.id.to_string());
+                a.dispatched_at = at;
+                a.ready_at = wait.map(|ms| at - ChronoDuration::milliseconds(ms));
+            }
+        };
+        let db = gradient_fixtures::shape::shape()
+            .evaluation(EvaluationId::now_v7())
+            .eval_assignment()
+            .assignment_option(build(Some(1000)))
+            .eval_assignment()
+            .assignment_option(build(Some(3000)))
+            .eval_assignment()
+            .assignment_option(build(None))
+            .into_database()
+            .await;
+
+        db.connection()
+            .execute_unprepared(&dispatch_wait_sql())
+            .await
+            .expect("the dispatch wait rollup runs");
+
+        let rows: Vec<_> = db
+            .rows::<gradient_entity::metric_rollup::Entity>()
+            .await
+            .into_iter()
+            .map(|row| (row.metric, row.count, row.sum, row.min, row.max))
             .collect();
+        db.finish().await;
+        assert_eq!(
+            rows,
+            [("dispatch.wait_ms".to_owned(), 2, 4000.0, 1000.0, 3000.0)]
+        );
+    }
+
+    #[tokio::test]
+    async fn rollup_cascade_rebuilds_coarser_buckets_and_refreshes_newest_scope_on_rerun() {
+        use gradient_entity::metric_rollup;
+        use gradient_fixtures::database::TestDatabase;
+
+        let db = TestDatabase::create().await;
+        let conn = db.connection();
+        let hour_start = "date_trunc('hour', (now() AT TIME ZONE 'UTC') - interval '3 hours')";
+        let minute_row = |offset: &str, scope: &str| {
+            format!(
+                "INSERT INTO metric_rollup (id, metric, granularity, bucket_start, scope, \
+                 scope_hash, count, sum, min, max, sum_sq) \
+                 VALUES (uuidv7(), 'test.metric', 0, {hour_start} + interval '{offset}', \
+                 '{scope}'::jsonb, 1, 2, 10, 1, 4, 0)"
+            )
+        };
+        for sql in [
+            minute_row("0 minutes", r#"{"v":"old"}"#),
+            minute_row("30 minutes", r#"{"v":"new"}"#),
+            minute_row("-1 minutes", r#"{"v":"outside"}"#),
+        ] {
+            db.execute(&sql).await;
+        }
+        let cascade = cascade_sql(
+            RollupGranularity::Hour,
+            RollupGranularity::Minute,
+            "3 hours",
+        );
+        let hours = || async {
+            db.rows::<metric_rollup::Entity>()
+                .await
+                .into_iter()
+                .filter(|row| row.granularity == RollupGranularity::Hour)
+                .map(|row| (row.count, row.sum, row.scope))
+                .collect::<Vec<_>>()
+        };
+
+        conn.execute_unprepared(&cascade)
+            .await
+            .expect("the cascade runs");
+        let first = hours().await;
+        db.execute(&format!(
+            "UPDATE metric_rollup SET scope = '{{\"v\":\"newer\"}}' \
+             WHERE granularity = 0 AND bucket_start = {hour_start} + interval '30 minutes'"
+        ))
+        .await;
+        conn.execute_unprepared(&cascade)
+            .await
+            .expect("the cascade reruns");
+        let second = hours().await;
+
+        db.finish().await;
+        assert_eq!(first, [(4, 20.0, serde_json::json!({"v": "new"}))]);
+        assert_eq!(second, [(4, 20.0, serde_json::json!({"v": "newer"}))]);
+    }
+
+    #[tokio::test]
+    async fn build_rollups_uses_task_project_latest_finished_attempts_and_refreshes_stale_scope() {
+        use gradient_entity::build::BuildStatus;
+        use gradient_entity::build_attempt::AttemptOutcome;
+        use gradient_entity::ids::BuildAttemptId;
+        use gradient_types::EvaluationId;
+
+        const DONE: &str = "/nix/store/0123456789abcdfghijklmnpqrsvwxyz-done.drv";
+        const UNSTARTED: &str = "/nix/store/0c7kxbq0fdq6pnxpzhg5yvbbrylx4v3f-unstarted.drv";
+        const OLD: &str = "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-old.drv";
+        let now = gradient_types::now();
+        let (mine, other) = (EvaluationId::now_v7(), EvaluationId::now_v7());
+        let completed = move |b: &mut gradient_entity::derivation_build::Model, created| {
+            b.status = BuildStatus::Completed;
+            b.created_at = created;
+            b.updated_at = created;
+        };
+        let db = gradient_fixtures::shape::shape()
+            .evaluation(mine)
+            .derivation(DONE)
+            .job()
+            .shared_build_option(|b| completed(b, now))
+            .attempt(AttemptOutcome::Built, None)
+            .attempt(AttemptOutcome::Built, None)
+            .derivation(UNSTARTED)
+            .job()
+            .shared_build_option(|b| completed(b, now))
+            .attempt(AttemptOutcome::Built, None)
+            .derivation(OLD)
+            .job()
+            .shared_build_option(|b| completed(b, now - chrono::Duration::minutes(30)))
+            .attempt(AttemptOutcome::Built, None)
+            .evaluation(other)
+            .derivation(DONE)
+            .job()
+            .into_database()
+            .await;
+        let place = |id: BuildAttemptId, minutes_ago: i64, seconds: Option<i64>| {
+            let started = seconds
+                .map(|s| {
+                    format!("(now() AT TIME ZONE 'UTC') - interval '{minutes_ago} minutes' - interval '{s} seconds'")
+                })
+                .unwrap_or_else(|| "NULL".into());
+            format!(
+                "UPDATE build_attempt SET \
+                 build_finished_at = (now() AT TIME ZONE 'UTC') - interval '{minutes_ago} minutes', \
+                 build_started_at = {started} WHERE id = '{}'",
+                id.into_inner()
+            )
+        };
+        let retried = db.attempts(DONE).await;
+        for (attempt, minutes_ago, seconds) in [
+            (retried[0].id, 5, Some(10)),
+            (retried[1].id, 2, Some(30)),
+            (db.attempts(UNSTARTED).await[0].id, 1, None),
+            (db.attempts(OLD).await[0].id, 20, Some(30)),
+        ] {
+            db.execute(&place(attempt, minutes_ago, seconds)).await;
+        }
+        let conn = db.connection();
+        let run_all = || async {
+            for m in build_counts() {
+                conn.execute_unprepared(&build_count_sql(&m))
+                    .await
+                    .expect("the build count runs");
+            }
+            for m in BUILD_DURATIONS {
+                conn.execute_unprepared(&build_duration_sql(m))
+                    .await
+                    .expect("the build duration runs");
+            }
+            conn.execute_unprepared(&build_duration_attempt_sql())
+                .await
+                .expect("the attempt duration runs");
+        };
+        let rows = || async { db.rows::<gradient_entity::metric_rollup::Entity>().await };
+        let (mine_project, other_project) = (
+            db.project_of(mine).await.to_string(),
+            db.project_of(other).await.to_string(),
+        );
+
+        run_all().await;
+        let first = rows().await;
+        db.execute("UPDATE metric_rollup SET scope = '{\"stale\":true}'")
+            .await;
+        run_all().await;
+        let second = rows().await;
+
+        db.finish().await;
+        let summarize = |rows: &[gradient_entity::metric_rollup::Model], metric: &str| {
+            let mut found: Vec<_> = rows
+                .iter()
+                .filter(|row| row.metric == metric)
+                .map(|row| {
+                    (
+                        row.scope["project"].as_str().unwrap_or_default().to_owned(),
+                        row.count,
+                        row.sum,
+                    )
+                })
+                .collect();
+            found.sort_by(|a, b| a.partial_cmp(b).expect("ordered"));
+            found
+        };
+        let mut durations = vec![
+            (mine_project.clone(), 1, 30_000.0),
+            (other_project.clone(), 1, 30_000.0),
+        ];
+        durations.sort_by(|a, b| a.partial_cmp(b).expect("ordered"));
+        let mut created = vec![(mine_project, 2, 0.0), (other_project, 1, 0.0)];
+        created.sort_by(|a, b| a.partial_cmp(b).expect("ordered"));
+        assert_eq!(summarize(&first, metric::BUILDS_DURATION_MS), durations);
+        assert_eq!(summarize(&first, metric::BUILDS_CREATED), created);
+        assert!(
+            second.iter().all(|row| row.scope.get("project").is_some()),
+            "{second:?}"
+        );
+        assert_eq!(first.len(), second.len());
+    }
+
+    #[tokio::test]
+    async fn every_job_phase_reported_by_workers_gets_own_rollup_series_row() {
+        use gradient_types::EvaluationId;
+
+        let mut seed = gradient_fixtures::shape::shape()
+            .evaluation(EvaluationId::now_v7())
+            .eval_assignment()
+            .assignment_option(|a| {
+                a.kind = DispatchedJobKind::Build;
+                a.job_id = Some(a.id.to_string());
+            });
         for phase in JobPhase::ALL {
-            let v = phase.as_i16();
-            assert!(v <= bound, "{} is filtered out", phase.as_str());
-            assert_eq!(names[v as usize], phase.as_str());
+            seed = seed.phase(phase.as_i16(), 0, 100);
         }
-    }
+        let db = seed.into_database().await;
+        db.execute("UPDATE dispatched_job_phase SET created_at = (now() AT TIME ZONE 'UTC')")
+            .await;
 
-    #[test]
-    fn dispatch_wait_measures_each_dispatch_from_its_own_readiness() {
-        let sql = dispatch_wait_sql();
+        db.connection()
+            .execute_unprepared(&phase_duration_sql())
+            .await
+            .expect("the phase duration rollup runs");
 
-        assert!(sql.contains("FROM dispatched_job dj"), "{sql}");
-        assert!(sql.contains("dj.dispatched_at - dj.ready_at"), "{sql}");
-        assert!(!sql.contains("derivation_build"), "{sql}");
-    }
-
-    #[test]
-    fn build_rollups_attribute_project_via_task() {
-        let counts = build_counts();
-        let sqls = counts
+        let mut names: Vec<_> = db
+            .rows::<gradient_entity::metric_rollup::Entity>()
+            .await
+            .into_iter()
+            .map(|row| row.metric)
+            .collect();
+        names.sort();
+        db.finish().await;
+        let mut expected: Vec<_> = JobPhase::ALL
             .iter()
-            .map(build_count_sql)
-            .chain(BUILD_DURATIONS.iter().map(build_duration_sql))
-            .chain(std::iter::once(build_duration_attempt_sql()));
-        for sql in sqls {
-            assert!(sql.contains("JOIN task pr"), "missing task join: {sql}");
-            assert!(
-                !sql.contains("d.project"),
-                "stale derivation project: {sql}"
-            );
-        }
+            .map(|p| format!("phase.build.{}.ms", p.as_str()))
+            .collect();
+        expected.sort();
+        assert_eq!(names, expected);
     }
 }

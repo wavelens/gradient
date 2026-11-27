@@ -96,24 +96,6 @@ pub async fn extend_expiry<C: ConnectionTrait>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sea_orm::{DatabaseBackend, QueryTrait};
-
-    #[test]
-    fn active_sessions_query_excludes_revoked_and_expired_and_orders_own_session_then_last_use() {
-        let sql = active_sessions_of_user(
-            UserId::now_v7(),
-            Some(SessionId::now_v7()),
-            gradient_types::now(),
-        )
-        .build(DatabaseBackend::Postgres)
-        .to_string();
-        assert!(sql.contains(r#""revoked_at" IS NULL"#), "sql = {sql}");
-        assert!(sql.contains(r#""expires_at" >="#), "sql = {sql}");
-        let (_, order) = sql.split_once("ORDER BY").expect("an ORDER BY clause");
-        let own = order.find(r#""id" = "#).expect("own session ordered first");
-        let last_used = order.find("last_used_at").expect("ordered by last use");
-        assert!(own < last_used, "order = {order}");
-    }
 
     async fn insert_session_signed_in_ago(
         connection: &sea_orm::DatabaseConnection,
@@ -226,12 +208,42 @@ mod tests {
             .collect();
         assert_eq!(listed, usable);
         assert_eq!(listed, [browser.id, cli_device.id].into_iter().collect());
+        let colleague = crate::rows::insert::<EUser, _>(
+            &connection,
+            MUser {
+                id: UserId::now_v7(),
+                username: "colleague".into(),
+                name: "colleague".into(),
+                email: "colleague@example.com".into(),
+                ..gradient_fixtures::rows::user()
+            },
+        )
+        .await
+        .expect("insert second user");
+        insert_session_signed_in_ago(&connection, colleague.id, day, false, now).await;
+        let mut older_use = browser.clone().into_active_model();
+        older_use.last_used_at = Set(now - chrono::TimeDelta::hours(1));
+        older_use.update(&connection).await.expect("older use");
+        let ordered = |current| {
+            let connection = connection.clone();
+            async move {
+                active_sessions_of_user(user.id, current, now)
+                    .all(&connection)
+                    .await
+                    .expect("list sessions")
+                    .into_iter()
+                    .map(|session| session.id)
+                    .collect::<Vec<_>>()
+            }
+        };
+        assert_eq!(ordered(Some(browser.id)).await, [browser.id, cli_device.id]);
+        assert_eq!(ordered(None).await, [cli_device.id, browser.id]);
         assert_eq!(
             usable_sessions_at(now)
                 .count(&connection)
                 .await
                 .expect("count"),
-            2
+            3
         );
         db.finish().await;
     }

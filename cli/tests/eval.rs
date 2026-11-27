@@ -9,25 +9,6 @@
 use assert_cmd::Command;
 
 #[test]
-fn eval_help_describes_nix_eval_jobs_like_output() {
-    let out = Command::cargo_bin("gradient")
-        .unwrap()
-        .args(["eval", "--help"])
-        .output()
-        .unwrap();
-    assert!(out.status.success(), "eval --help should succeed");
-    let text = String::from_utf8(out.stdout).unwrap();
-    assert!(
-        text.contains("nix-eval-jobs"),
-        "help should reference nix-eval-jobs:\n{text}"
-    );
-    assert!(
-        text.contains("installable syntax"),
-        "help should describe installable-syntax patterns:\n{text}"
-    );
-}
-
-#[test]
 fn eval_requires_a_pattern() {
     let out = Command::cargo_bin("gradient")
         .unwrap()

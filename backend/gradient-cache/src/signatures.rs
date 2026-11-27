@@ -1501,17 +1501,66 @@ mod sign_sweep_pending_signature_query_tests {
 #[cfg(test)]
 mod orphan_claim_tests {
     use super::REPAIR_ORPHAN_CLAIMS;
+    use gradient_entity::cached_path_signature;
+    use gradient_entity::evaluation::EvaluationStatus;
+    use gradient_entity::ids::{CacheId, EvaluationId};
+    use gradient_fixtures::shape::shape;
+    use sea_orm::{ConnectionTrait, EntityTrait, Value};
 
-    /// An unbounded fixpoint over `cached_path` starved this scheduler before. The pass is running
-    /// on a timer.
-    #[test]
-    fn the_repair_is_bounded_and_respects_the_sign_outputs_opt_out() {
-        let sql = REPAIR_ORPHAN_CLAIMS.text();
-        assert!(sql.contains("LIMIT $1"), "{sql}");
-        assert!(
-            sql.contains("claim_subscription.sign_outputs"),
-            "Pass no claims to subscriptions that opted out of signing."
-        );
+    const FIRST_DERIVATION: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-a.drv";
+    const SECOND_DERIVATION: &str = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-b.drv";
+
+    #[tokio::test]
+    async fn orphan_cache_claim_repair_inserts_at_most_limit_missing_signature_rows_and_skips_subscriptions_with_sign_outputs_disabled()
+     {
+        let db = shape()
+            .evaluation(EvaluationId::now_v7())
+            .evaluation_status(EvaluationStatus::Building)
+            .derivation(FIRST_DERIVATION)
+            .walked()
+            .probed()
+            .entry_point("a")
+            .job()
+            .output("a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0")
+            .cached_output(FIRST_DERIVATION)
+            .derivation(SECOND_DERIVATION)
+            .walked()
+            .probed()
+            .job()
+            .output("b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0")
+            .cached_output(SECOND_DERIVATION)
+            .into_cache(CacheId::now_v7())
+            .into_database()
+            .await;
+        let connection = db.connection();
+        let repair = async |limit: i64| {
+            connection
+                .execute_raw(REPAIR_ORPHAN_CLAIMS.bind([Value::BigInt(Some(limit))]))
+                .await
+                .expect("the repair runs")
+                .rows_affected()
+        };
+        db.execute("DELETE FROM cached_path_signature").await;
+
+        assert_eq!(repair(1).await, 1);
+        let claims = async || {
+            cached_path_signature::Entity::find()
+                .all(&connection)
+                .await
+                .expect("claims read")
+                .len()
+        };
+        assert_eq!(claims().await, 1);
+        assert_eq!(repair(10).await, 1);
+        assert_eq!(claims().await, 2);
+
+        db.execute(
+            "DELETE FROM cached_path_signature; UPDATE project_cache SET sign_outputs = false",
+        )
+        .await;
+        assert_eq!(repair(10).await, 0);
+        assert_eq!(claims().await, 0);
+        db.finish().await;
     }
 }
 

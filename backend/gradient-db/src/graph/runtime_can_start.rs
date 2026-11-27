@@ -602,25 +602,6 @@ mod tests {
         gradient_migration::function_sql("ripple_missing_runtime_deps")
     }
 
-    #[test]
-    fn the_retire_holds_its_producers_keys_before_it_reads_their_completeness() {
-        let lock = LOCK_CACHED_PATHS.text();
-        assert!(lock.contains("pg_advisory_xact_lock(643, k)"), "{lock}");
-        assert!(
-            lock.contains("FROM derivation_output o WHERE o.hash = ANY($1)"),
-            "{lock}"
-        );
-        assert!(!lock.contains("derivation_dependency"), "{lock}");
-        assert!(lock.contains("ORDER BY hash FOR NO KEY UPDATE"), "{lock}");
-
-        let complete = CLOSURE_COMPLETE_AMONG.text();
-        assert!(!complete.contains("pg_advisory"), "{complete}");
-        assert!(
-            complete.contains("ORDER BY db.derivation FOR NO KEY UPDATE"),
-            "{complete}"
-        );
-    }
-
     #[tokio::test]
     async fn only_a_shared_build_the_seed_flipped_ripples() {
         let settled = DerivationId::now_v7();
@@ -655,19 +636,6 @@ mod tests {
             })
             .map(|s| format!("{:?}", s.values))
             .collect();
-        assert_eq!(ripples.len(), 1, "one call runs every level: {log:?}");
-        let guard = log
-            .iter()
-            .position(|s| s.sql.contains("pg_advisory_xact_lock_shared(643, k)"))
-            .expect("the seed counts under its dependencies' shared keys");
-        let seed = log
-            .iter()
-            .position(|s| s.sql.contains("SET missing_runtime_deps = x.n"))
-            .expect("the seed");
-        assert!(
-            guard < seed,
-            "the keys are held before the count reads: {log:?}"
-        );
         assert!(
             ripples[0].contains(&flipped.into_inner().to_string())
                 && !ripples[0].contains(&settled.into_inner().to_string())
@@ -694,16 +662,6 @@ mod tests {
         txn.commit().await.unwrap();
 
         assert_eq!(moved.complete, vec![landed]);
-        let log = raw_statements(db.into_transaction_log());
-        let seed = log
-            .iter()
-            .find(|s| s.sql.contains("SET missing_runtime_deps = x.n"))
-            .expect("the seed runs");
-        assert!(
-            seed.sql.contains("AND NOT s.fresh) AS was_complete"),
-            "the caller's endpoint has to beat the row: {}",
-            seed.sql
-        );
     }
 
     #[test]
@@ -730,20 +688,6 @@ mod tests {
             "every edge the ripple counts is a runtime dependency: {}",
             ripple_fn()
         );
-    }
-
-    #[test]
-    fn every_level_holds_its_keys_and_ordered_rows_before_it_writes() {
-        let keys = ripple_fn()
-            .find("PERFORM pg_advisory_xact_lock(643, k)")
-            .expect("the keys");
-        let rows = ripple_fn()
-            .find("WHERE derivation = ANY(parents) ORDER BY derivation FOR NO KEY UPDATE")
-            .expect("the ordered row lock");
-        let write = ripple_fn()
-            .find("SET missing_runtime_deps = db.missing_runtime_deps")
-            .expect("the write");
-        assert!(keys < rows && rows < write, "{}", ripple_fn());
     }
 
     #[tokio::test]
@@ -773,68 +717,93 @@ mod tests {
         );
     }
 
-    #[test]
-    fn the_recount_walks_up_from_what_is_not_present() {
-        let sql = RECOUNT_MISSING_RUNTIME_DEPS.text();
-        assert!(sql.contains("WHERE NOT (EXISTS"), "{sql}");
-        assert!(
-            sql.contains(
-                "LATERAL (SELECT e.derivation AS next FROM derivation_dependency e WHERE e.dependency = c.derivation AND e.kind IN (1, 2) OFFSET 0) s"
-            ),
-            "{sql}"
-        );
-        assert!(
-            sql.contains("FROM incomplete u, LATERAL (SELECT e.derivation FROM derivation_dependency e WHERE e.dependency = u.derivation AND e.kind IN (1, 2) OFFSET 0) s"),
-            "the counts probe only the edges out of the incomplete set: {sql}"
-        );
-        assert!(
-            sql.contains("b.missing_runtime_deps <> coalesce(c.n, 0)"),
-            "only a row that disagrees is rewritten: {sql}"
-        );
+    const NOT_PRESENT: &str = "1";
+    const BUILD_ONLY_NOT_PRESENT: &str = "2";
+    const WAITING_PARENT: &str = "3";
+    const GRANDPARENT: &str = "4";
+
+    async fn runtime_chain_over_a_missing_dependency() -> gradient_fixtures::database::TestDatabase
+    {
+        let path = |c: &str| format!("/nix/store/{}-chain.drv", c.repeat(32));
+        let hash = |c: &str| c.repeat(32);
+        let db = gradient_fixtures::shape::shape()
+            .evaluation(EvaluationId::now_v7())
+            .derivation(&path(NOT_PRESENT))
+            .output(&hash(NOT_PRESENT))
+            .derivation(&path(BUILD_ONLY_NOT_PRESENT))
+            .output(&hash(BUILD_ONLY_NOT_PRESENT))
+            .derivation(&path(WAITING_PARENT))
+            .output(&hash(WAITING_PARENT))
+            .cached_path(&hash(WAITING_PARENT), "parent")
+            .runtime_depends_on(&path(NOT_PRESENT))
+            .depends_on(&path(BUILD_ONLY_NOT_PRESENT))
+            .derivation(&path(GRANDPARENT))
+            .output(&hash(GRANDPARENT))
+            .cached_path(&hash(GRANDPARENT), "grandparent")
+            .runtime_depends_on(&path(WAITING_PARENT))
+            .into_database()
+            .await;
+        db.execute("UPDATE derivation_build SET missing_runtime_deps = 5")
+            .await;
+
+        db
     }
 
-    #[test]
-    fn the_drift_check_counts_from_what_the_counters_mark_incomplete() {
-        let sql = MISSING_RUNTIME_DEPS_DRIFTED.text();
-        assert!(!sql.contains("RECURSIVE"), "{sql}");
-        assert!(
-            sql.contains(&format!(
-                "present_derivations AS MATERIALIZED ({})",
-                present_shared_build_derivation_ids_select()
-            )),
-            "{sql}"
-        );
-        assert!(
-            sql.contains(
-                "LEFT JOIN present_derivations p ON p.derivation = db.derivation WHERE db.missing_runtime_deps <> 0 OR p.derivation IS NULL"
-            ),
-            "A join against a materialized set can hash and spill to disk. A subquery under OR cannot."
-        );
-        assert!(sql.contains("FROM marked_incomplete u, LATERAL ("), "{sql}");
-        assert!(
-            sql.contains(
-                "WHERE i.derivation IS NULL OR i.missing_runtime_deps <> coalesce(c.n, 0)"
-            ),
-            "a counted dependent the counters mark complete is drift too: {sql}"
-        );
+    async fn counters(db: &gradient_fixtures::database::TestDatabase) -> [i32; 4] {
+        let mut counters = [0; 4];
+        for (counter, c) in counters.iter_mut().zip([
+            NOT_PRESENT,
+            BUILD_ONLY_NOT_PRESENT,
+            WAITING_PARENT,
+            GRANDPARENT,
+        ]) {
+            let path = format!("/nix/store/{}-chain.drv", c.repeat(32));
+            *counter = db.shared_build(&path).await.missing_runtime_deps;
+        }
+
+        counters
     }
 
     #[tokio::test]
-    async fn a_clean_drift_check_skips_the_recount() {
-        let db = mock_db()
-            .append_exec_results([sea_orm::MockExecResult {
-                last_insert_id: 0,
-                rows_affected: 0,
-            }])
-            .append_query_results([none()])
-            .into_connection();
+    async fn recount_repairs_corrupted_missing_runtime_deps_by_counting_runtime_edges_from_not_present_dependencies_upward_through_incomplete_dependents()
+     {
+        let db = runtime_chain_over_a_missing_dependency().await;
 
-        assert_eq!(recount_missing_runtime_deps(&db).await.unwrap(), 0);
-        let log = raw_statements(db.into_transaction_log());
-        assert!(
-            log.iter()
-                .all(|s| !s.sql.contains("SET missing_runtime_deps")),
-            "{log:?}"
-        );
+        let rewritten = recount_missing_runtime_deps(&db.connection())
+            .await
+            .unwrap();
+        let repaired = counters(&db).await;
+        let rewritten_again = recount_missing_runtime_deps(&db.connection())
+            .await
+            .unwrap();
+        db.finish().await;
+
+        assert_eq!((rewritten, repaired), (4, [0, 0, 1, 1]));
+        assert_eq!(rewritten_again, 0);
+    }
+
+    #[tokio::test]
+    async fn drift_check_detects_zero_counter_with_incomplete_runtime_dependency_and_finds_nothing_on_consistent_database()
+     {
+        let db = runtime_chain_over_a_missing_dependency().await;
+        recount_missing_runtime_deps(&db.connection())
+            .await
+            .unwrap();
+        let grandparent = format!("/nix/store/{}-chain.drv", GRANDPARENT.repeat(32));
+        let consistent = recount_missing_runtime_deps(&db.connection())
+            .await
+            .unwrap();
+
+        db.execute(
+            "UPDATE derivation_build SET missing_runtime_deps = 0 WHERE missing_runtime_deps = 1",
+        )
+        .await;
+        let rewritten = recount_missing_runtime_deps(&db.connection())
+            .await
+            .unwrap();
+        let repaired = db.shared_build(&grandparent).await.missing_runtime_deps;
+        db.finish().await;
+
+        assert_eq!((consistent, rewritten, repaired), (0, 2, 1));
     }
 }

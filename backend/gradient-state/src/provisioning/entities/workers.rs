@@ -273,7 +273,10 @@ mod team_worker_tests {
     #[tokio::test]
     async fn a_declared_team_worker_is_inserted_as_managed() {
         let inserted = inserted_team_worker(&state_worker(true)).await;
-        assert!(inserted.sql.contains("\"managed\""));
+        assert_eq!(
+            inserted_value(&inserted, "managed"),
+            sea_orm::Value::Bool(Some(true))
+        );
     }
 
     #[tokio::test]

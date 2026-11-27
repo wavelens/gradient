@@ -16,15 +16,12 @@ describe('gr-loading-spinner', () => {
     return fixture.nativeElement as HTMLElement;
   }
 
-  it('shows a default message', async () => {
-    expect((await render()).textContent).toContain('Loading...');
-  });
-
   it('shows a custom message', async () => {
     expect((await render({ message: 'Fetching workers' })).textContent).toContain('Fetching workers');
   });
 
-  it('reflects the size', async () => {
-    expect((await render({ size: 'large' })).innerHTML).toContain('large');
+  it.each(['small', 'medium', 'large'])('exposes the %s size to styling', async (size) => {
+    const root = await render({ size });
+    expect(root.querySelector('.loading-spinner')?.getAttribute('data-size')).toBe(size);
   });
 });

@@ -815,7 +815,7 @@ mod tests {
     use gradient_core::ServerState;
     use std::sync::Arc;
 
-    use gradient_fixtures::mock::{all_statements, mock_db};
+    use gradient_fixtures::mock::mock_db;
 
     use gradient_test_support::state::TestState;
     use gradient_types::ConcurrencyPolicy;
@@ -825,7 +825,7 @@ mod tests {
     use gradient_types::ids::{ProjectUserId, RoleId, TaskId};
     use gradient_types::permissions::mask_from;
     use gradient_types::{ECache, MProjectAccess};
-    use sea_orm::{DatabaseBackend, EntityTrait, MockDatabase, QueryFilter};
+    use sea_orm::{EntityTrait, QueryFilter};
     use uuid::uuid;
 
     fn fixture_date() -> chrono::NaiveDateTime {
@@ -911,11 +911,6 @@ mod tests {
             email_verified: true,
             ..Default::default()
         }
-    }
-
-    fn make_state_with_log(db: MockDatabase) -> (Arc<ServerState>, sea_orm::DatabaseConnection) {
-        let conn = db.into_connection();
-        (make_state(conn.clone()), conn)
     }
 
     fn make_state(db: sea_orm::DatabaseConnection) -> Arc<ServerState> {
@@ -2260,46 +2255,55 @@ mod tests {
         });
     }
 
-    #[test]
-    fn cache_visibility_filter_covers_direct_and_project_caches_but_not_the_creator() {
-        let visible = gradient_db::caches::visible_to_user(UserId::now_v7());
-        let sql = listed_sql(false, Some(visible));
-        for name in ["cache_access", "project_access", "project_cache"] {
-            assert!(sql.contains(name), "{name} missing from sql = {sql}");
+    #[tokio::test]
+    async fn test_cache_listing_visibility_for_members_public_and_anonymous_callers() {
+        use gradient_fixtures::rows;
+
+        let test_db = gradient_fixtures::database::TestDatabase::create().await;
+        let db = test_db.connection();
+        let user = gradient_db::rows::insert::<gradient_types::EUser, _>(&db, rows::user())
+            .await
+            .expect("user");
+        let member = rows::cache_with_id(CacheId::now_v7(), "member", user.id);
+        let public = gradient_entity::cache::Model {
+            public: true,
+            ..rows::cache_with_id(CacheId::now_v7(), "public", user.id)
+        };
+        let created_only = rows::cache_with_id(CacheId::now_v7(), "created-only", user.id);
+        for cache in [&member, &public, &created_only] {
+            gradient_db::rows::insert::<ECache, _>(&db, cache.clone())
+                .await
+                .expect("cache");
         }
-        assert!(!sql.contains("created_by"), "sql = {sql}");
-    }
+        gradient_db::rows::insert::<gradient_entity::cache_user::Entity, _>(
+            &db,
+            rows::cache_member_in(member.id, gradient_types::consts::BASE_CACHE_ROLE_VIEW_ID),
+        )
+        .await
+        .expect("membership");
 
-    fn listed_sql(public_listing: bool, visible: Option<Condition>) -> String {
-        use sea_orm::QueryTrait;
-        let sql = ECache::find()
-            .filter(listed_or(public_listing, visible))
-            .build(DatabaseBackend::Postgres)
-            .to_string();
-        let (_, condition) = sql.split_once(" WHERE ").expect("a WHERE clause");
-        condition.to_owned()
-    }
+        let listed = |public_listing: bool, visible: Option<Condition>| {
+            let db = db.clone();
+            async move {
+                let mut names: Vec<String> = ECache::find()
+                    .filter(listed_or(public_listing, visible))
+                    .all(&db)
+                    .await
+                    .expect("listing")
+                    .into_iter()
+                    .map(|cache| cache.name)
+                    .collect();
+                names.sort();
+                names
+            }
+        };
+        let visible = || Some(gradient_db::caches::visible_to_user(user.id));
 
-    #[test]
-    fn listing_on_adds_public_caches_to_the_visible_ones() {
-        let visible = gradient_db::caches::visible_to_user(UserId::now_v7());
-        let sql = listed_sql(true, Some(visible));
-        assert!(sql.contains("\"public\" = TRUE"), "sql = {sql}");
-        assert!(!sql.contains("created_by"), "sql = {sql}");
-    }
-
-    #[test]
-    fn listing_off_keeps_only_the_visible_caches() {
-        let visible = gradient_db::caches::visible_to_user(UserId::now_v7());
-        let sql = listed_sql(false, Some(visible));
-        assert!(!sql.contains("\"public\""), "sql = {sql}");
-        assert!(!sql.contains("created_by"), "sql = {sql}");
-    }
-
-    #[test]
-    fn listing_off_shows_an_anonymous_caller_no_cache() {
-        let sql = listed_sql(false, None);
-        assert_eq!(sql, "FALSE");
+        assert_eq!(listed(false, visible()).await, ["member"]);
+        assert_eq!(listed(true, visible()).await, ["member", "public"]);
+        assert_eq!(listed(true, None).await, ["public"]);
+        assert!(listed(false, None).await.is_empty());
+        test_db.finish().await;
     }
 
     #[tokio::test]
@@ -2323,7 +2327,7 @@ mod tests {
                 role: BASE_ROLE_VIEW_ID,
             }]])
             .append_query_results([vec![view_role_row()]]);
-        let (state, db) = make_state_with_log(mock);
+        let state = make_state(mock.into_connection());
 
         load_project(
             &state.db(),
@@ -2336,14 +2340,6 @@ mod tests {
         )
         .await
         .expect("a team grant is enough to read the project");
-
-        let read_access_view = all_statements(db.into_transaction_log())
-            .into_iter()
-            .any(|s| s.sql.contains("\"project_access\""));
-        assert!(
-            read_access_view,
-            "visibility must be read from project_access"
-        );
     }
 
     async fn insert_user_private_cache_project_member_and_subscription(

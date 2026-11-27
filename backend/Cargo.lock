@@ -3093,8 +3093,10 @@ name = "gradient-report"
 version = "2.1.0-rc.1"
 dependencies = [
  "anyhow",
+ "chrono",
  "gradient-db",
  "gradient-entity",
+ "gradient-fixtures",
  "gradient-redact",
  "gradient-storage",
  "gradient-types",
@@ -3170,6 +3172,7 @@ dependencies = [
  "gradient-core",
  "gradient-db",
  "gradient-effects",
+ "gradient-fixtures",
  "gradient-graph",
  "gradient-report",
  "gradient-scheduler",

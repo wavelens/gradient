@@ -875,3 +875,56 @@ async fn cached_path_signature_deletions_count_each_affected_cache_once_per_stat
     );
     case.finish().await;
 }
+
+#[tokio::test]
+async fn c15_gc_orphan_object_probe_keeps_driver_and_input_source_keys_for_shared_builds_keeps_output_keys_only_for_non_terminal_builds_and_returns_candidate_keys_not_listed_in_db()
+ {
+    let (queued_source, aborted_source) = ("s".repeat(32), "r".repeat(32));
+    let case = Case::start(
+        shape()
+            .evaluation(EvaluationId::now_v7())
+            .derivation(A)
+            .walked()
+            .probed()
+            .entry_point("pkg.a")
+            .job()
+            .output(A_OUT)
+            .input_source(&format!("{queued_source}-src"))
+            .derivation(B)
+            .walked()
+            .probed()
+            .job()
+            .output(B_OUT)
+            .input_source(&format!("{aborted_source}-src"))
+            .build_status(BuildStatus::Aborted),
+    )
+    .await;
+    let key = |hash: &str| format!("{hash}-x");
+    let (a_drv, b_drv) = (
+        key(&case.db.derivation(A).await.hash),
+        key(&case.db.derivation(B).await.hash),
+    );
+    let unknown = key(&"m".repeat(32));
+    let candidates = [
+        a_drv,
+        b_drv,
+        key(A_OUT),
+        key(B_OUT),
+        key(&queued_source),
+        key(&aborted_source),
+        unknown.clone(),
+    ];
+
+    let report = case
+        .gc(GcRequest::OrphanObjects {
+            object_storage_keys: candidates.to_vec(),
+        })
+        .await;
+
+    let mut orphans = report.unreferenced_orphan_object_storage_keys;
+    orphans.sort();
+    let mut expected = vec![key(B_OUT), unknown];
+    expected.sort();
+    assert_eq!(orphans, expected);
+    case.finish().await;
+}

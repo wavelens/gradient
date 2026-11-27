@@ -309,3 +309,6 @@ sentry             = { workspace = true }
 tokio              = { workspace = true, features = ["process", "signal", "macros"] }
 tracing            = { workspace = true }
 gradient-web       = { workspace = true }
+
+[dev-dependencies]
+gradient-fixtures = { workspace = true }

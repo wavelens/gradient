@@ -342,216 +342,102 @@ crate::sql_fn! {
 mod tests {
     use super::*;
 
-    #[test]
-    fn deterministic_build_failure_predicate_matches_builder_nonzero() {
-        let sql = deterministic_build_failure("db")
-            .split_whitespace()
-            .collect::<Vec<_>>()
-            .join(" ");
+    #[tokio::test]
+    async fn requeue_failed_shared_builds_restores_timed_out_and_dependency_failed_builds_but_keeps_reproducible_failure_and_forgets_stale_cache()
+     {
+        let path = |c: &str| format!("/nix/store/{}-requeue.drv", c.repeat(32));
+        let [
+            reproducible,
+            above_reproducible,
+            timed_out,
+            above_timed_out,
+            fresh_miss,
+            stale_hit,
+        ] = ["1", "2", "3", "4", "5", "6"];
+        let db = gradient_fixtures::shape::shape()
+            .evaluation(EvaluationId::now_v7())
+            .derivation(&path(reproducible))
+            .walked()
+            .job()
+            .probed()
+            .build_status(BuildStatus::FailedPermanent)
+            .attempt(
+                AttemptOutcome::Failed,
+                Some(AttemptFailureReason::BuilderNonzero),
+            )
+            .derivation(&path(above_reproducible))
+            .walked()
+            .job()
+            .depends_on(&path(reproducible))
+            .build_status(BuildStatus::DependencyFailed)
+            .derivation(&path(timed_out))
+            .walked()
+            .job()
+            .probed()
+            .build_status(BuildStatus::FailedTimeout)
+            .attempt(
+                AttemptOutcome::Failed,
+                Some(AttemptFailureReason::WallClockTimeout),
+            )
+            .derivation(&path(above_timed_out))
+            .walked()
+            .job()
+            .depends_on(&path(timed_out))
+            .build_status(BuildStatus::DependencyFailed)
+            .derivation(&path(fresh_miss))
+            .walked()
+            .job()
+            .probed()
+            .build_status(BuildStatus::Aborted)
+            .derivation(&path(stale_hit))
+            .walked()
+            .job()
+            .probed()
+            .cache_available()
+            .build_status(BuildStatus::Aborted)
+            .into_database()
+            .await;
+        let keys = [
+            reproducible,
+            above_reproducible,
+            timed_out,
+            above_timed_out,
+            fresh_miss,
+            stale_hit,
+        ];
+        let mut ids = Vec::new();
+        for key in keys {
+            ids.push(db.id_of(&path(key)).await);
+        }
+        db.execute(&format!(
+            "UPDATE derivation_build SET attempt = 3; \
+             UPDATE derivation_build SET probed_at = (now() AT TIME ZONE 'UTC') - interval '2 hours' \
+             WHERE derivation IN ('{}', '{}')",
+            ids[2], ids[5]
+        ))
+        .await;
+
+        let changes = requeue_failed_shared_builds(&db.connection(), &ids)
+            .await
+            .unwrap();
+        let mut rows = Vec::new();
+        for key in keys {
+            let row = db.shared_build(&path(key)).await;
+            rows.push((row.status, row.attempt, row.probed));
+        }
+        db.finish().await;
+
+        assert_eq!(changes.len(), 4);
         assert_eq!(
-            sql,
-            format!(
-                "EXISTS (SELECT 1 FROM build_attempt ba WHERE ba.derivation_build = db.id \
-                 AND ba.outcome = {outcome} AND ba.reason = {reason})",
-                outcome = crate::sql::status::attempt_outcome(AttemptOutcome::Failed),
-                reason = crate::sql::status::attempt_reason(AttemptFailureReason::BuilderNonzero),
-            ),
+            rows,
+            [
+                (BuildStatus::FailedPermanent, 3, true),
+                (BuildStatus::DependencyFailed, 3, false),
+                (BuildStatus::Created, 0, false),
+                (BuildStatus::Created, 0, false),
+                (BuildStatus::Created, 0, true),
+                (BuildStatus::Created, 0, true),
+            ]
         );
-    }
-
-    #[test]
-    fn a_fresh_evaluation_thaws_every_failure_in_its_closure() {
-        let norm = |s: String| s.split_whitespace().collect::<Vec<_>>().join(" ");
-        let sql = norm(requeue_failed_closure_fresh_sql());
-        assert!(
-            sql.starts_with("WITH RECURSIVE closure(derivation) AS"),
-            "{sql}"
-        );
-        assert!(
-            sql.contains(&format!(
-                "db.status IN ({}) AND NOT EXISTS \
-                 (SELECT 1 FROM kept_failed x WHERE x.derivation = db.derivation) RETURNING",
-                crate::sql::status::build_in(&BuildStatus::REQUEUEABLE)
-            )),
-            "{sql}"
-        );
-        assert!(
-            !sql.contains("deterministic_blocked") && !sql.contains("build_attempt"),
-            "a reproducible failure is retried once per evaluation: {sql}"
-        );
-    }
-
-    #[test]
-    fn no_heal_of_an_evaluation_thaws_what_its_user_aborted_or_its_task_keeps() {
-        let norm = |s: String| s.split_whitespace().collect::<Vec<_>>().join(" ");
-        let aborted = norm(aborted_in_evaluation("$1"));
-        for sql in [
-            norm(requeue_failed_closure_fresh_sql()),
-            norm(requeue_failed_closure_blocked_sql()),
-        ] {
-            assert!(
-                sql.contains(&format!(
-                    "kept_failed(derivation) AS (SELECT derivation FROM ({aborted} UNION"
-                )),
-                "{sql}"
-            );
-            assert!(
-                sql.contains("WHERE e.id = $1 AND NOT t.retry_failed_builds"),
-                "{sql}"
-            );
-            assert!(
-                sql.contains(
-                    "SELECT e.derivation AS next FROM derivation_dependency e WHERE e.dependency = c.derivation"
-                ),
-                "the dependents of the aborted build stay failed: {sql}"
-            );
-            assert!(
-                sql.contains(
-                    "NOT EXISTS (SELECT 1 FROM kept_failed x WHERE x.derivation = db.derivation)"
-                ),
-                "an anti join, never a NOT IN rescanned per shared build: {sql}"
-            );
-        }
-    }
-
-    #[test]
-    fn a_user_retry_of_an_evaluation_thaws_all_failures_in_its_closure() {
-        let norm = |s: String| s.split_whitespace().collect::<Vec<_>>().join(" ");
-        let sql = norm(requeue_failed_closure_all_sql());
-        let requeueable = crate::sql::status::build_in(&BuildStatus::REQUEUEABLE);
-        assert!(
-            sql.contains(&format!("db.status IN ({requeueable}) RETURNING")),
-            "{sql}"
-        );
-        assert!(
-            sql.contains(&format!(
-                "FROM (SELECT f.derivation FROM derivation_build f WHERE f.status IN ({requeueable}) \
-                 AND f.derivation IN (SELECT derivation FROM closure)) failed"
-            )),
-            "the failed shared builds drive the write, not the closure: {sql}"
-        );
-        assert!(
-            !sql.contains("kept_failed") && !sql.contains("deterministic_blocked"),
-            "{sql}"
-        );
-    }
-
-    #[test]
-    fn a_user_retry_asks_the_upstream_caches_again_and_a_requeue_after_an_hour() {
-        let norm = |s: String| s.split_whitespace().collect::<Vec<_>>().join(" ");
-        let forgets_the_miss = "attempt = 0, probed = (db.probed AND db.cache_available),";
-        for sql in [requeue_failed_closure_all_sql(), retry_build_closure_sql()] {
-            assert!(norm(sql.clone()).contains(forgets_the_miss), "{sql}");
-        }
-
-        let forgets_a_stale_miss = "attempt = 0, probed = (db.probed AND (db.cache_available \
-             OR COALESCE(db.probed_at > (now() AT TIME ZONE 'UTC') - interval '1 hour', false))),";
-        for sql in [
-            requeue_failed_closure_fresh_sql(),
-            requeue_failed_closure_blocked_sql(),
-            requeue_failed_shared_builds_sql(),
-            requeue_failed_import_closure_sql(),
-        ] {
-            assert!(norm(sql.clone()).contains(forgets_a_stale_miss), "{sql}");
-        }
-    }
-
-    #[test]
-    fn a_retry_thaws_the_failed_causes_and_only_the_dependents_they_failed() {
-        let norm = |s: String| s.split_whitespace().collect::<Vec<_>>().join(" ");
-        let sql = norm(retry_build_closure_sql());
-        let dependency_failed = crate::sql::status::build(BuildStatus::DependencyFailed);
-        let retryable = crate::sql::status::build_in(&BuildStatus::RETRYABLE);
-        let incomplete = settled_incomplete_predicate("p");
-        assert!(
-            sql.starts_with("WITH RECURSIVE closure(derivation) AS"),
-            "the walk stays inside the evaluation: {sql}"
-        );
-        assert_eq!(
-            sql.matches(&norm(failure_spreads_predicate("e"))).count(),
-            2,
-            "both walks pass a cached build over a runtime dependency only: {sql}"
-        );
-        assert!(
-            sql.contains("causes(derivation) AS (SELECT $2::uuid UNION"),
-            "{sql}"
-        );
-        assert!(
-            sql.contains(&format!(
-                "WHERE p.derivation = e.dependency \
-                 AND (p.status IN ({dependency_failed}, {retryable}) OR {incomplete}))"
-            )),
-            "the walk down passes failed and incomplete dependencies only: {sql}"
-        );
-        assert!(
-            sql.contains(&format!(
-                "retried AS ( SELECT c.derivation FROM causes c \
-                 JOIN derivation_build f ON f.derivation = c.derivation \
-                 WHERE f.status IN ({retryable}) )"
-            )),
-            "{sql}"
-        );
-        assert!(
-            sql.contains("dependents(derivation) AS (SELECT derivation FROM retried UNION"),
-            "{sql}"
-        );
-        assert!(
-            sql.contains(&format!(
-                "WHERE p.derivation = e.derivation \
-                 AND (p.status IN ({dependency_failed}) OR {incomplete}))"
-            )),
-            "the walk up stops at a parent that failed on its own: {sql}"
-        );
-        assert!(
-            sql.contains(&format!(
-                "AND (db.status = {dependency_failed} OR (db.status IN ({retryable}) \
-                 AND db.derivation IN (SELECT derivation FROM retried)))"
-            )),
-            "{sql}"
-        );
-        assert!(
-            !sql.contains("deterministic_blocked") && !sql.contains("build_attempt"),
-            "a retry rebuilds a reproducible failure on purpose: {sql}"
-        );
-    }
-
-    #[test]
-    fn requeue_excludes_the_deterministic_blocked_subtree() {
-        let norm = |s: String| s.split_whitespace().collect::<Vec<_>>().join(" ");
-        let deterministic = norm(deterministic_build_failure("dbf"));
-        for sql in [
-            norm(requeue_failed_shared_builds_sql()),
-            norm(requeue_failed_closure_blocked_sql()),
-            norm(requeue_failed_import_closure_sql()),
-        ] {
-            assert!(
-                sql.contains("deterministic_blocked(derivation) AS"),
-                "must build the deterministic-blocked closure: {sql}"
-            );
-            assert!(
-                sql.contains(&deterministic),
-                "blocked set must seed from a reproducible builder-nonzero exit: {sql}"
-            );
-            assert!(
-                sql.contains(
-                "SELECT e.derivation AS next FROM derivation_dependency e WHERE e.dependency = c.derivation"
-            ),
-                "must close upward over parents so DependencyFailed victims are caught: {sql}"
-            );
-            assert!(
-                sql.contains(
-                    "NOT EXISTS (SELECT 1 FROM deterministic_blocked x \
-                     WHERE x.derivation = db.derivation)"
-                ) && !sql.contains("NOT IN (SELECT"),
-                "the thaw must skip the whole poisoned subtree: {sql}"
-            );
-            assert!(
-                sql.contains(&format!(
-                    "db.status IN ({})",
-                    crate::sql::status::build_in(&BuildStatus::REQUEUEABLE)
-                )),
-                "still thaws the requeueable states for transient causes: {sql}"
-            );
-        }
     }
 }

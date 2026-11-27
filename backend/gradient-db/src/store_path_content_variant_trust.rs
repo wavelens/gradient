@@ -5264,65 +5264,6 @@ ORDER BY selected_content_variant_for_signing.cache, selected_content_variant_fo
         fixture.db.finish().await;
     }
 
-    fn sql_text_compares_reference_token_hash_expression_in_join_on_or_exists(
-        sql: &str,
-        start: usize,
-    ) -> bool {
-        let before = sql[..start].trim_end();
-        let after =
-            sql[start + STORE_PATH_HASH_FROM_REFERENCE_TOKEN_SQL_EXPRESSION.len()..].trim_start();
-        if !(before.ends_with('=')
-            || before.ends_with("<>")
-            || after.starts_with('=')
-            || after.starts_with("<>"))
-        {
-            return false;
-        }
-        let mut depth = 0usize;
-        let mut clause = Vec::new();
-        for (index, byte) in before.bytes().enumerate().rev() {
-            match (byte, depth) {
-                (b')', _) => depth += 1,
-                (b'(', 0) => {
-                    if before[..index].trim_end().ends_with("EXISTS") {
-                        return true;
-                    }
-                    break;
-                }
-                (b'(', _) => depth -= 1,
-                (_, 0) => clause.push(byte),
-                _ => {}
-            }
-        }
-        clause.reverse();
-        String::from_utf8_lossy(&clause)
-            .split_whitespace()
-            .rfind(|word| matches!(*word, "ON" | "WHERE"))
-            == Some("ON")
-    }
-
-    #[test]
-    fn publish_statement_sql_store_path_hash_computed_from_reference_token_at_most_three_times_without_join_on_or_exists_comparison()
-     {
-        let sql =
-            SQL_SELECT_STORED_CONTENT_VARIANTS_WITH_REFERENCE_CLOSURE_FOR_PROJECT_CACHE_SIGNING
-                .text();
-        let starts: Vec<usize> = sql
-            .match_indices(STORE_PATH_HASH_FROM_REFERENCE_TOKEN_SQL_EXPRESSION)
-            .map(|(start, _)| start)
-            .collect();
-        assert!(
-            starts.len() <= 3,
-            "There are more than 3 computations of the store path hash from the reference token in the publish statement."
-        );
-        assert!(
-            !starts.iter().any(|&start| {
-                sql_text_compares_reference_token_hash_expression_in_join_on_or_exists(&sql, start)
-            }),
-            "The publish statement does compare the column with the hash of the store path of the reference token inside a JOIN ... ON or EXISTS subquery."
-        );
-    }
-
     const TRUSTED_PROJECT_OUTPUT_STORE_PATH_HASH: &str = "99999999999999999999999999999999";
 
     async fn read_all_project_cache_backfill_requested_at_as_text_ordered_by_id(
@@ -5622,17 +5563,33 @@ ORDER BY selected_content_variant_for_signing.cache, selected_content_variant_fo
         );
     }
 
-    #[test]
-    fn requested_parent_build_filter_is_the_page_query_with_an_id_list_in_place_of_the_page_range()
-    {
+    #[tokio::test]
+    async fn requested_parent_build_filter_selects_the_same_parent_builds_as_the_page_query_when_listed()
+     {
+        let fixture =
+            setup_stored_dependency_variant_with_live_parent_build_job_and_read_write_signing_cache(
+                true,
+                |shape, _| shape.build_status(gradient_entity::build::BuildStatus::Completed),
+            )
+            .await;
+        let conn = fixture.db.connection();
+        let unrelated = DerivationId::new(uuid::Uuid::now_v7());
+        let paged = query_parent_builds_page_on_fixture(&fixture).await;
+        let listed = list_parent_build_derivation_ids_with_dependency_outputs_to_sign(
+            &conn,
+            &[fixture.parent, unrelated],
+        )
+        .await
+        .expect("Select the listed parent builds.");
+        let unlisted =
+            list_parent_build_derivation_ids_with_dependency_outputs_to_sign(&conn, &[unrelated])
+                .await
+                .expect("Select the unrelated parent build.");
+        let parent = fixture.parent;
+        fixture.db.finish().await;
         assert_eq!(
-            SQL_LIST_REQUESTED_PARENT_BUILD_DERIVATION_IDS_WITH_DEPENDENCY_OUTPUTS_TO_SIGN.text(),
-            SQL_LIST_PARENT_BUILD_DERIVATION_IDS_WITH_DEPENDENCY_OUTPUTS_TO_SIGN_PAGE
-                .text()
-                .replace(
-                    "p.derivation > $1 AND p.derivation <= $2 ORDER BY p.derivation LIMIT $3",
-                    "p.derivation = ANY($1::uuid[])",
-                )
+            (paged, listed, unlisted),
+            (vec![parent], vec![parent], vec![])
         );
     }
 

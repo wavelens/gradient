@@ -7,9 +7,11 @@
 use axum::http::StatusCode;
 use gradient_entity::ids::UserId;
 use gradient_entity::{user, user_identity};
-use gradient_fixtures::mock::all_statements;
-use gradient_fixtures::rows::user;
-use gradient_test_support::web::{make_test_server, signed_in};
+use gradient_fixtures::database::TestDatabase;
+use gradient_fixtures::rows::{live_session, user};
+use gradient_test_support::state::TestState;
+use gradient_test_support::web::{bearer, make_test_server, signed_in};
+use gradient_types::SessionId;
 use serde_json::json;
 
 const SETTINGS: &str = "/api/v1/user/settings";
@@ -85,32 +87,30 @@ async fn taking_the_email_of_another_user_is_refused() {
 }
 
 #[tokio::test]
-async fn the_email_clash_check_ignores_case() {
-    let (db, auth) = signed_in();
-    let db = db
-        .append_query_results([Vec::<user_identity::Model>::new()])
-        .append_query_results([vec![other_user()]])
-        .into_connection();
-    let server = make_test_server(db.clone());
+async fn test_rejects_email_change_to_uppercase_form_of_another_account_email_with_conflict() {
+    let test_db = TestDatabase::create().await;
+    let db = test_db.connection();
+    let session = SessionId::now_v7();
+    gradient_db::rows::insert::<user::Entity, _>(&db, user())
+        .await
+        .unwrap();
+    gradient_db::rows::insert::<user::Entity, _>(&db, other_user())
+        .await
+        .unwrap();
+    gradient_db::rows::insert::<gradient_entity::session::Entity, _>(&db, live_session(session))
+        .await
+        .unwrap();
+    let server = TestState::new().web_db(db).server();
 
     let res = server
         .patch(SETTINGS)
-        .add_header("authorization", auth)
+        .add_header("authorization", bearer(session))
         .json(&json!({ "email": other_user().email.to_uppercase() }))
         .await;
 
     assert_eq!(res.status_code(), StatusCode::CONFLICT);
     drop(server);
-    let lookup = all_statements(db.into_transaction_log())
-        .into_iter()
-        .rev()
-        .find(|s| s.sql.contains(r#""user"."email""#))
-        .expect("email lookup");
-    assert!(
-        lookup.sql.to_lowercase().contains("lower("),
-        "{}",
-        lookup.sql
-    );
+    test_db.finish().await;
 }
 
 #[tokio::test]

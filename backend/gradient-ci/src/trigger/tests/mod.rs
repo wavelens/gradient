@@ -296,11 +296,6 @@ async fn restart_with_one_failed_inserts_a_manual_retry_eval_and_inherits_the_na
         find_evaluation_insert_value_for_column(&log, "building_started_at"),
         sea_orm::Value::ChronoDateTime(Some(_))
     ));
-    assert!(
-        log.iter().any(|s| s.sql.contains("INSERT INTO build_job")
-            && s.sql.contains("FROM build_job bj WHERE bj.evaluation = $1")),
-        "the restart takes the previous evaluation's names over: {log:?}"
-    );
     let link = log
         .iter()
         .find(|s| s.sql.starts_with(r#"UPDATE "evaluation" SET "next""#))
@@ -448,4 +443,57 @@ fn fork_repository_url_kept_only_if_host_and_port_match() {
         fork("https://GITEA.example.com/f/r"),
         Some("https://GITEA.example.com/f/r".to_owned())
     );
+}
+
+#[tokio::test]
+async fn retry_evaluation_after_walk_completed_takes_over_only_previous_evaluation_build_jobs() {
+    use gradient_fixtures::shape::shape;
+
+    let drv = |letter: &str| format!("/nix/store/{}-{letter}.drv", letter.repeat(32));
+    let (previous, unrelated) = (EvaluationId::now_v7(), EvaluationId::now_v7());
+    let db = shape()
+        .evaluation(previous)
+        .evaluation_status(EvaluationStatus::Failed)
+        .derivation(&drv("a"))
+        .job()
+        .entry_point("packages.x86_64-linux.a")
+        .derivation(&drv("b"))
+        .job()
+        .evaluation(unrelated)
+        .derivation(&drv("c"))
+        .job()
+        .into_database()
+        .await;
+    let conn = db.connection();
+    let task = db
+        .find::<gradient_entity::task::Entity>(db.task_of(previous).await)
+        .await
+        .expect("the task");
+    let previous_evaluation = db
+        .find::<evaluation::Entity>(previous)
+        .await
+        .expect("the previous evaluation");
+
+    let retry = trigger_evaluation_retry(
+        &conn,
+        &task,
+        &previous_evaluation,
+        gradient_fixtures::rows::user().id,
+    )
+    .await
+    .expect("the retry is created");
+
+    assert_eq!(retry.status, EvaluationStatus::Building);
+    let mut inherited: Vec<DerivationId> = db
+        .jobs(retry.id)
+        .await
+        .into_iter()
+        .map(|job| job.derivation)
+        .collect();
+    inherited.sort();
+    let mut expected = vec![db.id_of(&drv("a")).await, db.id_of(&drv("b")).await];
+    expected.sort();
+    assert_eq!(inherited, expected);
+    assert_eq!(db.entry_points(retry.id).await.len(), 1);
+    db.finish().await;
 }

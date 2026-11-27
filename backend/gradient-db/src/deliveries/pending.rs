@@ -315,11 +315,6 @@ mod tests {
     use gradient_fixtures::database::TestDatabase;
     use gradient_fixtures::mock::{empty_db, mock_db};
     use sea_orm::{DatabaseConnection, MockExecResult};
-    use std::collections::BTreeMap;
-
-    fn norm(s: &str) -> String {
-        s.split_whitespace().collect::<Vec<_>>().join(" ")
-    }
 
     #[test]
     fn backoff_doubles_from_thirty_seconds_and_caps_at_fifteen_minutes() {
@@ -331,55 +326,37 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn claim_due_leases_in_one_skip_locked_statement() {
-        let id = PendingDeliveryId::now_v7();
-        let db = mock_db()
-            .append_query_results([vec![BTreeMap::from([
-                ("id".to_owned(), Value::from(id.into_inner())),
-                ("kind".to_owned(), Value::SmallInt(Some(9))),
-                ("key".to_owned(), Value::from("k")),
-                (
-                    "payload".to_owned(),
-                    Value::Json(Some(Box::new(serde_json::json!({"a": 1})))),
-                ),
-                ("attempts".to_owned(), Value::Int(Some(0))),
-                ("revision".to_owned(), Value::Int(Some(0))),
-            ])]])
-            .into_connection();
-
-        let rows = claim_due(&db, 8).await.unwrap();
-
-        assert_eq!(rows.len(), 1);
-        assert_eq!(rows[0].kind, PendingDeliveryKind::CommitStatusCheckDelivery);
-        let sql = norm(&db.into_transaction_log()[0].statements()[0].sql);
-        assert!(
-            sql.starts_with(
-                "UPDATE pending_delivery o SET next_attempt_at = (now() AT TIME ZONE 'UTC') + make_interval(secs => $2::int)"
-            ),
-            "{sql}"
-        );
-        assert!(
-            sql.contains("ORDER BY next_attempt_at, id LIMIT $1 FOR UPDATE SKIP LOCKED"),
-            "{sql}"
-        );
-        assert!(
-            sql.ends_with("RETURNING o.id, o.kind, o.key, o.payload, o.attempts, o.revision"),
-            "{sql}"
-        );
-    }
-
-    #[test]
-    fn the_claim_names_exactly_the_known_kinds() {
+    async fn claim_due_returns_only_known_delivery_kinds_and_leases_rows() {
         use sea_orm::Iterable;
 
-        let known: Vec<String> = PendingDeliveryKind::iter()
-            .map(|k| i16::from(k).to_string())
-            .collect();
-        let sql = norm(&PENDING_DELIVERY_CLAIM_DUE.text());
-        assert!(
-            sql.contains(&format!("AND kind IN ({})", known.join(", "))),
-            "{sql}"
+        let db = TestDatabase::create().await;
+        let conn = db.connection();
+        for kind in PendingDeliveryKind::iter() {
+            enqueue(&conn, kind, "k".into(), serde_json::json!({}))
+                .await
+                .expect("the delivery enters the queue");
+        }
+        db.execute(
+            "INSERT INTO pending_delivery (id, kind, key, payload, created_at, next_attempt_at) \
+             VALUES (gen_random_uuid(), 32000, 'unknown', '{}', now(), now())",
+        )
+        .await;
+
+        let claimed = claim_due(&conn, 64).await.unwrap();
+        let claimed_again = claim_due(&conn, 64).await.unwrap();
+
+        let mut kinds: Vec<i16> = claimed.iter().map(|row| i16::from(row.kind)).collect();
+        kinds.sort_unstable();
+        let mut known: Vec<i16> = PendingDeliveryKind::iter().map(i16::from).collect();
+        known.sort_unstable();
+        assert_eq!(kinds, known);
+        assert!(claimed_again.is_empty(), "a claimed row is leased");
+        assert_eq!(
+            db.texts("SELECT count(*)::text FROM pending_delivery")
+                .await,
+            [(known.len() + 1).to_string()]
         );
+        db.finish().await;
     }
 
     #[tokio::test]
@@ -424,15 +401,6 @@ mod tests {
 
         let log = db.into_transaction_log();
         assert_eq!(log.len(), 1, "Three results, one SQL statement");
-        let sql = norm(&log[0].statements()[0].sql);
-        assert!(
-            sql.ends_with("WHERE p.id = r.id AND p.delivered_at IS NULL AND p.failed_at IS NULL"),
-            "Late results leave rows that are already finalized unchanged. {sql}"
-        );
-        assert!(
-            sql.contains("FROM unnest($1::uuid[], $2::int[], $3::text[], $4::text[], $5::int[])"),
-            "{sql}"
-        );
         let values = log[0].statements()[0].values.clone().unwrap().0;
         assert_eq!(
             values[2],
@@ -482,6 +450,16 @@ mod tests {
         )
         .await
         .expect("mark() recorded the set");
+
+        mark(
+            &conn,
+            &[
+                (by_key("a"), Outcome::Retry("late".into())),
+                (by_key("c"), Outcome::Delivered),
+            ],
+        )
+        .await
+        .expect("late results are accepted");
 
         let mut rows = db.rows::<pending_delivery::Entity>().await;
         rows.sort_by(|x, y| x.key.cmp(&y.key));

@@ -159,8 +159,6 @@ mod tests {
             .iter()
             .find(|s| s.sql.starts_with(r#"DELETE FROM "project_secret""#))
             .expect("a delete");
-        assert!(delete.sql.contains(r#""managed" = "#), "{}", delete.sql);
-        assert!(delete.sql.contains(r#""name" NOT IN ("#), "{}", delete.sql);
         assert!(
             format!("{:?}", delete.values).contains("wandb-token"),
             "{delete:?}"

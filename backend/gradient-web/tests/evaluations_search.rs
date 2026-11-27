@@ -7,7 +7,7 @@
 use gradient_entity::evaluation::EvaluationStatus;
 use gradient_entity::{commit, evaluation, ids::*};
 use gradient_fixtures::ids::{commit_id, task_id};
-use gradient_fixtures::mock::{all_statements, mock_db};
+use gradient_fixtures::mock::mock_db;
 use gradient_fixtures::rows::{public_project, task};
 use gradient_fixtures::test_date;
 use gradient_test_support::web::{make_test_server, make_token, with_auth};
@@ -207,17 +207,75 @@ async fn before_an_evaluation_of_another_task_is_not_found() {
 }
 
 #[tokio::test]
-async fn before_pages_to_evaluations_older_than_the_cursor() {
+async fn test_list_task_evaluations_before_cursor_returns_older_evaluations_with_id_tiebreak() {
+    use gradient_fixtures::shape::shape;
+
+    let mut ids = [(); 5].map(|_| EvaluationId::now_v7());
+    ids.sort();
+    let [
+        newer_lower_id,
+        same_time_lower_id,
+        cursor,
+        same_time_higher_id,
+        older_higher_id,
+    ] = ids;
+    let mut declared = shape()
+        .evaluation(cursor)
+        .evaluation_status(EvaluationStatus::Completed);
+    for id in [
+        newer_lower_id,
+        same_time_lower_id,
+        same_time_higher_id,
+        older_higher_id,
+    ] {
+        declared = declared
+            .evaluation(id)
+            .same_task_as(cursor)
+            .evaluation_status(EvaluationStatus::Completed);
+    }
+    let test_db = declared.into_database().await;
+    let db = test_db.connection();
+    for (id, day) in [
+        (newer_lower_id, 3),
+        (same_time_lower_id, 2),
+        (cursor, 2),
+        (same_time_higher_id, 2),
+        (older_higher_id, 1),
+    ] {
+        test_db
+            .execute(&format!(
+                "UPDATE evaluation SET created_at = '2026-01-0{day}' WHERE id = '{id}'"
+            ))
+            .await;
+    }
+    let task = test_db
+        .find::<gradient_entity::task::Entity>(test_db.task_of(cursor).await)
+        .await
+        .expect("task");
+    let project = test_db.project_of(cursor).await;
+    test_db
+        .execute(&format!(
+            "UPDATE project SET public = true WHERE id = '{project}'"
+        ))
+        .await;
+    let project = test_db
+        .find::<gradient_entity::project::Entity>(project)
+        .await
+        .expect("project");
     let session_id = SessionId::now_v7();
-    let cursor = eval_row(EvaluationId::now_v7(), "*", EvaluationStatus::Queued);
-    let db = base_db(session_id)
-        .append_query_results([vec![cursor.clone()]])
-        .append_query_results([Vec::<evaluation::Model>::new()])
-        .into_connection();
-    let server = make_test_server(db.clone());
+    gradient_db::rows::insert::<gradient_entity::session::Entity, _>(
+        &db,
+        gradient_fixtures::rows::live_session(session_id),
+    )
+    .await
+    .expect("session");
+    let server = make_test_server(db);
 
     let res = server
-        .get(&format!("{URL}?before={}&limit=10", cursor.id))
+        .get(&format!(
+            "/api/v1/tasks/{}/{}/evaluations?before={cursor}&limit=10",
+            project.name, task.name
+        ))
         .add_header(
             "Authorization",
             format!("Bearer {}", make_token(session_id)),
@@ -225,18 +283,18 @@ async fn before_pages_to_evaluations_older_than_the_cursor() {
         .await;
 
     res.assert_status_ok();
+    let body: Value = res.json();
+    let mut paged: Vec<String> = body["message"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|e| e["id"].as_str().unwrap().to_owned())
+        .collect();
+    paged.sort();
+    assert_eq!(
+        paged,
+        [same_time_lower_id, older_higher_id].map(|id| id.to_string())
+    );
     drop(server);
-    let page = all_statements(db.into_transaction_log())
-        .pop()
-        .expect("page query");
-    assert!(
-        page.sql.contains(r#""evaluation"."created_at" < $"#),
-        "page must stop at the cursor: {}",
-        page.sql
-    );
-    assert!(
-        page.sql.contains(r#""evaluation"."id" < $"#),
-        "evaluations created at the same time must page by id: {}",
-        page.sql
-    );
+    test_db.finish().await;
 }

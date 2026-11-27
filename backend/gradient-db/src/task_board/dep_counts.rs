@@ -259,303 +259,162 @@ pub async fn load_entry_point_dep_counts<C: ConnectionTrait>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use gradient_entity::ids::EntryPointDepCountId;
-    use gradient_fixtures::mock::{all_statements, mock_db};
-    use sea_orm::{DatabaseConnection, MockExecResult, Value};
-    use std::collections::BTreeMap;
+    use gradient_fixtures::database::TestDatabase;
+    use gradient_fixtures::shape::shape;
 
-    fn ok(rows_affected: u64) -> MockExecResult {
-        MockExecResult {
-            last_insert_id: 0,
-            rows_affected,
-        }
+    fn drv(letter: &str) -> String {
+        format!("{}-{letter}.drv", letter.repeat(32))
     }
 
-    fn count_row(
-        entry_point: EntryPointId,
-        status: BuildStatus,
-        count: i64,
-    ) -> MEntryPointDepCount {
-        MEntryPointDepCount {
-            id: EntryPointDepCountId::now_v7(),
-            entry_point,
-            status: i32::from(status),
-            count,
-        }
-    }
-
-    fn walk_row(
-        entry_point: EntryPointId,
-        status: BuildStatus,
-        cnt: i64,
-    ) -> BTreeMap<String, Value> {
-        BTreeMap::from([
-            (
-                "entry_point".to_owned(),
-                Value::from(entry_point.into_inner()),
-            ),
-            ("status".to_owned(), Value::from(i32::from(status))),
-            ("cnt".to_owned(), Value::from(cnt)),
-        ])
-    }
-
-    fn claimed(entry_points: &[EntryPointId]) -> Vec<BTreeMap<String, Value>> {
-        entry_points
-            .iter()
-            .map(|ep| BTreeMap::from([("id".to_owned(), Value::from(ep.into_inner()))]))
-            .collect()
-    }
-
-    fn entry_point(evaluation: EvaluationId, stamp: Option<i64>, age_secs: i64) -> MEntryPoint {
-        MEntryPoint {
-            id: EntryPointId::now_v7(),
-            evaluation,
-            derivation: DerivationId::now_v7(),
-            dep_counts_version: stamp,
-            dep_counts_computed_at: Some(
-                gradient_types::now() - chrono::Duration::seconds(age_secs),
-            ),
-            ..Default::default()
-        }
-    }
-
-    fn never_computed(evaluation: EvaluationId) -> MEntryPoint {
-        MEntryPoint {
-            id: EntryPointId::now_v7(),
-            evaluation,
-            derivation: DerivationId::now_v7(),
-            ..Default::default()
-        }
-    }
-
-    fn evaluation(graph_version: i64) -> MEvaluation {
-        MEvaluation {
-            id: EvaluationId::now_v7(),
-            graph_version,
-            ..Default::default()
-        }
-    }
-
-    fn sqls(db: DatabaseConnection) -> Vec<String> {
-        db.into_transaction_log()
-            .iter()
-            .flat_map(|t| t.statements().iter().map(|s| s.sql.clone()))
-            .collect()
-    }
-
-    #[tokio::test]
-    async fn a_fresh_stamp_reads_the_cache_and_a_stale_one_walks_then_stores() {
-        let eval = evaluation(3);
-        let fresh = entry_point(eval.id, Some(3), 1);
-        let stale = entry_point(eval.id, Some(2), DEP_COUNTS_REFRESH_SECS + 1);
-        let db = mock_db()
-            .append_query_results([claimed(&[stale.id])])
-            .append_query_results([vec![count_row(fresh.id, BuildStatus::Completed, 3)]])
-            .append_exec_results([ok(0)])
-            .append_query_results([vec![walk_row(stale.id, BuildStatus::Building, 1)]])
-            .append_exec_results([ok(2), ok(1), ok(1)])
-            .into_connection();
-
-        let out = cached_entry_point_dep_counts(&db, &eval, &[fresh.clone(), stale.clone()])
+    async fn counts(db: &TestDatabase, evaluation: EvaluationId) -> DepCounts {
+        let model = db
+            .rows::<EEvaluation>()
             .await
-            .unwrap();
-
-        assert_eq!(out[&fresh.id][&BuildStatus::Completed], 3);
-        assert_eq!(out[&stale.id][&BuildStatus::Building], 1);
-        let log = sqls(db);
-        let walk = log
-            .iter()
-            .find(|s| s.contains("WITH RECURSIVE seeds"))
-            .expect("the stale entry point is walked");
-
-        assert!(!walk.contains("dep_counts_version"), "{walk}");
-        let stamp = log
-            .iter()
-            .position(|s| s.contains("SET dep_counts_version = $1"))
-            .expect("the stamp is written");
-        let delete = log
-            .iter()
-            .position(|s| s.starts_with("DELETE FROM entry_point_dep_count"))
-            .expect("the old rows go first");
-        let insert = log
-            .iter()
-            .position(|s| s.contains("ON CONFLICT (entry_point, status) DO UPDATE"))
-            .expect("the new rows land");
-
-        assert!(delete < insert && insert < stamp, "{log:?}");
-    }
-
-    #[tokio::test]
-    async fn a_fully_fresh_page_never_walks_or_writes() {
-        let eval = evaluation(7);
-        let ep = entry_point(eval.id, Some(7), 1);
-        let db = mock_db()
-            .append_query_results([vec![count_row(ep.id, BuildStatus::Queued, 5)]])
-            .into_connection();
-
-        let out = cached_entry_point_dep_counts(&db, &eval, std::slice::from_ref(&ep))
-            .await
-            .unwrap();
-
-        assert_eq!(out[&ep.id][&BuildStatus::Queued], 5);
-        assert_eq!(sqls(db).len(), 1);
-    }
-
-    #[tokio::test]
-    async fn a_leaf_is_stamped_without_an_insert() {
-        let eval = evaluation(1);
-        let leaf = never_computed(eval.id);
-        let db = mock_db()
-            .append_query_results([claimed(&[leaf.id])])
-            .append_exec_results([ok(0)])
-            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
-            .append_exec_results([ok(0), ok(1)])
-            .into_connection();
-
-        let out = cached_entry_point_dep_counts(&db, &eval, std::slice::from_ref(&leaf))
-            .await
-            .unwrap();
-
-        assert!(out.is_empty());
-        let log = sqls(db);
-
-        assert!(
-            !log.iter()
-                .any(|s| s.contains("INSERT INTO entry_point_dep_count")),
-            "{log:?}"
-        );
-        assert!(
-            log.iter()
-                .any(|s| s.contains("SET dep_counts_version = $1")),
-            "{log:?}"
-        );
-    }
-
-    #[tokio::test]
-    async fn a_just_computed_page_is_served_even_though_the_graph_moved() {
-        let eval = evaluation(99);
-        let ep = entry_point(eval.id, Some(4), DEP_COUNTS_REFRESH_SECS - 1);
-        let db = mock_db()
-            .append_query_results([vec![count_row(ep.id, BuildStatus::Building, 2)]])
-            .into_connection();
-
-        let out = cached_entry_point_dep_counts(&db, &eval, std::slice::from_ref(&ep))
-            .await
-            .unwrap();
-
-        assert_eq!(out[&ep.id][&BuildStatus::Building], 2);
-        assert_eq!(sqls(db).len(), 1, "a damped read neither walks nor writes");
-    }
-
-    #[tokio::test]
-    async fn rows_past_the_age_ceiling_update_even_with_a_matching_stamp() {
-        let eval = evaluation(5);
-        let ep = entry_point(eval.id, Some(5), DEP_COUNTS_MAX_AGE_SECS + 1);
-        let db = mock_db()
-            .append_query_results([claimed(&[ep.id])])
-            .append_exec_results([ok(0)])
-            .append_query_results([vec![walk_row(ep.id, BuildStatus::Completed, 4)]])
-            .append_exec_results([ok(1), ok(1), ok(1)])
-            .into_connection();
-
-        let out = cached_entry_point_dep_counts(&db, &eval, std::slice::from_ref(&ep))
-            .await
-            .unwrap();
-
-        assert_eq!(out[&ep.id][&BuildStatus::Completed], 4);
-        let log = sqls(db);
-
-        assert!(
-            log.iter().any(|s| s.contains("WITH RECURSIVE seeds")),
-            "{log:?}"
-        );
-    }
-
-    #[tokio::test]
-    async fn a_refresh_claimed_by_a_concurrent_page_load_reads_the_stored_counts() {
-        let eval = evaluation(8);
-        let ep = entry_point(eval.id, Some(7), DEP_COUNTS_REFRESH_SECS + 1);
-        let db = mock_db()
-            .append_query_results([claimed(&[])])
-            .append_query_results([vec![count_row(ep.id, BuildStatus::Queued, 6)]])
-            .into_connection();
-
-        let out = cached_entry_point_dep_counts(&db, &eval, std::slice::from_ref(&ep))
-            .await
-            .unwrap();
-
-        assert_eq!(out[&ep.id][&BuildStatus::Queued], 6);
-        let log = sqls(db);
-
-        assert!(
-            log[0].contains("dep_counts_computed_at <= $2"),
-            "the claim runs first: {log:?}"
-        );
-        assert!(
-            !log.iter().any(|s| s.contains("WITH RECURSIVE seeds")),
-            "{log:?}"
-        );
-    }
-
-    #[tokio::test]
-    async fn the_store_binds_its_ids_in_sorted_order() {
-        let eval = evaluation(2);
-        let a = never_computed(eval.id);
-        let b = never_computed(eval.id);
-        let db = mock_db()
-            .append_query_results([claimed(&[a.id, b.id])])
-            .append_exec_results([ok(0)])
-            .append_query_results([vec![
-                walk_row(a.id, BuildStatus::Queued, 1),
-                walk_row(b.id, BuildStatus::Queued, 1),
-            ]])
-            .append_exec_results([ok(0), ok(2), ok(2)])
-            .into_connection();
-
-        cached_entry_point_dep_counts(&db, &eval, &[a.clone(), b.clone()])
-            .await
-            .unwrap();
-
-        let mut expected = [a.id.into_inner(), b.id.into_inner()];
-        expected.sort_unstable();
-        let bound: Vec<String> = all_statements(db.into_transaction_log())
             .into_iter()
-            .filter(|s| s.sql.contains("SET dep_counts_version"))
-            .map(|s| format!("{:?}", s.values))
-            .collect();
-        let stamp = bound.first().expect("the stamp is written");
-        let first = stamp
-            .find(&expected[0].to_string())
-            .expect("the lower id is bound");
-        let second = stamp
-            .find(&expected[1].to_string())
-            .expect("the higher id is bound");
+            .find(|e| e.id == evaluation)
+            .expect("the evaluation exists");
+        let entry_points = db.entry_points(evaluation).await;
+        cached_entry_point_dep_counts(&db.connection(), &model, &entry_points)
+            .await
+            .unwrap()
+    }
 
-        assert!(first < second, "{stamp}");
+    async fn set_status(db: &TestDatabase, path: &str, status: BuildStatus) {
+        let build = db.shared_build(path).await;
+        db.execute(&format!(
+            "UPDATE derivation_build SET status = {} WHERE id = '{}'",
+            i32::from(status),
+            build.id
+        ))
+        .await;
+    }
+
+    async fn age_stamps(db: &TestDatabase, seconds: i64) {
+        db.execute(&format!(
+            "UPDATE entry_point SET dep_counts_computed_at = \
+             (now() AT TIME ZONE 'UTC') - interval '{seconds} seconds'"
+        ))
+        .await;
     }
 
     #[tokio::test]
-    async fn the_bump_locks_the_evaluations_in_id_order_and_skips_an_empty_set() {
-        let db = mock_db().append_exec_results([ok(2)]).into_connection();
+    async fn test_cached_entry_point_dep_counts() {
+        let evaluation = EvaluationId::now_v7();
+        let db = shape()
+            .evaluation(evaluation)
+            .derivation(&drv("a"))
+            .build_status(BuildStatus::Queued)
+            .job()
+            .entry_point("root")
+            .derivation(&drv("b"))
+            .build_status(BuildStatus::Queued)
+            .job()
+            .derivation(&drv("c"))
+            .build_status(BuildStatus::Completed)
+            .job()
+            .derivation(&drv("d"))
+            .build_status(BuildStatus::Queued)
+            .job()
+            .entry_point("leaf")
+            .derivation(&drv("a"))
+            .depends_on(&drv("b"))
+            .depends_on(&drv("c"))
+            .into_database()
+            .await;
+        let entry = |attr: &'static str| {
+            let db = &db;
+            async move {
+                db.entry_points(evaluation)
+                    .await
+                    .into_iter()
+                    .find(|e| e.eval == attr)
+                    .expect("the entry point exists")
+                    .id
+            }
+        };
+        let (root, leaf) = (entry("root").await, entry("leaf").await);
+        let status_of = |counts: &DepCounts, status| counts[&root].get(&status).copied();
 
-        assert_eq!(bump_graph_version(&db, &[]).await.unwrap(), 0);
-        let n = bump_graph_version(&db, &[EvaluationId::now_v7(), EvaluationId::now_v7()])
+        let computed = counts(&db, evaluation).await;
+        let stored_rows = db.rows::<EEntryPointDepCount>().await.len();
+        let stamped = db
+            .entry_points(evaluation)
+            .await
+            .iter()
+            .all(|e| e.dep_counts_computed_at.is_some());
+
+        set_status(&db, &drv("b"), BuildStatus::Completed).await;
+        let damped = counts(&db, evaluation).await;
+
+        age_stamps(&db, DEP_COUNTS_MAX_AGE_SECS + 1).await;
+        let aged = counts(&db, evaluation).await;
+        let rows_after_age = db.rows::<EEntryPointDepCount>().await.len();
+
+        let bumped = bump_graph_version(&db.connection(), &[evaluation])
             .await
             .unwrap();
+        let bumped_for_derivation =
+            bump_graph_version_for_derivations(&db.connection(), &[db.id_of(&drv("a")).await])
+                .await
+                .unwrap();
+        let bumped_nothing = bump_graph_version(&db.connection(), &[]).await.unwrap();
+        let version = db.rows::<EEvaluation>().await[0].graph_version;
 
-        assert_eq!(n, 2);
-        let log = sqls(db);
+        age_stamps(&db, DEP_COUNTS_REFRESH_SECS + 1).await;
+        let claimed_elsewhere = {
+            let model = db.rows::<EEvaluation>().await.remove(0);
+            let stale = db.entry_points(evaluation).await;
+            age_stamps(&db, 0).await;
+            set_status(&db, &drv("c"), BuildStatus::Queued).await;
+            cached_entry_point_dep_counts(&db.connection(), &model, &stale)
+                .await
+                .unwrap()
+        };
 
-        assert_eq!(log.len(), 1, "{log:?}");
-        assert!(
-            log[0].contains("graph_version = e.graph_version + 1"),
-            "{}",
-            log[0]
+        age_stamps(&db, DEP_COUNTS_REFRESH_SECS + 1).await;
+        let version_moved = counts(&db, evaluation).await;
+        db.finish().await;
+
+        assert_eq!(
+            (
+                status_of(&computed, BuildStatus::Queued),
+                status_of(&computed, BuildStatus::Completed)
+            ),
+            (Some(1), Some(1))
         );
-        assert!(
-            log[0].contains("ORDER BY id FOR NO KEY UPDATE"),
-            "{}",
-            log[0]
+        assert!(!computed.contains_key(&leaf), "a leaf has no counts");
+        assert_eq!(stored_rows, 2);
+        assert!(stamped, "a leaf is stamped without rows");
+        assert_eq!(
+            status_of(&damped, BuildStatus::Queued),
+            Some(1),
+            "a fresh stamp reads the stored counts"
+        );
+        assert_eq!(
+            (
+                status_of(&aged, BuildStatus::Completed),
+                status_of(&aged, BuildStatus::Queued)
+            ),
+            (Some(2), None),
+            "past the age ceiling the walk replaces the stored rows"
+        );
+        assert_eq!(rows_after_age, 1);
+        assert_eq!(
+            (bumped, bumped_for_derivation, bumped_nothing, version),
+            (1, 1, 0, 2)
+        );
+        assert_eq!(
+            status_of(&claimed_elsewhere, BuildStatus::Completed),
+            Some(2),
+            "a refresh claimed by another reader serves the stored counts"
+        );
+        assert_eq!(
+            (
+                status_of(&version_moved, BuildStatus::Completed),
+                status_of(&version_moved, BuildStatus::Queued)
+            ),
+            (Some(1), Some(1)),
+            "a moved graph version walks again"
         );
     }
 }

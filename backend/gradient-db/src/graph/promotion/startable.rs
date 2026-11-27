@@ -82,50 +82,6 @@ mod tests {
     use super::*;
     use gradient_fixtures::mock::empty_db;
 
-    #[test]
-    fn assign_reads_the_queued_invariant_only() {
-        let sql = find_startable_shared_builds_sql()
-            .split_whitespace()
-            .collect::<Vec<_>>()
-            .join(" ");
-        assert!(sql.contains(&format!(
-            "db.status = {}",
-            crate::sql::status::build(BuildStatus::Queued)
-        )));
-        assert!(sql.contains("FROM build_job bj WHERE bj.derivation = db.derivation"));
-        assert!(
-            !sql.contains("blocking_deps")
-                && !sql.contains("fetchable")
-                && !sql.contains("cached_path"),
-            "{sql}"
-        );
-    }
-
-    #[test]
-    fn assign_refuses_a_shared_build_whose_assignment_row_is_open() {
-        let norm = |s: String| s.split_whitespace().collect::<Vec<_>>().join(" ");
-        let gate = norm(
-            crate::scheduling::assignment_record::no_open_assignment_predicate(
-                &crate::scheduling::assignment_record::build_job_key_sql("db.id"),
-            ),
-        );
-
-        assert!(norm(find_startable_shared_builds_sql()).contains(&gate));
-    }
-
-    #[test]
-    fn the_delta_is_the_startable_set_narrowed_to_what_moved() {
-        let norm = |s: String| s.split_whitespace().collect::<Vec<_>>().join(" ");
-        let among = norm(find_startable_shared_builds_among_sql());
-        let scope = "AND db.derivation = ANY($1::uuid[]) ";
-
-        assert!(among.contains(scope), "{among}");
-        assert_eq!(
-            among.replacen(scope, "", 1),
-            norm(find_startable_shared_builds_sql())
-        );
-    }
-
     #[tokio::test]
     async fn no_moves_means_no_statement() {
         let db = empty_db();
@@ -136,5 +92,52 @@ mod tests {
 
         assert!(shared_builds.is_empty());
         assert!(db.into_transaction_log().is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_find_startable_shared_builds_returns_queued_job_named_unassigned_builds_in_dependency_order_and_among_narrows_to_given_build_ids()
+     {
+        let path = |key: &str| format!("/nix/store/{}-startable.drv", key.repeat(32));
+        let db = gradient_fixtures::shape::shape()
+            .evaluation(gradient_types::EvaluationId::now_v7())
+            .derivation(&path("1"))
+            .build_status(BuildStatus::Queued)
+            .job()
+            .derivation(&path("2"))
+            .build_status(BuildStatus::Queued)
+            .derivation(&path("3"))
+            .build_status(BuildStatus::Queued)
+            .job()
+            .open_assignment()
+            .derivation(&path("4"))
+            .job()
+            .derivation(&path("5"))
+            .build_status(BuildStatus::Queued)
+            .job()
+            .depends_on(&path("1"))
+            .into_database()
+            .await;
+        db.execute("UPDATE derivation_build SET blocking_deps = 3, fetchable = false")
+            .await;
+        let mut ids = Vec::new();
+        for key in ["1", "2", "3", "4", "5"] {
+            ids.push(db.id_of(&path(key)).await);
+        }
+        let connection = db.connection();
+
+        let all = find_startable_shared_builds(&connection).await.unwrap();
+        let among = find_startable_shared_builds_among(&connection, &ids[..4])
+            .await
+            .unwrap();
+        db.finish().await;
+
+        assert_eq!(
+            all.iter().map(|row| row.derivation).collect::<Vec<_>>(),
+            [ids[4], ids[0]]
+        );
+        assert_eq!(
+            among.iter().map(|row| row.derivation).collect::<Vec<_>>(),
+            [ids[0]]
+        );
     }
 }

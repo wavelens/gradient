@@ -358,14 +358,78 @@ pub async fn of_projects<C: ConnectionTrait>(
 mod tests {
     use super::*;
 
-    #[test]
-    fn series_group_by_label_within_the_window() {
-        let sql = labelled_series_sql(RollupGranularity::Minute, 6);
-        assert!(sql.contains("metric = $1"), "{sql}");
-        assert!(sql.contains("granularity = 0"), "{sql}");
-        assert!(sql.contains("interval '6 hours'"), "{sql}");
-        assert!(sql.contains("COALESCE(scope->>'label', '')"), "{sql}");
-        assert!(sql.contains("GROUP BY 1, 2"), "{sql}");
-        assert!(sql.contains("max(max)"), "{sql}");
+    #[tokio::test]
+    async fn sums_rollup_rows_per_label_and_bucket_for_requested_metric_and_granularity_within_window()
+     {
+        use gradient_fixtures::database::TestDatabase;
+
+        let db = TestDatabase::create().await;
+        let rollup = |metric: &str,
+                      granularity: i16,
+                      minutes_ago: i32,
+                      scope: &str,
+                      hash: i32,
+                      count: i32,
+                      sum: i32,
+                      max: i32| {
+            format!(
+                "INSERT INTO metric_rollup (id, metric, granularity, bucket_start, scope, scope_hash, \
+                 count, sum, min, max, sum_sq) \
+                 VALUES (uuidv7(), '{metric}', {granularity}, \
+                 date_trunc('minute', (now() AT TIME ZONE 'UTC') - interval '{minutes_ago} minutes'), \
+                 '{scope}'::jsonb, {hash}, {count}, {sum}, 0, {max}, 0)"
+            )
+        };
+        let metric = metric::STORAGE_OP_MS;
+        for sql in [
+            rollup(metric, 0, 10, r#"{"label":"read"}"#, 1, 2, 20, 15),
+            rollup(
+                metric,
+                0,
+                10,
+                r#"{"label":"read","node":"x"}"#,
+                7,
+                3,
+                30,
+                40,
+            ),
+            rollup(metric, 0, 10, r#"{"label":"write"}"#, 2, 1, 5, 5),
+            rollup(metric, 0, 10, r#"{}"#, 3, 1, 9, 9),
+            rollup(metric, 0, 5, r#"{"label":"read"}"#, 1, 1, 7, 7),
+            rollup(metric, 1, 10, r#"{"label":"hour"}"#, 4, 1, 1, 1),
+            rollup(metric, 0, 600, r#"{"label":"old"}"#, 5, 1, 1, 1),
+            rollup(
+                metric::CACHE_BYTES_SENT,
+                0,
+                10,
+                r#"{"label":"other"}"#,
+                6,
+                1,
+                1,
+                1,
+            ),
+        ] {
+            db.execute(&sql).await;
+        }
+
+        let buckets = labelled(&db.connection(), metric, RollupGranularity::Minute, 6)
+            .await
+            .expect("the labelled series read");
+
+        db.finish().await;
+        let summary: Vec<_> = buckets
+            .iter()
+            .map(|b| (b.label.as_str(), b.count, b.sum, b.max))
+            .collect();
+        assert_eq!(
+            summary,
+            [
+                ("", 1, 9.0, 9.0),
+                ("read", 5, 50.0, 40.0),
+                ("read", 1, 7.0, 7.0),
+                ("write", 1, 5.0, 5.0),
+            ]
+        );
+        assert!(buckets[1].bucket_start < buckets[2].bucket_start);
     }
 }

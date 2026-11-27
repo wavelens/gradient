@@ -217,42 +217,83 @@ fn literal(param: &Param) -> Option<Value> {
 #[cfg(test)]
 mod tests {
     use gradient_db::sql::Param;
+    use gradient_fixtures::shape::shape;
+    use gradient_types::EvaluationId;
+    use sea_orm::Value;
+    use uuid::Uuid;
 
-    use super::draw_sql;
+    use super::{Sampler, draw_sql};
 
-    #[test]
-    fn every_drawn_kind_has_a_sampler() {
-        for param in [
-            Param::DerivationId,
-            Param::DerivationIds(4),
-            Param::OrphanDerivationIds(4),
-            Param::DerivationHash,
-            Param::DerivationHashes(4),
-            Param::CachedPathId,
-            Param::CachedPathIds(4),
-            Param::CachedPathHash,
-            Param::CachedPathHashes(4),
-            Param::SharedBuildId,
-            Param::SharedBuildIds(4),
-            Param::EvaluationId,
-            Param::EvaluationIds(4),
-            Param::EntryPointId,
-            Param::EntryPointIds(4),
-            Param::ProjectId,
-            Param::UserId,
-            Param::CacheId,
-            Param::TaskId,
-            Param::TaskActionId,
-            Param::GitHostConnectionId,
-            Param::CommitPrefixLow,
-            Param::CommitPrefixHigh,
+    const ORPHAN_FIRST: &str = "0123456789abcdfghijklmnpqrsvwxyz-orphan-first.drv";
+    const WITH_JOB: &str = "0c7kxbq0fdq6pnxpzhg5yvbbrylx4v3f-with-job.drv";
+    const WITH_TWO_JOBS: &str = "1b8m2nd4qkhgp6dzs7vwyxjr0a3fc9li-with-two-jobs.drv";
+    const WITH_ENTRY_POINT: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-with-entry-point.drv";
+    const ORPHAN_LAST: &str = "0c0f6hb8s2q2wbdrhl5ch9fwr8v2rq7x-orphan-last.drv";
+
+    #[tokio::test]
+    async fn real_postgres_sql_gate_value_sampler_lowest_ids_excludes_orphans_with_jobs_or_entry_points_and_picks_most_jobs_for_evaluation()
+     {
+        let (small, large) = (EvaluationId::now_v7(), EvaluationId::now_v7());
+        let db = shape()
+            .derivation(ORPHAN_FIRST)
+            .derivation(ORPHAN_LAST)
+            .evaluation(small)
+            .derivation(WITH_JOB)
+            .job()
+            .derivation(WITH_ENTRY_POINT)
+            .entry_point("packages.x86_64-linux.entry")
+            .evaluation(large)
+            .derivation(WITH_JOB)
+            .job()
+            .derivation(WITH_TWO_JOBS)
+            .job()
+            .into_database()
+            .await;
+        let connection = db.connection();
+
+        let mut by_id = Vec::new();
+        for path in [
+            ORPHAN_FIRST,
+            WITH_JOB,
+            WITH_TWO_JOBS,
+            WITH_ENTRY_POINT,
+            ORPHAN_LAST,
         ] {
-            let sql = draw_sql(&param).unwrap_or_else(|| panic!("{param:?} has no sampler"));
-            assert!(
-                sql.contains("ORDER BY"),
-                "{param:?} draws in heap order: {sql}"
-            );
+            by_id.push(Uuid::from(db.id_of(path).await));
         }
+        let mut orphans = vec![by_id[0], by_id[4]];
+        by_id.sort();
+        orphans.sort();
+        db.execute(&format!(
+            "UPDATE derivation SET name = name WHERE id = '{}'",
+            by_id[0]
+        ))
+        .await;
+
+        let draw = |param: Param| {
+            let connection = connection.clone();
+            async move {
+                Sampler::default()
+                    .draw(&connection, &param)
+                    .await
+                    .expect("draw")
+            }
+        };
+
+        assert_eq!(draw(Param::DerivationId).await, Some(Value::from(by_id[0])));
+        assert_eq!(
+            draw(Param::DerivationIds(2)).await,
+            Some(Value::from(by_id[..2].to_vec()))
+        );
+        assert_eq!(
+            draw(Param::OrphanDerivationIds(5)).await,
+            Some(Value::from(orphans))
+        );
+        assert_eq!(
+            draw(Param::EvaluationId).await,
+            Some(Value::from(Uuid::from(large)))
+        );
+        db.finish().await;
     }
 
     #[test]
@@ -270,14 +311,5 @@ mod tests {
         ] {
             assert!(draw_sql(&param).is_none(), "{param:?} must not query");
         }
-    }
-
-    #[test]
-    fn an_array_sampler_asks_for_the_declared_width() {
-        assert!(
-            draw_sql(&Param::DerivationIds(64))
-                .expect("sampler")
-                .contains("$1")
-        );
     }
 }

@@ -141,126 +141,135 @@ crate::sql_fn! {
 
 #[cfg(test)]
 mod tests {
-    use super::super::requeue::{
-        requeue_failed_closure_blocked_sql, requeue_failed_shared_builds_sql,
-    };
     use super::*;
+    use gradient_types::EvaluationId;
 
-    #[test]
-    fn a_failure_walk_enters_a_passthrough_only_over_an_unavailable_referenced_output() {
-        let norm = |s: String| s.split_whitespace().collect::<Vec<_>>().join(" ");
-        let fence = norm(failure_spreads_predicate("e"));
-        assert!(
-            fence.contains("rb.cache_available AND NOT EXISTS (SELECT 1 FROM derivation_output o")
-                && fence.contains("o.external_url IS NULL")
-                && fence.contains("THEN e.kind IN (1, 2)"),
-            "a passthrough fails only on a dependency output it references and nobody holds: {fence}"
-        );
-        for sql in [
-            norm(cascade_dependency_failed_sql()),
-            norm(dependency_failed_repair_sql()),
-            norm(requeue_failed_shared_builds_sql()),
-            norm(requeue_failed_closure_blocked_sql()),
-        ] {
-            assert!(
-                sql.contains(&fence),
-                "the upward walk enters a passthrough over a build input: {sql}"
-            );
+    #[tokio::test]
+    async fn repair_dependency_failed_fails_pending_parents_above_failed_dependency_and_leaves_other_builds_untouched()
+     {
+        use gradient_entity::build_attempt::AttemptOutcome;
+
+        let path = |c: &str| format!("/nix/store/{}-repair.drv", c.repeat(32));
+        let [failed, pending, completed, in_flight, outside] = ["1", "2", "3", "4", "5"];
+        let (evaluation, other_evaluation) = (EvaluationId::now_v7(), EvaluationId::now_v7());
+        let db = gradient_fixtures::shape::shape()
+            .evaluation(evaluation)
+            .derivation(&path(failed))
+            .walked()
+            .job()
+            .output(&failed.repeat(32))
+            .build_status(BuildStatus::FailedPermanent)
+            .derivation(&path(pending))
+            .walked()
+            .job()
+            .output(&pending.repeat(32))
+            .depends_on(&path(failed))
+            .derivation(&path(completed))
+            .walked()
+            .job()
+            .output(&completed.repeat(32))
+            .depends_on(&path(failed))
+            .build_status(BuildStatus::Completed)
+            .cached_path(&completed.repeat(32), "completed")
+            .derivation(&path(in_flight))
+            .walked()
+            .job()
+            .output(&in_flight.repeat(32))
+            .depends_on(&path(failed))
+            .build_status(BuildStatus::Building)
+            .attempt(AttemptOutcome::Running, None)
+            .open_assignment()
+            .evaluation(other_evaluation)
+            .derivation(&path(outside))
+            .walked()
+            .job()
+            .output(&outside.repeat(32))
+            .depends_on(&path(failed))
+            .into_database()
+            .await;
+
+        let changes = repair_dependency_failed(&db.connection(), evaluation)
+            .await
+            .unwrap();
+        let mut statuses = Vec::new();
+        for key in [failed, pending, completed, in_flight, outside] {
+            statuses.push(db.shared_build(&path(key)).await.status);
         }
+        db.finish().await;
+
+        assert_eq!(
+            statuses,
+            [
+                BuildStatus::FailedPermanent,
+                BuildStatus::DependencyFailed,
+                BuildStatus::Completed,
+                BuildStatus::Building,
+                BuildStatus::Created
+            ]
+        );
+        assert_eq!(changes.len(), 1);
     }
 
-    #[test]
-    fn dependency_failed_repair_sql_mirrors_the_cascade() {
-        let sql = dependency_failed_repair_sql()
-            .split_whitespace()
-            .collect::<Vec<_>>()
-            .join(" ");
-        let terminal_failure = crate::sql::status::build_in(&BuildStatus::TERMINAL_FAILURE);
-        let cascade_target = crate::sql::status::from(BuildStatus::CASCADE_DEPENDENCY_FAILED);
-        assert!(
-            !BuildStatus::TERMINAL_FAILURE.contains(&BuildStatus::Aborted)
-                && !BuildStatus::CASCADE_DEPENDENCY_FAILED
-                    .from
-                    .contains(&BuildStatus::Building),
-            "seed excludes Aborted (retried, not permanent); target excludes Building"
-        );
-        assert!(
-            sql.contains(&format!(
-                "FROM derivation_build WHERE status IN ({terminal_failure})"
-            )),
-            "must seed from the terminal-failed set: {sql}"
-        );
-        assert!(
-            sql.contains(&format!(
-                "SET status = {}",
-                crate::sql::status::build(BuildStatus::DependencyFailed)
-            )),
-            "must fail parents to DependencyFailed: {sql}"
-        );
-        assert!(
-            sql.contains(&format!("db.status IN ({cascade_target})")),
-            "must only touch non-terminal shared builds (never terminal-success): {sql}"
-        );
-        assert!(
-            sql.contains("old.status AS from_status"),
-            "must capture the pre-update status for the effects emitter: {sql}"
-        );
-        let in_flight_guard = format!("AND {}", not_in_flight());
-        assert!(
-            sql.contains(&in_flight_guard)
-                && cascade_dependency_failed_sql().contains(&in_flight_guard),
-            "neither write may take a shared build away from its open dispatch: {sql}"
-        );
-        assert!(
-            sql.contains(
-                "SELECT e.derivation AS next FROM derivation_dependency e WHERE e.dependency = c.derivation"
-            ),
-            "must walk parents upward via the dependency edge: {sql}"
-        );
-        assert!(
-            sql.contains("RETURNING db.derivation"),
-            "must return failed derivations so the caller can finalize their evals: {sql}"
-        );
-    }
+    #[tokio::test]
+    async fn repair_dependency_failed_fails_parents_above_evaluation_aborted_build_but_not_above_build_aborted_elsewhere()
+     {
+        let path = |c: &str| format!("/nix/store/{}-aborted.drv", c.repeat(32));
+        let [
+            aborted_here,
+            parent_here,
+            aborted_elsewhere,
+            parent_elsewhere,
+        ] = ["1", "2", "3", "4"];
+        let evaluation = EvaluationId::now_v7();
+        let db = gradient_fixtures::shape::shape()
+            .evaluation(evaluation)
+            .derivation(&path(aborted_here))
+            .walked()
+            .job()
+            .build_status(BuildStatus::Aborted)
+            .derivation(&path(parent_here))
+            .walked()
+            .job()
+            .depends_on(&path(aborted_here))
+            .derivation(&path(aborted_elsewhere))
+            .walked()
+            .job()
+            .build_status(BuildStatus::Aborted)
+            .derivation(&path(parent_elsewhere))
+            .walked()
+            .job()
+            .depends_on(&path(aborted_elsewhere))
+            .into_database()
+            .await;
+        db.execute(&format!(
+            "UPDATE build_job SET aborted = true WHERE derivation = '{}'",
+            db.id_of(&path(aborted_here)).await
+        ))
+        .await;
 
-    #[test]
-    fn a_build_the_evaluation_aborted_fails_its_dependents_like_a_failure() {
-        let norm = |s: String| s.split_whitespace().collect::<Vec<_>>().join(" ");
-        let sql = norm(dependency_failed_repair_sql());
-        assert!(
-            sql.contains(&format!(
-                "UNION {}) seed",
-                norm(aborted_in_evaluation("$1"))
-            )),
-            "{sql}"
-        );
-    }
+        let changes = repair_dependency_failed(&db.connection(), evaluation)
+            .await
+            .unwrap();
+        let mut statuses = Vec::new();
+        for key in [
+            aborted_here,
+            parent_here,
+            aborted_elsewhere,
+            parent_elsewhere,
+        ] {
+            statuses.push(db.shared_build(&path(key)).await.status);
+        }
+        db.finish().await;
 
-    #[test]
-    fn dependency_failed_repair_sql_bounds_to_eval_closure() {
-        let norm = |s: String| s.split_whitespace().collect::<Vec<_>>().join(" ");
-        let scoped = norm(dependency_failed_repair_sql());
-        assert!(
-            scoped.contains("WITH RECURSIVE closure(derivation) AS"),
-            "the sweep must walk the eval closure: {scoped}"
+        assert_eq!(
+            statuses,
+            [
+                BuildStatus::Aborted,
+                BuildStatus::DependencyFailed,
+                BuildStatus::Aborted,
+                BuildStatus::Created
+            ]
         );
-        assert!(
-            scoped.contains(&format!(
-                "WHERE status IN ({terminal_failure}) AND derivation IN (SELECT derivation FROM closure)",
-                terminal_failure = crate::sql::status::build_in(&BuildStatus::TERMINAL_FAILURE),
-            )),
-            "the seed must be the closure's terminal-failed shared builds: {scoped}"
-        );
-        assert!(
-            scoped.contains("WHERE EXISTS (SELECT 1 FROM closure x WHERE x.derivation = t.next)"),
-            "the walk must stay inside the closure: {scoped}"
-        );
-        assert!(
-            scoped
-                .matches("IN (SELECT derivation FROM closure)")
-                .count()
-                >= 2,
-            "seed and UPDATE must be bounded to the closure: {scoped}"
-        );
+        assert_eq!(changes.len(), 1);
     }
 }

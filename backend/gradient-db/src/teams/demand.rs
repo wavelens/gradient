@@ -80,7 +80,7 @@ fn aggregate(reasons: impl IntoIterator<Item = WaitingReason>) -> TeamDemand {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use gradient_fixtures::mock::{all_statements, mock_db};
+    use gradient_fixtures::mock::mock_db;
 
     fn grant(project: ProjectId) -> MTeamProject {
         MTeamProject {
@@ -163,47 +163,64 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn ignores_projects_without_worker_grant() {
-        let db = mock_db()
-            .append_query_results([Vec::<MTeamProject>::new()])
-            .into_connection();
+    async fn team_demand_counts_only_waiting_evaluations_of_projects_with_granted_workers_and_honors_project_filter()
+     {
+        let [granted_a, granted_b, ungranted, building] = [(); 4].map(|_| EvaluationId::now_v7());
+        let db = gradient_fixtures::shape::shape()
+            .evaluation(granted_a)
+            .evaluation_status(EvaluationStatus::Waiting)
+            .evaluation(granted_b)
+            .evaluation_status(EvaluationStatus::Waiting)
+            .evaluation(ungranted)
+            .evaluation_status(EvaluationStatus::Waiting)
+            .evaluation(building)
+            .add_team_worker_with_team_grants_for_evaluation_projects(
+                "w1",
+                &[granted_a, granted_b, building],
+            )
+            .into_database()
+            .await;
+        let reasons = [
+            (
+                granted_a,
+                WaitingReason::workers(vec![unmet("x86_64-linux", &[], 2)], 1, vec![]),
+            ),
+            (
+                granted_b,
+                WaitingReason::eval_workers(EvalCapability::Network, 0),
+            ),
+            (
+                ungranted,
+                WaitingReason::workers(vec![unmet("aarch64-linux", &[], 7)], 1, vec![]),
+            ),
+            (
+                building,
+                WaitingReason::workers(vec![unmet("riscv64-linux", &[], 9)], 1, vec![]),
+            ),
+        ];
+        for (evaluation, reason) in reasons {
+            db.execute(&format!(
+                "UPDATE evaluation SET waiting_reason = '{}'::jsonb WHERE id = '{evaluation}'",
+                reason.to_json()
+            ))
+            .await;
+        }
+        let team = db.rows::<ETeam>().await[0].id;
+        let project_of_b = db.project_of(granted_b).await;
 
-        let demand = team_demand(&db, TeamId::now_v7(), None)
+        let everything = team_demand(&db.connection(), team, None).await.unwrap();
+        let only_b = team_demand(&db.connection(), team, Some(&[project_of_b]))
             .await
-            .expect("demand");
-
-        assert_eq!(demand, TeamDemand::default());
-        let statements = all_statements(db.into_transaction_log());
-        assert!(
-            statements
-                .iter()
-                .all(|s| !s.sql.contains("FROM \"evaluation\""))
-        );
-        assert!(
-            statements
-                .iter()
-                .any(|s| s.sql.contains("\"includes_workers\" = $"))
-        );
-    }
-
-    #[tokio::test]
-    async fn project_filter_limits_aggregation() {
-        let (kept, dropped) = (ProjectId::now_v7(), ProjectId::now_v7());
-        let db = mock_db()
-            .append_query_results([vec![grant(kept), grant(dropped)]])
-            .append_query_results([Vec::<MEvaluation>::new()])
-            .into_connection();
-
-        team_demand(&db, TeamId::now_v7(), Some(&[kept]))
+            .unwrap();
+        let nothing = team_demand(&db.connection(), TeamId::now_v7(), None)
             .await
-            .expect("demand");
+            .unwrap();
+        db.finish().await;
 
-        let evaluations = all_statements(db.into_transaction_log())
-            .into_iter()
-            .find(|s| s.sql.contains("FROM \"evaluation\""))
-            .expect("an evaluation query");
-        let values = format!("{:?}", evaluations.values);
-        assert!(values.contains(&kept.to_string()));
-        assert!(!values.contains(&dropped.to_string()));
+        assert_eq!(everything.builds, vec![unmet("x86_64-linux", &[], 2)]);
+        assert_eq!(everything.network, 1);
+        assert!(only_b.builds.is_empty());
+        assert_eq!(only_b.network, 1);
+        assert_eq!(nothing, TeamDemand::default());
     }
 }

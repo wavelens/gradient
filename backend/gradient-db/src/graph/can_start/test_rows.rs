@@ -8,10 +8,6 @@ use gradient_types::DerivationId;
 use sea_orm::{MockExecResult, Value};
 use std::collections::BTreeMap;
 
-pub(super) fn norm(s: &str) -> String {
-    s.split_whitespace().collect::<Vec<_>>().join(" ")
-}
-
 pub(super) fn drv(id: DerivationId) -> BTreeMap<String, Value> {
     BTreeMap::from([("derivation".to_owned(), Value::from(id.into_inner()))])
 }

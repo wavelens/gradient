@@ -216,132 +216,166 @@ async fn close_open_attempts<C: ConnectionTrait>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::scheduling::cluster::test_rows::exec;
-    use gradient_fixtures::mock::{all_statements, mock_db};
+    use gradient_entity::ids::ClusterAttemptId;
     use gradient_fixtures::shape::shape;
     use gradient_types::EvaluationId;
 
     #[tokio::test]
-    async fn the_budget_counts_only_attempts_inside_it() {
-        let db = mock_db().append_exec_results([exec(1)]).into_connection();
+    async fn finish_moves_only_live_clusters_and_dissolve_removes_only_queued_unplaced_clusters_past_deadline_without_open_attempt()
+     {
+        let now = gradient_types::now();
+        let (past, future) = (
+            now - chrono::Duration::hours(1),
+            now + chrono::Duration::hours(1),
+        );
+        let ids: Vec<ClusterJobId> = (0..7).map(|_| ClusterJobId::now_v7()).collect();
+        let [running, done, due, not_due, plain, placed, running_due] = ids[..] else {
+            unreachable!()
+        };
+        let mut seed = shape().evaluation(EvaluationId::now_v7());
+        for (cluster, status, dissolve_after) in [
+            (running, ClusterJobStatus::Running, None),
+            (done, ClusterJobStatus::Completed, None),
+            (due, ClusterJobStatus::Queued, Some(past)),
+            (not_due, ClusterJobStatus::Queued, Some(future)),
+            (plain, ClusterJobStatus::Queued, None),
+            (placed, ClusterJobStatus::Queued, Some(past)),
+            (running_due, ClusterJobStatus::Running, Some(past)),
+        ] {
+            seed = seed
+                .cluster(cluster, false, 2, status, 0, now)
+                .cluster_option(cluster, |c| c.dissolve_after = dissolve_after);
+        }
+        let db = seed
+            .cluster_attempt(placed, ClusterAttemptId::now_v7(), None, None, None)
+            .into_database()
+            .await;
+        let conn = db.connection();
 
-        let requeued = requeue_cluster_job(&db, ClusterJobId::now_v7(), Requeue::WithinBudget)
+        let finished_live = finish_cluster_job(&conn, running, ClusterJobStatus::Failed).await;
+        let finished_done = finish_cluster_job(&conn, done, ClusterJobStatus::Failed).await;
+        let dissolved = dissolve_unplaced_clusters(&conn).await;
+        let split_not_due = dissolve_split_cluster(&conn, not_due).await;
+        let split_plain = dissolve_split_cluster(&conn, plain).await;
+        let split_placed = dissolve_split_cluster(&conn, placed).await;
+        let split_running = dissolve_split_cluster(&conn, running_due).await;
+
+        let mut left: Vec<_> = db
+            .rows::<EClusterJob>()
             .await
-            .expect("requeue");
-
-        assert!(requeued);
-        let statements = all_statements(db.into_transaction_log());
-        let sql = &statements[0].sql;
-        assert!(
-            sql.starts_with("UPDATE \"cluster_job\" SET \"status\" = $1"),
-            "{sql}"
-        );
-        assert!(
-            sql.contains("\"attempts\" - \"attempts_outside_budget\" <= \"retry_budget\""),
-            "{sql}"
-        );
-        assert!(sql.contains("NOT EXISTS(SELECT"), "{sql}");
-        assert!(sql.contains("FROM \"cluster_member\""), "{sql}");
-        assert!(
-            sql.contains("\"cluster_member\".\"cluster_job\" = \"cluster_job\".\"id\""),
-            "{sql}"
-        );
-        let queued = format!("SmallInt(Some({}))", i16::from(ClusterJobStatus::Queued));
-        let running = format!("SmallInt(Some({}))", i16::from(ClusterJobStatus::Running));
-        let values = format!("{:?}", statements[0].values);
-        assert!(
-            values.contains(&queued) && values.contains(&running),
-            "{values}"
-        );
+            .into_iter()
+            .map(|c| (c.id, c.status))
+            .collect();
+        left.sort_by_key(|(id, _)| *id);
+        db.finish().await;
+        assert!(finished_live.expect("finish"));
+        assert!(!finished_done.expect("finish"));
+        assert_eq!(dissolved.expect("dissolve"), [due]);
+        assert!(split_not_due.expect("dissolve"));
+        assert!(!split_plain.expect("dissolve"));
+        assert!(!split_placed.expect("dissolve"));
+        assert!(!split_running.expect("dissolve"));
+        let mut expected = vec![
+            (running, ClusterJobStatus::Failed),
+            (done, ClusterJobStatus::Completed),
+            (plain, ClusterJobStatus::Queued),
+            (placed, ClusterJobStatus::Queued),
+            (running_due, ClusterJobStatus::Running),
+        ];
+        expected.sort_by_key(|(id, _)| *id);
+        assert_eq!(left, expected);
     }
 
     #[tokio::test]
-    async fn an_unplaced_split_cluster_is_dissolved() {
-        use gradient_entity::cluster_job::Model as MClusterJob;
+    async fn startup_recovery_closes_open_attempts_requeues_running_and_aborts_dead_member() {
+        use gradient_entity::evaluation::EvaluationStatus;
 
-        let cluster = ClusterJobId::now_v7();
-        let db = mock_db()
-            .append_query_results([vec![MClusterJob {
-                id: cluster,
-                ..Default::default()
-            }]])
-            .into_connection();
+        let now = gradient_types::now();
+        let (alive, dead_running, dead_queued, idle) = (
+            ClusterJobId::now_v7(),
+            ClusterJobId::now_v7(),
+            ClusterJobId::now_v7(),
+            ClusterJobId::now_v7(),
+        );
+        let (started, unstarted, finished) = (
+            ClusterAttemptId::now_v7(),
+            ClusterAttemptId::now_v7(),
+            ClusterAttemptId::now_v7(),
+        );
+        let db = shape()
+            .evaluation(EvaluationId::now_v7())
+            .cluster(alive, true, 3, ClusterJobStatus::Running, 1, now)
+            .evaluation_member_of(alive, "server", true, None)
+            .cluster_attempt(alive, started, Some(now), None, None)
+            .evaluation(EvaluationId::now_v7())
+            .evaluation_status(EvaluationStatus::Completed)
+            .cluster(dead_running, true, 3, ClusterJobStatus::Running, 1, now)
+            .evaluation_member_of(dead_running, "server", true, None)
+            .cluster_attempt(dead_running, unstarted, None, None, None)
+            .evaluation(EvaluationId::now_v7())
+            .evaluation_status(EvaluationStatus::Completed)
+            .cluster(dead_queued, true, 3, ClusterJobStatus::Queued, 0, now)
+            .evaluation_member_of(dead_queued, "server", true, None)
+            .evaluation(EvaluationId::now_v7())
+            .cluster(idle, true, 3, ClusterJobStatus::Queued, 1, now)
+            .evaluation_member_of(idle, "server", true, None)
+            .cluster_attempt(
+                idle,
+                finished,
+                Some(now),
+                Some(now),
+                Some(ClusterAttemptOutcome::Failed),
+            )
+            .into_database()
+            .await;
 
-        let dissolved = dissolve_unplaced_clusters(&db).await.expect("dissolve");
-
-        assert_eq!(dissolved, vec![cluster]);
-        let statements = all_statements(db.into_transaction_log());
-        let sql = &statements[0].sql;
-        assert!(sql.starts_with("DELETE FROM \"cluster_job\""), "{sql}");
-        assert!(sql.contains("\"dissolve_after\" < $"), "{sql}");
-        assert!(sql.contains("NOT EXISTS(SELECT"), "{sql}");
-        assert!(sql.contains("\"finished_at\" IS NULL"), "{sql}");
-        let queued = format!("SmallInt(Some({}))", i16::from(ClusterJobStatus::Queued));
-        assert!(format!("{:?}", statements[0].values).contains(&queued));
-    }
-
-    #[tokio::test]
-    async fn finishing_moves_only_a_live_cluster() {
-        let db = mock_db().append_exec_results([exec(0)]).into_connection();
-
-        let finished = finish_cluster_job(&db, ClusterJobId::now_v7(), ClusterJobStatus::Failed)
+        let recovered = recover_cluster_attempts(&db.connection())
             .await
-            .expect("finish");
+            .expect("recover");
 
-        assert!(!finished);
-        let statements = all_statements(db.into_transaction_log());
-        let sql = &statements[0].sql;
-        assert!(
-            sql.starts_with("UPDATE \"cluster_job\" SET \"status\" = $1"),
-            "{sql}"
-        );
-        assert!(sql.contains("\"status\" IN ($"), "{sql}");
-    }
-
-    #[tokio::test]
-    async fn startup_closes_every_open_attempt_then_requeues_live_clusters() {
-        let db = mock_db()
-            .append_exec_results([exec(2), exec(1), exec(1), exec(3)])
-            .append_query_results([Vec::<std::collections::BTreeMap<&str, sea_orm::Value>>::new()])
-            .into_connection();
-
-        let recovered = recover_cluster_attempts(&db).await.expect("recover");
-
+        let status = |cluster| {
+            let db = &db;
+            async move {
+                let row = db.find::<EClusterJob>(cluster).await.expect("the cluster");
+                (row.status, row.attempts_outside_budget)
+            }
+        };
+        let outcomes: std::collections::HashMap<_, _> = db
+            .rows::<EClusterAttempt>()
+            .await
+            .into_iter()
+            .map(|a| (a.id, a.outcome))
+            .collect();
+        let statuses = [
+            status(alive).await,
+            status(dead_running).await,
+            status(dead_queued).await,
+            status(idle).await,
+        ];
+        db.finish().await;
         assert_eq!(
             recovered,
             ClusterRecovery {
-                attempts_closed: 3,
-                clusters_requeued: 3,
-                clusters_aborted: 1,
+                attempts_closed: 2,
+                clusters_requeued: 1,
+                clusters_aborted: 2,
             }
         );
-        let statements = all_statements(db.into_transaction_log());
-        let sql: Vec<&str> = statements.iter().map(|s| s.sql.as_str()).collect();
-        assert!(
-            sql[0].starts_with("UPDATE \"cluster_attempt\"")
-                && sql[0].contains("\"started_at\" IS NULL"),
-            "{sql:?}"
+        assert_eq!(
+            statuses,
+            [
+                (ClusterJobStatus::Queued, 1),
+                (ClusterJobStatus::Aborted, 0),
+                (ClusterJobStatus::Aborted, 0),
+                (ClusterJobStatus::Queued, 0),
+            ]
         );
-        assert!(
-            sql[1].starts_with("UPDATE \"cluster_attempt\"")
-                && sql[1].contains("\"started_at\" IS NOT NULL"),
-            "{sql:?}"
+        assert_eq!(outcomes[&started], Some(ClusterAttemptOutcome::Aborted));
+        assert_eq!(
+            outcomes[&unstarted],
+            Some(ClusterAttemptOutcome::PrepareFailed)
         );
-        assert!(
-            sql[2].starts_with("UPDATE \"cluster_job\"") && sql[2].contains("EXISTS(SELECT"),
-            "{sql:?}"
-        );
-        assert!(
-            sql[3].starts_with("UPDATE \"cluster_job\"")
-                && sql[3].contains("\"attempts_outside_budget\" = \"attempts_outside_budget\" + ")
-                && !sql[3].contains("EXISTS"),
-            "{sql:?}"
-        );
-        let prepare_failed = format!(
-            "SmallInt(Some({}))",
-            i16::from(ClusterAttemptOutcome::PrepareFailed)
-        );
-        assert!(format!("{:?}", statements[0].values).contains(&prepare_failed));
+        assert_eq!(outcomes[&finished], Some(ClusterAttemptOutcome::Failed));
     }
 
     #[tokio::test]

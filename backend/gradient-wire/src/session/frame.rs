@@ -44,6 +44,9 @@ type WriterTask = std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>
 pub use crate::constants::BULK_CHUNK_SIZE;
 
 pub const MAX_PROTO_MESSAGE_SIZE: usize = 8 * 1024 * 1024;
+const _: () = assert!(
+    BULK_CHUNK_SIZE * 2 <= MAX_PROTO_MESSAGE_SIZE && MAX_PROTO_MESSAGE_SIZE <= 16 * 1024 * 1024
+);
 
 /// [`MAX_PROTO_MESSAGE_SIZE`] is bounding memory, not liveness. A message far larger than the send
 /// buffer is leaving its sender blocked mid-write. Two peers blocked mid-write never return to

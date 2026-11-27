@@ -233,44 +233,106 @@ pub async fn shared_builds_with_qos<C: ConnectionTrait>(
 mod tests {
     use super::*;
 
-    #[test]
-    fn prioritizable_excludes_every_state_the_database_unprioritizes() {
-        for status in [
-            BuildStatus::FailedPermanent,
-            BuildStatus::Aborted,
-            BuildStatus::DependencyFailed,
-            BuildStatus::FailedTimeout,
-            BuildStatus::Skipped,
-        ] {
-            assert!(!PRIORITIZABLE.contains(&status), "{status:?}");
-        }
+    #[tokio::test]
+    async fn test_prioritize_shared_builds_flags_only_open_unprioritized_shared_builds_and_returns_their_ids()
+     {
+        use gradient_fixtures::shape::shape;
+
+        let db = shape()
+            .evaluation(EvaluationId::now_v7())
+            .derivation("/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-open.drv")
+            .build_status(BuildStatus::Queued)
+            .derivation("/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-finished.drv")
+            .build_status(BuildStatus::Completed)
+            .derivation("/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-flagged.drv")
+            .build_status(BuildStatus::Queued)
+            .into_database()
+            .await;
+        let conn = db.connection();
+        let open = db
+            .shared_build("/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-open.drv")
+            .await;
+        let finished = db
+            .shared_build("/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-finished.drv")
+            .await;
+        let flagged = db
+            .shared_build("/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-flagged.drv")
+            .await;
+        db.execute(&format!(
+            "UPDATE derivation_build SET prioritized = true WHERE id = '{}'",
+            flagged.id.into_inner()
+        ))
+        .await;
+        let derivations: Vec<uuid::Uuid> = [&open, &finished, &flagged]
+            .iter()
+            .map(|build| build.derivation.into_inner())
+            .collect();
+
+        let first =
+            IdRow::find_by_statement(PRIORITIZE_SHARED_BUILDS.bind([derivations.clone().into()]))
+                .all(&conn)
+                .await
+                .expect("flag the open shared builds");
+        let again = IdRow::find_by_statement(PRIORITIZE_SHARED_BUILDS.bind([derivations.into()]))
+            .all(&conn)
+            .await
+            .expect("flag the open shared builds again");
+        let flagged_ids = db
+            .texts("SELECT id::text FROM derivation_build WHERE prioritized ORDER BY id")
+            .await;
+        db.finish().await;
+
+        assert_eq!(
+            (
+                first.iter().map(|row| row.id).collect::<Vec<_>>(),
+                again.len(),
+                flagged_ids.len()
+            ),
+            (vec![open.id.into_inner()], 0, 2)
+        );
     }
 
-    #[test]
-    fn shared_build_write_is_bounded_by_the_unnested_closure() {
-        let sql = prioritize_shared_builds_sql();
-        assert!(
-            sql.contains("FROM unnest($1::uuid[]) AS x(derivation)"),
-            "{sql}"
-        );
-        assert!(sql.contains("AND NOT db.prioritized"), "{sql}");
-        assert!(sql.contains("status IN (0, 1, 2, 8)"), "{sql}");
-    }
+    #[tokio::test]
+    async fn import_lift_walks_open_dependencies_and_stops_at_finished_dependencies() {
+        use gradient_fixtures::shape::shape;
 
-    #[test]
-    fn the_import_lift_walks_the_open_closure_of_the_waited_builds_only() {
-        let sql = import_lifted_shared_builds_sql();
-        let (seed, step) = sql
-            .split_once(" UNION ")
-            .expect("the closure is a recursive union");
-        assert!(
-            seed.contains("WHERE root.id = ANY($1::uuid[]) AND (NOT root.fetchable"),
-            "the walk starts at the builds an evaluation waits on: {sql}"
-        );
-        assert!(!sql.contains("ifd"), "{sql}");
-        assert!(
-            step.contains("dep.derivation = e.dependency AND (NOT dep.fetchable"),
-            "a finished dependency ends the walk: {sql}"
-        );
+        const WAITED: &str = "/nix/store/0123456789abcdfghijklmnpqrsvwxyz-waited.drv";
+        const OPEN_IFD: &str = "/nix/store/0c7kxbq0fdq6pnxpzhg5yvbbrylx4v3f-open-ifd.drv";
+        const FINISHED: &str = "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-finished.drv";
+        const BEHIND: &str = "/nix/store/0c0f6hb8s2q2wbdrhl5ch9fwr8v2rq7x-behind.drv";
+        const UNRELATED: &str = "/nix/store/dddddddddddddddddddddddddddddddd-unrelated.drv";
+        let db = shape()
+            .evaluation(EvaluationId::now_v7())
+            .derivation(WAITED)
+            .build_status(BuildStatus::Queued)
+            .depends_on(OPEN_IFD)
+            .derivation(OPEN_IFD)
+            .ifd()
+            .build_status(BuildStatus::Queued)
+            .depends_on(FINISHED)
+            .derivation(FINISHED)
+            .build_status(BuildStatus::Completed)
+            .shared_build_option(|b| b.fetchable = true)
+            .depends_on(BEHIND)
+            .derivation(BEHIND)
+            .build_status(BuildStatus::Queued)
+            .derivation(UNRELATED)
+            .build_status(BuildStatus::Queued)
+            .into_database()
+            .await;
+        let id = |path: &'static str| {
+            let db = &db;
+            async move { db.shared_build(path).await.id }
+        };
+        let (waited, open_ifd, unrelated) =
+            (id(WAITED).await, id(OPEN_IFD).await, id(UNRELATED).await);
+
+        let lifted = import_lifted_shared_builds(&db.connection(), &[waited])
+            .await
+            .expect("the import lift reads");
+
+        db.finish().await;
+        assert_eq!(lifted, HashSet::from([waited, open_ifd]));
+        assert!(!lifted.contains(&unrelated));
     }
 }

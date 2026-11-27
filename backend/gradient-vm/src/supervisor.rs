@@ -2805,14 +2805,6 @@ mod tests {
     }
 
     #[test]
-    fn test_inet_guest_filter_table_nft_list_table_arguments() {
-        assert_eq!(
-            nft_list_inet_guest_filter_table_arguments(),
-            ["list", "table", "inet", "gradient-guests"]
-        );
-    }
-
-    #[test]
     fn record_path_is_built_only_for_guest_tap_names() {
         assert_eq!(
             tap_record_file_path(

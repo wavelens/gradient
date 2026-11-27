@@ -464,173 +464,18 @@ pub(crate) async fn abandon_open<C: ConnectionTrait>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use gradient_fixtures::mock::{empty_db, mock_db};
-    use sea_orm::{MockDatabase, MockExecResult, Statement};
+    use gradient_entity::build::BuildStatus;
+    use gradient_entity::cluster_job::ClusterJobStatus;
+    use gradient_entity::exec_job;
+    use gradient_entity::ids::{ClusterAttemptId, ClusterJobId};
+    use gradient_fixtures::database::TestDatabase;
+    use gradient_fixtures::shape::{build_assignment, build_job_key, eval_assignment, shape};
 
     #[test]
     fn an_exec_key_names_its_job() {
         let id = gradient_entity::ids::ExecJobId::now_v7();
         assert_eq!(exec_job_of_key(&format!("{EXEC_KEY_PREFIX}{id}")), Some(id));
         assert_eq!(exec_job_of_key(&format!("{BUILD_KEY_PREFIX}{id}")), None);
-    }
-
-    fn closed_rows(rows_affected: u64) -> MockDatabase {
-        mock_db().append_exec_results([MockExecResult {
-            last_insert_id: 0,
-            rows_affected,
-        }])
-    }
-
-    fn abandoned_bound() -> String {
-        format!(
-            "SmallInt(Some({}))",
-            i16::from(DispatchedJobOutcome::Abandoned)
-        )
-    }
-
-    fn assert_closes_open_rows_as_abandoned(statement: &Statement) {
-        let sql = &statement.sql;
-        assert!(
-            sql.starts_with("UPDATE \"dispatched_job\" SET \"finished_at\" = $1, \"outcome\" = $2"),
-            "{sql}"
-        );
-        assert!(sql.contains("\"finished_at\" IS NULL"), "{sql}");
-
-        let values = format!("{:?}", statement.values);
-        assert!(values.contains(&abandoned_bound()), "{values}");
-    }
-
-    fn claim_row(job_id: &str) -> MDispatchedJob {
-        MDispatchedJob {
-            id: DispatchedJobId::now_v7(),
-            job_id: Some(job_id.to_owned()),
-            worker_id: "w1".into(),
-            ..Default::default()
-        }
-    }
-
-    async fn claimed(rows_affected: u64, gate: ClaimGate) -> (bool, Statement) {
-        let db = closed_rows(rows_affected).into_connection();
-        let won = claim_assignment(&db, claim_row("build:x"), gate)
-            .await
-            .expect("claim");
-        let log = db.into_transaction_log();
-
-        (won, log[0].statements()[0].clone())
-    }
-
-    fn build_gate() -> ClaimGate {
-        ClaimGate::Build {
-            shared_build: DerivationBuildId::now_v7(),
-            output_names_to_substitute: None,
-        }
-    }
-
-    #[tokio::test]
-    async fn a_claim_inserts_its_row_unless_the_job_is_already_open() {
-        let (won, statement) = claimed(1, build_gate()).await;
-
-        assert!(won);
-        let sql = &statement.sql;
-        assert!(sql.starts_with("INSERT INTO \"dispatched_job\""), "{sql}");
-        assert!(
-            sql.contains("ON CONFLICT (\"job_id\") WHERE \"finished_at\" IS NULL DO NOTHING"),
-            "{sql}"
-        );
-    }
-
-    #[tokio::test]
-    async fn a_claim_that_inserted_nothing_is_lost() {
-        let (won, _) = claimed(0, build_gate()).await;
-
-        assert!(!won);
-    }
-
-    #[tokio::test]
-    async fn a_build_claim_requires_the_shared_build_queued_in_its_passthrough_mode() {
-        let (_, statement) = claimed(1, build_gate()).await;
-
-        let sql = &statement.sql;
-        assert!(sql.contains("WHERE EXISTS(SELECT"), "{sql}");
-        assert!(sql.contains("FROM \"derivation_build\""), "{sql}");
-        assert!(sql.contains("\"derivation_build\".\"status\" ="), "{sql}");
-        assert!(
-            sql.contains("\"derivation_build\".\"cache_available\" ="),
-            "{sql}"
-        );
-    }
-
-    #[tokio::test]
-    async fn the_substitute_build_claim_sql_requires_needed_shared_build_outputs_in_the_job_output_names_unlike_the_full_build_claim_sql()
-     {
-        let shared_build = DerivationBuildId::now_v7();
-        let (_, substitute) = claimed(
-            1,
-            ClaimGate::Build {
-                shared_build,
-                output_names_to_substitute: Some(vec!["out".into()]),
-            },
-        )
-        .await;
-        let (_, full) = claimed(1, build_gate()).await;
-
-        let sql = &substitute.sql;
-        assert!(sql.contains("NOT EXISTS(SELECT"), "{sql}");
-        assert!(sql.contains("FROM \"derivation_output\""), "{sql}");
-        assert!(
-            sql.contains("<> ALL(\"derivation_build\".\"unneeded_outputs\")"),
-            "{sql}"
-        );
-        assert!(
-            sql.contains("\"derivation_output\".\"name\" NOT IN"),
-            "{sql}"
-        );
-        assert!(!full.sql.contains("\"derivation_output\""), "{}", full.sql);
-    }
-
-    #[tokio::test]
-    async fn an_eval_claim_requires_an_unfinished_evaluation() {
-        let (_, statement) = claimed(
-            1,
-            ClaimGate::Eval {
-                evaluation: EvaluationId::now_v7(),
-            },
-        )
-        .await;
-
-        let sql = &statement.sql;
-        assert!(sql.contains("FROM \"evaluation\""), "{sql}");
-        assert!(sql.contains("\"evaluation\".\"status\" NOT IN"), "{sql}");
-        assert!(!sql.contains("\"derivation_build\""), "{sql}");
-    }
-
-    #[tokio::test]
-    async fn the_newest_eval_job_wins() {
-        let evaluation = EvaluationId::now_v7();
-        let (older, newer) = (DispatchedJobId::now_v7(), DispatchedJobId::now_v7());
-        let row = |job: DispatchedJobId| {
-            std::collections::BTreeMap::from([
-                (
-                    "evaluation_id",
-                    sea_orm::Value::from(evaluation.into_inner()),
-                ),
-                ("id", sea_orm::Value::from(job.into_inner())),
-            ])
-        };
-        let db = mock_db()
-            .append_query_results([vec![row(older), row(newer)]])
-            .into_connection();
-
-        let jobs = latest_eval_jobs(&db, &[evaluation]).await.unwrap();
-
-        assert_eq!(jobs.get(&evaluation), Some(&newer));
-        let log = db.into_transaction_log();
-        let sql = &log[0].statements()[0].sql;
-        assert!(sql.contains("\"kind\" = $1"), "{sql}");
-        assert!(
-            sql.ends_with("ORDER BY \"dispatched_job\".\"dispatched_at\" ASC"),
-            "{sql}"
-        );
     }
 
     #[test]
@@ -676,191 +521,466 @@ mod tests {
         );
     }
 
-    #[test]
-    fn the_predicate_rebuilds_the_trackers_key() {
-        assert_eq!(build_job_key_sql("db.id"), "'build:' || db.id::text");
-        assert_eq!(
-            no_open_assignment_predicate(&build_job_key_sql("db.id")),
-            "NOT EXISTS (SELECT 1 FROM dispatched_job dj WHERE dj.job_id = 'build:' || db.id::text \
-             AND dj.finished_at IS NULL)"
+    async fn claimed(
+        db: &TestDatabase,
+        evaluation: EvaluationId,
+        shared_build: DerivationBuildId,
+        output_names_to_substitute: Option<Vec<&str>>,
+    ) -> bool {
+        let row = build_assignment(
+            evaluation,
+            db.project_of(evaluation).await,
+            db.task_of(evaluation).await,
+            shared_build,
+            gradient_types::now(),
         );
-    }
+        let gate = ClaimGate::Build {
+            shared_build,
+            output_names_to_substitute: output_names_to_substitute
+                .map(|names| names.into_iter().map(str::to_owned).collect()),
+        };
 
-    #[tokio::test]
-    async fn a_workers_open_rows_close_as_abandoned_only_below_the_cutoff() {
-        let db = closed_rows(2).into_connection();
-        let before = gradient_types::now();
-
-        let closed = abandon_open_assignments_for_worker(&db, "w1", before)
+        claim_assignment(&db.connection(), row, gate)
             .await
-            .expect("update");
-
-        assert_eq!(closed, 2);
-        let log = db.into_transaction_log();
-        let statement = &log[0].statements()[0];
-        assert_closes_open_rows_as_abandoned(statement);
-
-        let sql = &statement.sql;
-        assert!(sql.contains("\"worker_id\" ="), "{sql}");
-        assert!(sql.contains("\"dispatched_at\" <"), "{sql}");
-
-        let values = format!("{:?}", statement.values);
-        assert!(values.contains("String(Some(\"w1\"))"), "{values}");
-        assert!(values.contains(&format!("{before:?}")), "{values}");
+            .expect("the claim runs")
     }
 
     #[tokio::test]
-    async fn startup_recovery_closes_only_open_cluster_rows() {
-        let db = closed_rows(7).into_connection();
+    async fn claim_build_assignment_succeeds_only_for_queued_shared_build_in_matching_mode_without_open_assignment_for_job()
+     {
+        const QUEUED: &str = "/nix/store/0123456789abcdfghijklmnpqrsvwxyz-queued.drv";
+        const DONE: &str = "/nix/store/0c7kxbq0fdq6pnxpzhg5yvbbrylx4v3f-done.drv";
+        const AVAILABLE: &str = "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-available.drv";
+        const FULL: &str = "/nix/store/0c0f6hb8s2q2wbdrhl5ch9fwr8v2rq7x-full.drv";
+        let evaluation = EvaluationId::now_v7();
+        let db = shape()
+            .evaluation(evaluation)
+            .derivation(QUEUED)
+            .build_status(BuildStatus::Queued)
+            .derivation(DONE)
+            .build_status(BuildStatus::Completed)
+            .derivation(AVAILABLE)
+            .output("11111111111111111111111111111111")
+            .named_output("22222222222222222222222222222222", "dev")
+            .unneeded_output("33333333333333333333333333333333", "doc")
+            .build_status(BuildStatus::Queued)
+            .cache_available()
+            .derivation(FULL)
+            .build_status(BuildStatus::Queued)
+            .into_database()
+            .await;
+        let (queued, done, available, full) = (
+            db.shared_build(QUEUED).await.id,
+            db.shared_build(DONE).await.id,
+            db.shared_build(AVAILABLE).await.id,
+            db.shared_build(FULL).await.id,
+        );
 
-        let closed = abandon_open_cluster_assignments(&db).await.expect("update");
+        let first = claimed(&db, evaluation, queued, None).await;
+        let while_open = claimed(&db, evaluation, queued, None).await;
+        abandon_open_assignments_for_jobs(&db.connection(), &[build_job_key(queued)])
+            .await
+            .expect("the assignment closes");
+        let after_close = claimed(&db, evaluation, queued, None).await;
+        let finished = claimed(&db, evaluation, done, None).await;
+        let passthrough_of_available = claimed(&db, evaluation, available, None).await;
+        let missing_needed_output = claimed(&db, evaluation, available, Some(vec!["out"])).await;
+        let all_needed_outputs =
+            claimed(&db, evaluation, available, Some(vec!["out", "dev"])).await;
+        let substitute_of_unavailable = claimed(&db, evaluation, full, Some(vec!["out"])).await;
 
-        assert_eq!(closed, 7);
-        let log = db.into_transaction_log();
-        let statement = &log[0].statements()[0];
-        assert_closes_open_rows_as_abandoned(statement);
-
-        let sql = &statement.sql;
-        assert!(!sql.contains("\"worker_id\""), "{sql}");
-        assert!(!sql.contains("\"dispatched_at\""), "{sql}");
-        assert!(sql.contains(&chunk_scope()), "{sql}");
+        let mut open: Vec<_> = db
+            .rows::<EDispatchedJob>()
+            .await
+            .into_iter()
+            .filter(|row| row.finished_at.is_none())
+            .filter_map(|row| row.job_id)
+            .collect();
+        open.sort();
+        db.finish().await;
+        assert!(first && after_close && all_needed_outputs);
+        assert!(
+            !while_open
+                && !finished
+                && !passthrough_of_available
+                && !missing_needed_output
+                && !substitute_of_unavailable
+        );
+        let mut expected = vec![build_job_key(queued), build_job_key(available)];
+        expected.sort();
+        assert_eq!(open, expected);
     }
 
-    fn chunk_scope() -> String {
-        format!(
-            "IN (SELECT id FROM dispatched_job WHERE finished_at IS NULL \
-             AND (cluster_attempt IS NOT NULL OR job_id IS NULL) LIMIT {RECOVERY_CLOSE_CHUNK})"
+    async fn eval_row(db: &TestDatabase, evaluation: EvaluationId) -> MDispatchedJob {
+        eval_assignment(
+            evaluation,
+            db.project_of(evaluation).await,
+            db.task_of(evaluation).await,
+            gradient_types::now(),
         )
     }
 
+    async fn claim_eval(db: &TestDatabase, evaluation: EvaluationId) -> bool {
+        claim_assignment(
+            &db.connection(),
+            eval_row(db, evaluation).await,
+            ClaimGate::Eval { evaluation },
+        )
+        .await
+        .expect("the claim runs")
+    }
+
+    async fn claim_exec(db: &TestDatabase, evaluation: EvaluationId, exec_job: ExecJobId) -> bool {
+        let row = MDispatchedJob {
+            kind: DispatchedJobKind::Exec,
+            job_id: Some(format!("{EXEC_KEY_PREFIX}{exec_job}")),
+            ..eval_row(db, evaluation).await
+        };
+
+        claim_assignment(&db.connection(), row, ClaimGate::Exec { exec_job })
+            .await
+            .expect("the claim runs")
+    }
+
     #[tokio::test]
-    async fn startup_recovery_closes_a_backlog_one_chunk_per_statement() {
-        let db = mock_db()
-            .append_exec_results([
-                MockExecResult {
-                    last_insert_id: 0,
-                    rows_affected: RECOVERY_CLOSE_CHUNK,
-                },
-                MockExecResult {
-                    last_insert_id: 0,
-                    rows_affected: 7,
-                },
-            ])
-            .into_connection();
-
-        let closed = abandon_open_cluster_assignments(&db).await.expect("update");
-
-        assert_eq!(closed, RECOVERY_CLOSE_CHUNK + 7);
-        let log = db.into_transaction_log();
-        assert_eq!(log.len(), 2);
-        for transaction in &log {
-            let statement = &transaction.statements()[0];
-            assert_closes_open_rows_as_abandoned(statement);
-            assert!(statement.sql.contains(&chunk_scope()), "{}", statement.sql);
+    async fn claim_wins_only_for_unfinished_evaluation_or_queued_exec_job() {
+        let running = EvaluationId::now_v7();
+        let ended: Vec<_> = [
+            EvaluationStatus::Completed,
+            EvaluationStatus::Failed,
+            EvaluationStatus::Aborted,
+        ]
+        .into_iter()
+        .map(|status| (EvaluationId::now_v7(), status))
+        .collect();
+        let mut seed = shape()
+            .evaluation(running)
+            .derivation("/nix/store/0123456789abcdfghijklmnpqrsvwxyz-a.drv")
+            .entry_point("pkg.a");
+        for (evaluation, status) in &ended {
+            seed = seed.evaluation(*evaluation).evaluation_status(*status);
         }
+        let db = seed.into_database().await;
+        let conn = db.connection();
+        let point = db
+            .entry_point(running, "pkg.a")
+            .await
+            .expect("the entry point");
+        let (queued, finished) = (ExecJobId::now_v7(), ExecJobId::now_v7());
+        for (id, status, node_index) in [
+            (queued, ExecJobStatus::Queued, 0),
+            (finished, ExecJobStatus::Completed, 1),
+        ] {
+            crate::rows::insert::<exec_job::Entity, _>(
+                &conn,
+                exec_job::Model {
+                    id,
+                    evaluation: running,
+                    entry_point: point.id,
+                    program_derivation: point.derivation,
+                    requirement: serde_json::json!({}),
+                    spec: serde_json::json!({}),
+                    status,
+                    created_at: gradient_types::now(),
+                    node_index,
+                    ..Default::default()
+                },
+            )
+            .await
+            .expect("the exec job is written");
+        }
+        let won_eval = claim_eval(&db, running).await;
+        let mut lost_evals = Vec::new();
+        for (evaluation, _) in &ended {
+            lost_evals.push(claim_eval(&db, *evaluation).await);
+        }
+        let won_exec = claim_exec(&db, running, queued).await;
+        let lost_exec = claim_exec(&db, running, finished).await;
+
+        let stored = db.rows::<EDispatchedJob>().await.len();
+        db.finish().await;
+        assert!(won_eval && won_exec);
+        assert_eq!(lost_evals, [false; 3]);
+        assert!(!lost_exec);
+        assert_eq!(stored, 2);
     }
 
     #[tokio::test]
-    async fn the_named_assignments_close_under_one_array_bind() {
-        let db = closed_rows(2).into_connection();
-        let reap = [DispatchedJobId::now_v7(), DispatchedJobId::now_v7()];
-
-        let closed = abandon_open_assignments(&db, &reap).await.expect("update");
-
-        assert_eq!(closed, 2);
-        let log = db.into_transaction_log();
-        let statement = &log[0].statements()[0];
-        assert_closes_open_rows_as_abandoned(statement);
-
-        let sql = &statement.sql;
-        assert!(sql.contains("\"dispatched_job\".\"id\" = ANY($3)"), "{sql}");
-        assert!(!sql.contains(" IN ("), "{sql}");
-        assert!(!sql.contains("$4"), "{sql}");
-
-        let values = format!("{:?}", statement.values);
-        assert!(
-            values.contains(&format!(
-                "Array(Uuid, Some([Uuid(Some({})), Uuid(Some({}))]))",
-                reap[0], reap[1]
-            )),
-            "{values}"
+    async fn latest_eval_job_per_evaluation_is_newest_eval_kind_assignment() {
+        let (first, second, unrequested) = (
+            EvaluationId::now_v7(),
+            EvaluationId::now_v7(),
+            EvaluationId::now_v7(),
         );
+        let ids: Vec<DispatchedJobId> = (0..6).map(|_| DispatchedJobId::now_v7()).collect();
+        let [
+            older,
+            newer,
+            newest_build,
+            newest_continuation,
+            only,
+            elsewhere,
+        ] = ids[..]
+        else {
+            unreachable!()
+        };
+        let at = gradient_types::now();
+        let hours = |h: i64| at - chrono::Duration::hours(h);
+        let db = shape()
+            .evaluation(first)
+            .eval_assignment()
+            .assignment_option(|a| a.id = older)
+            .dispatched_at(hours(3))
+            .eval_assignment()
+            .assignment_option(|a| {
+                a.id = newer;
+                a.job_id = Some(format!("{EVAL_KEY_PREFIX}second-attempt"));
+            })
+            .dispatched_at(hours(2))
+            .eval_assignment()
+            .assignment_option(|a| {
+                a.id = newest_build;
+                a.kind = DispatchedJobKind::Build;
+                a.job_id = Some(format!("{BUILD_KEY_PREFIX}x"));
+            })
+            .dispatched_at(hours(1))
+            .eval_assignment()
+            .assignment_option(|a| {
+                a.id = newest_continuation;
+                a.job_id = Some(format!("{CONTINUE_KEY_PREFIX}x"));
+            })
+            .dispatched_at(hours(1))
+            .evaluation(second)
+            .eval_assignment()
+            .assignment_option(|a| a.id = only)
+            .dispatched_at(hours(4))
+            .evaluation(unrequested)
+            .eval_assignment()
+            .assignment_option(|a| a.id = elsewhere)
+            .into_database()
+            .await;
+
+        let latest = latest_eval_jobs(&db.connection(), &[first, second])
+            .await
+            .expect("the latest jobs read");
+
+        db.finish().await;
+        assert_eq!(latest, HashMap::from([(first, newer), (second, only)]));
     }
 
     #[tokio::test]
-    async fn no_assignments_means_no_statement() {
-        let db = empty_db();
-
-        let closed = abandon_open_assignments(&db, &[]).await.expect("no-op");
-
-        assert_eq!(closed, 0);
-        assert!(db.into_transaction_log().is_empty());
-    }
-
-    #[tokio::test]
-    async fn the_named_jobs_open_rows_close_as_abandoned() {
-        let db = closed_rows(2).into_connection();
-        let keys = vec![
-            format!("{BUILD_KEY_PREFIX}019905f2-0000-7000-8000-000000000001"),
-            format!("{EVAL_KEY_PREFIX}019905f2-0000-7000-8000-000000000002"),
+    async fn abandon_open_assignments_by_worker_cutoff_job_keys_single_id_and_id_list_closes_only_matching_open_rows_as_abandoned()
+     {
+        let now = gradient_types::now();
+        let cutoff = now - chrono::Duration::hours(1);
+        let long_ago = now - chrono::Duration::hours(2);
+        let ids: Vec<DispatchedJobId> = (0..10).map(|_| DispatchedJobId::now_v7()).collect();
+        let [
+            before,
+            after,
+            other_worker,
+            finished,
+            by_build_key,
+            by_eval_key,
+            kept,
+            single,
+            listed_a,
+            listed_b,
+        ] = ids[..]
+        else {
+            unreachable!()
+        };
+        let specs = [
+            (before, "w1", long_ago, "k1"),
+            (after, "w1", now, "k2"),
+            (other_worker, "w2", long_ago, "k3"),
+            (finished, "w1", long_ago, "k4"),
+            (by_build_key, "w3", now, "build:k5"),
+            (by_eval_key, "w3", now, "eval:k6"),
+            (kept, "w3", now, "k7"),
+            (single, "w3", now, "k8"),
+            (listed_a, "w3", now, "k9"),
+            (listed_b, "w3", now, "k10"),
         ];
-
-        let closed = abandon_open_assignments_for_jobs(&db, &keys)
-            .await
-            .expect("update");
-
-        assert_eq!(closed, 2);
-        let log = db.into_transaction_log();
-        let statement = &log[0].statements()[0];
-        assert_closes_open_rows_as_abandoned(statement);
-
-        let sql = &statement.sql;
-        assert!(sql.contains("\"job_id\" IN ("), "{sql}");
-
-        let values = format!("{:?}", statement.values);
-        for key in &keys {
-            assert!(
-                values.contains(&format!("String(Some(\"{key}\"))")),
-                "{values}"
-            );
+        let mut seed = shape().evaluation(EvaluationId::now_v7());
+        for (id, worker, dispatched_at, key) in specs {
+            seed = seed.eval_assignment().assignment_option(move |a| {
+                a.id = id;
+                a.worker_id = worker.into();
+                a.dispatched_at = dispatched_at;
+                a.job_id = Some(key.into());
+            });
+            if id == finished {
+                seed = seed.closed(DispatchedJobOutcome::Failed, long_ago);
+            }
         }
+        let db = seed.into_database().await;
+        let conn = db.connection();
+
+        let by_worker = abandon_open_assignments_for_worker(&conn, "w1", cutoff).await;
+        let by_keys = abandon_open_assignments_for_jobs(
+            &conn,
+            &["build:k5".to_owned(), "eval:k6".to_owned(), "k4".to_owned()],
+        )
+        .await;
+        let by_id = abandon_open_assignment(&conn, single).await;
+        let by_list = abandon_open_assignments(&conn, &[listed_a, listed_b]).await;
+        let by_empty_list = abandon_open_assignments(&conn, &[]).await;
+        let by_empty_keys = abandon_open_assignments_for_jobs(&conn, &[]).await;
+
+        let rows: HashMap<_, _> = db
+            .rows::<EDispatchedJob>()
+            .await
+            .into_iter()
+            .map(|row| (row.id, (row.finished_at.is_some(), row.outcome)))
+            .collect();
+        db.finish().await;
+        assert_eq!(by_worker.expect("update"), 1);
+        assert_eq!(by_keys.expect("update"), 2);
+        assert_eq!(by_id.expect("update"), 1);
+        assert_eq!(by_list.expect("update"), 2);
+        assert_eq!(by_empty_list.expect("no-op"), 0);
+        assert_eq!(by_empty_keys.expect("no-op"), 0);
+        let abandoned = (true, Some(DispatchedJobOutcome::Abandoned));
+        for id in [
+            before,
+            by_build_key,
+            by_eval_key,
+            single,
+            listed_a,
+            listed_b,
+        ] {
+            assert_eq!(rows[&id], abandoned);
+        }
+        for id in [after, other_worker, kept] {
+            assert_eq!(rows[&id], (false, None));
+        }
+        assert_eq!(rows[&finished], (true, Some(DispatchedJobOutcome::Failed)));
     }
 
     #[tokio::test]
-    async fn one_assignments_open_row_closes_as_abandoned() {
-        let db = closed_rows(1).into_connection();
-        let assignment_id = DispatchedJobId::now_v7();
+    async fn startup_abandon_open_cluster_assignments_closes_only_cluster_or_keyless_rows_in_chunks_over_large_backlog()
+     {
+        let now = gradient_types::now();
+        let (cluster, attempt) = (ClusterJobId::now_v7(), ClusterAttemptId::now_v7());
+        let (keyless, single, finished_keyless) = (
+            DispatchedJobId::now_v7(),
+            DispatchedJobId::now_v7(),
+            DispatchedJobId::now_v7(),
+        );
+        let db = shape()
+            .evaluation(EvaluationId::now_v7())
+            .cluster(cluster, true, 2, ClusterJobStatus::Running, 1, now)
+            .evaluation_member_of(cluster, "server", true, None)
+            .cluster_attempt(cluster, attempt, Some(now), None, None)
+            .evaluation(EvaluationId::now_v7())
+            .eval_assignment()
+            .assignment_option(|a| {
+                a.id = keyless;
+                a.job_id = None;
+            })
+            .evaluation(EvaluationId::now_v7())
+            .eval_assignment()
+            .assignment_option(|a| a.id = single)
+            .evaluation(EvaluationId::now_v7())
+            .eval_assignment()
+            .assignment_option(|a| {
+                a.id = finished_keyless;
+                a.job_id = None;
+            })
+            .closed(DispatchedJobOutcome::Completed, now)
+            .into_database()
+            .await;
+        let conn = db.connection();
+        let backlog = RECOVERY_CLOSE_CHUNK + 1;
+        db.execute(&format!(
+            "INSERT INTO dispatched_job \
+             SELECT (jsonb_populate_record(NULL::dispatched_job, \
+                       to_jsonb(t) || jsonb_build_object('id', uuidv7()))).* \
+             FROM dispatched_job t, generate_series(1, {backlog}) WHERE t.id = '{}'",
+            keyless.into_inner()
+        ))
+        .await;
 
-        let closed = abandon_open_assignment(&db, assignment_id)
+        let closed = abandon_open_cluster_assignments(&conn)
             .await
-            .expect("update");
+            .expect("the backlog closes");
 
-        assert_eq!(closed, 1);
-        let log = db.into_transaction_log();
-        let statement = &log[0].statements()[0];
-        assert_closes_open_rows_as_abandoned(statement);
-
-        let sql = &statement.sql;
-        assert!(sql.contains("\"dispatched_job\".\"id\" = $3"), "{sql}");
-        assert!(!sql.contains("\"job_id\""), "{sql}");
-        assert!(!sql.contains("\"worker_id\""), "{sql}");
-
-        let values = format!("{:?}", statement.values);
+        let rows = db.rows::<EDispatchedJob>().await;
+        db.finish().await;
+        assert_eq!(closed, backlog + 2);
+        let open: Vec<_> = rows.iter().filter(|r| r.finished_at.is_none()).collect();
+        assert_eq!(open.iter().map(|r| r.id).collect::<Vec<_>>(), [single]);
+        let finished = rows.iter().find(|r| r.id == finished_keyless).expect("row");
+        assert_eq!(finished.outcome, Some(DispatchedJobOutcome::Completed));
         assert!(
-            values.contains(&format!("Uuid(Some({assignment_id}))")),
-            "{values}"
+            rows.iter()
+                .filter(|r| r.outcome == Some(DispatchedJobOutcome::Abandoned))
+                .count() as u64
+                == backlog + 2
         );
     }
 
     #[tokio::test]
-    async fn no_job_keys_means_no_statement() {
-        let db = empty_db();
+    async fn test_job_key_sql_fragments_parse_to_keys_and_no_open_assignment_filters_jobs_with_open_assignment()
+     {
+        const OPEN: &str = "/nix/store/0123456789abcdfghijklmnpqrsvwxyz-open.drv";
+        const CLOSED: &str = "/nix/store/0c7kxbq0fdq6pnxpzhg5yvbbrylx4v3f-closed.drv";
+        const NONE: &str = "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-none.drv";
+        let now = gradient_types::now();
+        let db = shape()
+            .evaluation(EvaluationId::now_v7())
+            .derivation(OPEN)
+            .build_status(BuildStatus::Queued)
+            .open_assignment()
+            .derivation(CLOSED)
+            .build_status(BuildStatus::Queued)
+            .open_assignment()
+            .closed(DispatchedJobOutcome::Completed, now)
+            .derivation(NONE)
+            .build_status(BuildStatus::Queued)
+            .into_database()
+            .await;
+        let (build, evaluation, exec) = (
+            DerivationBuildId::now_v7(),
+            EvaluationId::now_v7(),
+            ExecJobId::now_v7(),
+        );
+        let key = |fragment: String| {
+            let db = &db;
+            async move {
+                db.texts(&format!("SELECT {fragment}"))
+                    .await
+                    .pop()
+                    .expect("a key")
+            }
+        };
+        let uuid = |id: uuid::Uuid| format!("'{id}'::uuid");
 
-        let closed = abandon_open_assignments_for_jobs(&db, &[])
-            .await
-            .expect("no-op");
+        let build_key = key(build_job_key_sql(&uuid(build.into_inner()))).await;
+        let eval_key = key(eval_job_key_sql(&uuid(evaluation.into_inner()))).await;
+        let exec_key = key(exec_job_key_sql(&uuid(exec.into_inner()))).await;
+        let continuation_key = key(continuation_job_key_sql(&uuid(exec.into_inner()))).await;
+        let without_open = db
+            .texts(&format!(
+                "SELECT b.id::text FROM derivation_build b WHERE {} ORDER BY 1",
+                no_open_assignment_predicate(&build_job_key_sql("b.id"))
+            ))
+            .await;
+        let (open, closed, none) = (
+            db.shared_build(OPEN).await.id,
+            db.shared_build(CLOSED).await.id,
+            db.shared_build(NONE).await.id,
+        );
 
-        assert_eq!(closed, 0);
-        assert!(db.into_transaction_log().is_empty());
+        db.finish().await;
+        assert_eq!(shared_build_of_key(&build_key), Some(build));
+        assert_eq!(eval_of_key(&eval_key), Some(evaluation));
+        assert_eq!(exec_job_of_key(&exec_key), Some(exec));
+        assert_eq!(exec_job_of_continuation_key(&continuation_key), Some(exec));
+        let mut expected = vec![closed.to_string(), none.to_string()];
+        expected.sort();
+        assert_eq!(without_open, expected);
+        assert!(!without_open.contains(&open.to_string()));
     }
 }

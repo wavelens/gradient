@@ -186,49 +186,6 @@ async fn scim_create_user_with_at_sign_in_username_returns_invalid_value_and_wri
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn scim_get_patch_delete_non_scim_user_returns_404_and_lookup_sql_filters_account_origin() {
-    let id = UserId::now_v7();
-    let db = mock_db()
-        .append_query_results([Vec::<user::Model>::new()])
-        .append_query_results([Vec::<user::Model>::new()])
-        .append_query_results([Vec::<user::Model>::new()])
-        .into_connection();
-    let s = scim_server(db.clone());
-    let path = format!("/scim/v2/Users/{id}");
-
-    s.get(&path)
-        .add_header("Authorization", auth_header())
-        .await
-        .assert_status_not_found();
-    s.patch(&path)
-        .add_header("Authorization", auth_header())
-        .json(&json!({
-            "schemas": ["urn:ietf:params:scim:api:messages:2.0:PatchOp"],
-            "Operations": [{"op": "replace", "path": "active", "value": false}]
-        }))
-        .await
-        .assert_status_not_found();
-    s.delete(&path)
-        .add_header("Authorization", auth_header())
-        .await
-        .assert_status_not_found();
-    drop(s);
-
-    let statements = all_statements(db.into_transaction_log());
-    assert_eq!(statements.len(), 3, "{statements:?}");
-    for statement in statements {
-        assert!(statement.sql.starts_with("SELECT"), "{}", statement.sql);
-        assert!(
-            statement.sql.contains("\"account_origin\" = "),
-            "{}",
-            statement.sql
-        );
-        let values = format!("{:?}", statement.values);
-        assert!(values.contains("SmallInt(Some(2))"), "{values}");
-    }
-}
-
-#[tokio::test(flavor = "multi_thread")]
 async fn scim_get_user_returns_resource() {
     let u = scim_user("bob@example.com", true);
     let db = mock_db()
@@ -503,38 +460,58 @@ async fn scim_patch_group_replace_members_removes_absent_group_members() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn scim_patch_group_remove_member_leaves_the_team() {
-    let team = scim_team();
-    let member = UserId::now_v7();
-    let db = mock_db()
-        .append_query_results([vec![team.clone()]])
-        .append_query_results([vec![scim_user_with_id(member)]])
-        .append_exec_results([MockExecResult {
-            last_insert_id: 0,
-            rows_affected: 1,
-        }])
-        .append_query_results([Vec::<team_user::Model>::new()])
-        .into_connection();
+async fn test_scim_group_member_removal_deletes_only_members_added_by_group_and_keeps_hand_added_members()
+ {
+    let test_db = TestDatabase::create().await;
+    let db = test_db.connection();
+    let by_group = insert_account(
+        &db,
+        AccountOrigin::ScimProvisionedByIdentityProvider,
+        "carol",
+        "carol@idp.io",
+    )
+    .await;
+    let by_hand = insert_account(
+        &db,
+        AccountOrigin::ScimProvisionedByIdentityProvider,
+        "dave",
+        "dave@idp.io",
+    )
+    .await;
+    let team = insert_scim_team(&db).await;
+    for member in [
+        team_member(team.id, by_group.id),
+        team_user::Model {
+            source: TeamMemberSource::Api,
+            ..team_member(team.id, by_hand.id)
+        },
+    ] {
+        member
+            .into_active_model()
+            .insert(&db)
+            .await
+            .expect("insert member");
+    }
     let server = scim_server(db.clone());
-    let res = server
-        .patch("/scim/v2/Groups/acme-eng")
-        .add_header("Authorization", auth_header())
-        .json(&json!({
-            "schemas": ["urn:ietf:params:scim:api:messages:2.0:PatchOp"],
-            "Operations": [{"op": "remove", "path": format!("members[value eq \"{member}\"]")}]
-        }))
-        .await;
-    res.assert_status_ok();
-    let body: Value = res.json();
-    assert_eq!(body["members"].as_array().map(Vec::len), Some(0));
+
+    for member in [by_group.id, by_hand.id] {
+        let res = server
+            .patch("/scim/v2/Groups/acme-eng")
+            .add_header("Authorization", auth_header())
+            .json(&group_patch_body(json!([
+                {"op": "remove", "path": format!("members[value eq \"{member}\"]")}
+            ])))
+            .await;
+        res.assert_status_ok();
+    }
+
     drop(server);
-    let only_group_rows = all_statements(db.into_transaction_log())
-        .into_iter()
-        .any(|s| s.sql.starts_with("DELETE FROM \"team_user\"") && s.sql.contains("\"source\""));
-    assert!(
-        only_group_rows,
-        "SCIM must not remove members added by hand or by the state"
+    let remaining = test_db.rows::<team_user::Entity>().await;
+    assert_eq!(
+        remaining.iter().map(|m| m.user).collect::<Vec<_>>(),
+        [by_hand.id]
     );
+    test_db.finish().await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -692,6 +669,26 @@ async fn scim_put_and_list_filter_do_not_reach_account_of_other_origin() {
         .add_header("Authorization", auth_header())
         .await;
 
+    let user_path = format!("/scim/v2/Users/{}", bob.id);
+    server
+        .get(&user_path)
+        .add_header("Authorization", auth_header())
+        .await
+        .assert_status_not_found();
+    server
+        .patch(&user_path)
+        .add_header("Authorization", auth_header())
+        .json(&json!({
+            "schemas": ["urn:ietf:params:scim:api:messages:2.0:PatchOp"],
+            "Operations": [{"op": "replace", "path": "active", "value": false}]
+        }))
+        .await
+        .assert_status_not_found();
+    server
+        .delete(&user_path)
+        .add_header("Authorization", auth_header())
+        .await
+        .assert_status_not_found();
     put.assert_status(StatusCode::NOT_FOUND);
     list.assert_status_ok();
     assert_eq!(list.json::<Value>()["totalResults"], 0);

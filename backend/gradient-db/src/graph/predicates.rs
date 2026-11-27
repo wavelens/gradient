@@ -438,12 +438,6 @@ pub fn stored_copy_in_input_closure_or_trusted_by_every_project_with_build_job_o
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::graph::walks::open_closure_cte;
-
-    fn norm(s: &str) -> String {
-        s.split_whitespace().collect::<Vec<_>>().join(" ")
-    }
-
     #[test]
     fn only_wanted_or_in_flight_work_blocks_an_evaluation() {
         use BuildStatus::*;
@@ -483,109 +477,34 @@ mod tests {
         }
     }
 
-    #[test]
-    fn the_predicate_names_what_blocks_evaluation_names() {
-        use BuildStatus::*;
+    #[tokio::test]
+    async fn shared_build_is_fetchable_only_when_it_has_stored_output_rows() {
+        let [without_outputs, with_output] =
+            ["1", "2"].map(|c| format!("/nix/store/{}-fetchable.drv", c.repeat(32)));
+        let hash = "3".repeat(32);
+        let db = gradient_fixtures::shape::shape()
+            .evaluation(gradient_entity::ids::EvaluationId::now_v7())
+            .derivation(&without_outputs)
+            .build_status(BuildStatus::Completed)
+            .derivation(&with_output)
+            .output(&hash)
+            .build_status(BuildStatus::Completed)
+            .cached_path(&hash, "stored")
+            .into_database()
+            .await;
+        db.execute("UPDATE derivation_build SET missing_runtime_deps = 0")
+            .await;
 
-        let sql = blocks_evaluation_predicate("db");
-        assert_eq!(
-            sql,
-            format!(
-                "(db.status IN ({pending}) AND (db.wanted OR db.status IN ({in_flight})))",
-                pending = crate::sql::status::build_in(&NEED_BUILD_STATUSES),
-                in_flight = crate::sql::status::build_in(&[Queued, Building]),
-            ),
-            "the predicate is the Rust rule written out; changing one without the \
-             other settles an evaluation whose builds are still running",
-        );
-    }
+        let fetchable = db
+            .texts(&format!(
+                "SELECT db.derivation::text FROM derivation_build db WHERE {}",
+                fetchable_predicate("db")
+            ))
+            .await;
+        let expected = db.id_of(&with_output).await.into_inner().to_string();
+        db.finish().await;
 
-    #[test]
-    fn the_gate_needs_the_drv_present_not_complete() {
-        let g = norm(&gates_predicate("db"));
-        assert!(
-            g.contains("JOIN cached_path cp ON cp.hash = d.hash")
-                && !g.contains("missing_references"),
-            "{g}"
-        );
-        assert_eq!(
-            norm(&drv_present_predicate("db")),
-            norm(&drv_nar_absent_predicate("db")).trim_start_matches("NOT "),
-            "the two must stay exact negations"
-        );
-    }
-
-    #[test]
-    fn complete_is_present_with_no_missing_runtime_dep_and_fetchable_reads_it() {
-        assert_eq!(
-            norm(&shared_build_complete_predicate("db")),
-            "(db.missing_runtime_deps = 0 AND (EXISTS (SELECT 1 FROM derivation_output o2 \
-             WHERE o2.derivation = db.derivation) AND NOT EXISTS (SELECT 1 FROM derivation_output o \
-             WHERE o.derivation = db.derivation AND o.name <> ALL(db.unneeded_outputs) \
-             AND NOT EXISTS (SELECT 1 FROM cached_path cp WHERE cp.hash = o.hash))))"
-        );
-        let f = norm(&fetchable_predicate("db"));
-        assert!(f.contains("db.missing_runtime_deps = 0"), "{f}");
-        assert!(
-            !f.contains("missing_references"),
-            "the path counter is no longer read: {f}"
-        );
-    }
-
-    #[test]
-    fn fetchable_is_terminal_success_with_complete_outputs_in_our_own_cache() {
-        let p = norm(&fetchable_predicate("db"));
-        assert!(p.starts_with("(db.status IN (3, 7)"), "{p}");
-        assert!(
-            p.contains("NOT EXISTS (SELECT 1 FROM cached_path cp WHERE cp.hash = o.hash)")
-                && !p.contains("file_hash"),
-            "{p}"
-        );
-        assert!(
-            !p.contains("cache_available"),
-            "an upstream copy is not our cache: {p}"
-        );
-        assert!(
-            !p.contains("derivation_dependency"),
-            "no walk over the build graph: {p}"
-        );
-    }
-
-    #[test]
-    fn a_settled_build_missing_a_runtime_dependency_is_incomplete() {
-        assert_eq!(
-            settled_incomplete_predicate("p"),
-            "(p.status IN (3, 7) AND p.missing_runtime_deps > 0)"
-        );
-    }
-
-    #[test]
-    fn a_shared_build_with_no_outputs_is_not_fetchable() {
-        let p = norm(&fetchable_predicate("db"));
-        assert!(
-            p.contains(
-                "EXISTS (SELECT 1 FROM derivation_output o2 WHERE o2.derivation = db.derivation) AND NOT EXISTS"
-            ),
-            "the output guard must precede the NOT EXISTS: {p}"
-        );
-    }
-
-    #[test]
-    fn both_gate_arms_are_need_gated_and_read_the_column() {
-        let sql = norm(&gates_predicate("db"));
-        assert!(sql.contains("db.wanted"), "{sql}");
-        assert!(
-            !sql.contains("FROM derivation_dependency"),
-            "the gate must not walk edges per row: {sql}"
-        );
-        assert!(
-            sql.contains("db.blocking_deps = 0"),
-            "the build arm keeps its can-start terms: {sql}"
-        );
-        assert!(
-            sql.contains("FROM build_job bj WHERE bj.derivation = db.derivation"),
-            "an unnamed shared build is still not promotable: {sql}"
-        );
+        assert_eq!(fetchable, [expected]);
     }
 
     #[test]
@@ -615,63 +534,12 @@ mod tests {
     #[test]
     fn the_wanted_status_set_is_closed_under_both_promotion_moves() {
         for status in [BuildStatus::Created, BuildStatus::Queued] {
-            assert!(
-                BUILDER_STATUSES.contains(&status),
-                "{status:?} is an endpoint of a promotion move"
-            );
+            assert!(BUILDER_STATUSES.contains(&status), "{status:?}");
         }
     }
 
     #[test]
-    fn gates_split_on_cache_available() {
-        let g = norm(&gates_predicate("db"));
-        assert!(
-            g.contains(
-                "AND db.wanted AND (db.cache_available OR (db.probed AND db.blocking_deps = 0 AND EXISTS ("
-            ),
-            "need is common to both arms, the split is on cache_available alone: {g}"
-        );
-        assert!(
-            g.contains("JOIN cached_path cp ON cp.hash = d.hash WHERE d.id = db.derivation"),
-            "the build arm reads the shared build's own .drv: {g}"
-        );
-    }
-
-    #[test]
-    fn promotable_is_created_plus_the_gates() {
-        let p = norm(&promotable_predicate("db"));
-        assert!(p.starts_with("(db.status = 0 AND ("), "{p}");
-        assert!(p.contains("w.walked"), "{p}");
-        assert!(p.contains("db.blocking_deps = 0"), "{p}");
-        assert!(
-            p.contains("FROM build_job bj WHERE bj.derivation = db.derivation"),
-            "{p}"
-        );
-        assert!(
-            !p.contains("derivation_input_source"),
-            "sources are references of the .drv: {p}"
-        );
-    }
-
-    #[test]
-    fn the_gates_never_read_the_shared_builds_own_status_column() {
-        let gates = gates_predicate("db");
-        assert!(!gates.contains("db.status"), "{gates}");
-        assert!(
-            promotable_predicate("db").contains("db.status = 0 AND"),
-            "the status term belongs to promotable alone"
-        );
-    }
-
-    #[test]
     fn open_is_not_fetchable_and_not_a_terminal_failure() {
-        assert_eq!(
-            norm(&open_predicate("db")),
-            format!(
-                "(NOT db.fetchable AND db.status NOT IN ({}))",
-                crate::sql::status::build_in(&BuildStatus::TERMINAL_FAILURE)
-            )
-        );
         for status in NEED_BUILD_STATUSES {
             assert!(
                 !BuildStatus::TERMINAL_FAILURE.contains(&status),
@@ -691,38 +559,6 @@ mod tests {
         assert!(BuildStatus::REQUEUEABLE.contains(&BuildStatus::Aborted));
         assert!(!BuildStatus::TERMINAL_FAILURE.contains(&BuildStatus::Aborted));
         assert!(!blocks_evaluation(BuildStatus::Aborted, true));
-    }
-
-    #[test]
-    fn the_walk_reaches_open_shared_builds_and_steps_every_edge_out_of_a_builder() {
-        let cte = norm(&open_closure_cte(
-            "pending",
-            "SELECT $1::uuid, $2::uuid, true",
-        ));
-        assert!(
-            cte.starts_with(
-                "WITH RECURSIVE pending(evaluation, derivation, builder) AS \
-                 (SELECT $1::uuid, $2::uuid, true UNION \
-                 SELECT c.evaluation, s.next, s.builder FROM pending c, LATERAL ("
-            ),
-            "{cte}"
-        );
-        assert!(
-            cte.contains(&format!(
-                "SELECT e.dependency AS next, ({}) AS builder",
-                norm(&builder_predicate("dep", "w"))
-            )),
-            "{cte}"
-        );
-        assert!(
-            cte.contains(&format!(
-                "WHERE e.derivation = c.derivation AND (c.builder OR e.kind IN (1, 2)) \
-                 AND {} OFFSET 0) s",
-                norm(&open_predicate("dep"))
-            )),
-            "{cte}"
-        );
-        assert_eq!(cte.matches("LATERAL (").count(), 1, "one probe: {cte}");
     }
 
     const SHARED_BUILD_OUTPUT_STORE_PATH_HASH: &str = "88888888888888888888888888888888";
@@ -1074,5 +910,190 @@ mod tests {
             "A build job whose shared build belongs to another derivation does not count as a live build job for either derivation."
         );
         db.finish().await;
+    }
+
+    async fn derivation_ids_matching(
+        db: &gradient_fixtures::database::TestDatabase,
+        predicate: &str,
+    ) -> std::collections::BTreeSet<String> {
+        db.texts(&format!(
+            "SELECT db.derivation::text FROM derivation_build db WHERE {predicate}"
+        ))
+        .await
+        .into_iter()
+        .collect()
+    }
+
+    async fn ids_of(
+        db: &gradient_fixtures::database::TestDatabase,
+        paths: &[&String],
+    ) -> std::collections::BTreeSet<String> {
+        let mut ids = std::collections::BTreeSet::new();
+        for path in paths {
+            ids.insert(db.id_of(path).await.into_inner().to_string());
+        }
+
+        ids
+    }
+
+    #[tokio::test]
+    async fn test_real_database_blocks_evaluation_and_open_sql_predicates_match_rust_rules_for_all_build_statuses_and_flags()
+     {
+        use sea_orm::Iterable;
+
+        let db = gradient_fixtures::database::TestDatabase::create().await;
+        let grid = |predicate: String| {
+            format!(
+                "SELECT s::text || ':' || w::text FROM generate_series(0, 10) s \
+                 CROSS JOIN (VALUES (true), (false)) v(w) \
+                 CROSS JOIN LATERAL (SELECT s AS status, w AS wanted, w AS fetchable) db \
+                 WHERE {predicate}"
+            )
+        };
+        let blocking: std::collections::BTreeSet<String> = db
+            .texts(&grid(blocks_evaluation_predicate("db")))
+            .await
+            .into_iter()
+            .collect();
+        let open: std::collections::BTreeSet<String> = db
+            .texts(&grid(open_predicate("db")))
+            .await
+            .into_iter()
+            .collect();
+        db.finish().await;
+
+        let mut expected_blocking = std::collections::BTreeSet::new();
+        let mut expected_open = std::collections::BTreeSet::new();
+        for status in BuildStatus::iter() {
+            for flag in [true, false] {
+                let key = format!("{}:{flag}", i32::from(status));
+                if blocks_evaluation(status, flag) {
+                    expected_blocking.insert(key.clone());
+                }
+                if !flag && !BuildStatus::TERMINAL_FAILURE.contains(&status) {
+                    expected_open.insert(key);
+                }
+            }
+        }
+        assert_eq!(blocking, expected_blocking);
+        assert_eq!(open, expected_open);
+    }
+
+    #[tokio::test]
+    async fn gates_and_promotable_predicates_accept_build_only_when_walked_named_wanted_and_cache_available_or_probe_has_no_blocking_deps_and_stored_drv()
+     {
+        let path = |name: &str| format!("/nix/store/{}-gate.drv", name.repeat(32));
+        let ready_shape = |shape: gradient_fixtures::shape::Shape, key: &str| {
+            shape.derivation(&path(key)).walked().job().drv_cached()
+        };
+        let shape = gradient_fixtures::shape::shape()
+            .evaluation(gradient_entity::ids::EvaluationId::now_v7());
+        let shape = ["1", "4", "5", "6", "9"]
+            .into_iter()
+            .fold(shape, ready_shape);
+        let db = shape
+            .derivation(&path("2"))
+            .job()
+            .drv_cached()
+            .derivation(&path("3"))
+            .walked()
+            .drv_cached()
+            .derivation(&path("7"))
+            .walked()
+            .job()
+            .derivation(&path("8"))
+            .walked()
+            .job()
+            .into_database()
+            .await;
+        db.execute("UPDATE derivation_build SET wanted = true, probed = true, blocking_deps = 0")
+            .await;
+        db.execute(&format!(
+            "UPDATE derivation_build SET wanted = false WHERE derivation = '{}'; \
+             UPDATE derivation_build SET probed = false WHERE derivation = '{}'; \
+             UPDATE derivation_build SET blocking_deps = 1 WHERE derivation = '{}'; \
+             UPDATE derivation_build SET status = 1 WHERE derivation = '{}'",
+            db.id_of(&path("4")).await,
+            db.id_of(&path("5")).await,
+            db.id_of(&path("6")).await,
+            db.id_of(&path("9")).await,
+        ))
+        .await;
+        db.execute(&format!(
+            "UPDATE derivation_build SET cache_available = true, probed = false, blocking_deps = 5 \
+             WHERE derivation = '{}'",
+            db.id_of(&path("8")).await,
+        ))
+        .await;
+
+        let gated = derivation_ids_matching(&db, &gates_predicate("db")).await;
+        let promotable = derivation_ids_matching(&db, &promotable_predicate("db")).await;
+        let (ready, cached, queued) = (path("1"), path("8"), path("9"));
+        let expected_gated = ids_of(&db, &[&ready, &cached, &queued]).await;
+        let expected_promotable = ids_of(&db, &[&ready, &cached]).await;
+        db.finish().await;
+
+        assert_eq!(gated, expected_gated);
+        assert_eq!(promotable, expected_promotable);
+    }
+
+    #[tokio::test]
+    async fn test_fetchable_predicate_and_settled_incomplete_predicate_on_database_builds_with_different_status_missing_runtime_dependencies_unneeded_outputs_cache_availability_and_stored_outputs()
+     {
+        let path = |key: &str| format!("/nix/store/{}-fetch.drv", key.repeat(32));
+        let stored = |shape: gradient_fixtures::shape::Shape, key: &str, status: BuildStatus| {
+            shape
+                .derivation(&path(key))
+                .output(&key.repeat(32))
+                .build_status(status)
+                .cached_path(&key.repeat(32), key)
+        };
+        let shape = gradient_fixtures::shape::shape()
+            .evaluation(gradient_entity::ids::EvaluationId::now_v7());
+        let shape = [
+            ("1", BuildStatus::Completed),
+            ("2", BuildStatus::Substituted),
+            ("3", BuildStatus::Queued),
+            ("4", BuildStatus::Completed),
+            ("5", BuildStatus::Queued),
+        ]
+        .into_iter()
+        .fold(shape, |shape, (key, status)| stored(shape, key, status));
+        let unneeded_hash = format!("{}d", "6".repeat(31));
+        let db = shape
+            .derivation(&path("6"))
+            .output(&"6".repeat(32))
+            .unneeded_output(&unneeded_hash, "dev")
+            .build_status(BuildStatus::Completed)
+            .cached_path(&"6".repeat(32), "6")
+            .derivation(&path("7"))
+            .output(&"7".repeat(32))
+            .build_status(BuildStatus::Completed)
+            .derivation(&path("8"))
+            .build_status(BuildStatus::Completed)
+            .derivation(&path("9"))
+            .output(&"9".repeat(32))
+            .cache_available()
+            .build_status(BuildStatus::Completed)
+            .into_database()
+            .await;
+        db.execute(&format!(
+            "UPDATE derivation_build SET missing_runtime_deps = 0; \
+             UPDATE derivation_build SET missing_runtime_deps = 1 WHERE derivation IN ('{}', '{}')",
+            db.id_of(&path("4")).await,
+            db.id_of(&path("5")).await,
+        ))
+        .await;
+
+        let fetchable = derivation_ids_matching(&db, &fetchable_predicate("db")).await;
+        let incomplete = derivation_ids_matching(&db, &settled_incomplete_predicate("db")).await;
+        let (completed, substituted, unneeded_unstored) = (path("1"), path("2"), path("6"));
+        let expected_fetchable = ids_of(&db, &[&completed, &substituted, &unneeded_unstored]).await;
+        let settled_missing_runtime_dependency = path("4");
+        let expected_incomplete = ids_of(&db, &[&settled_missing_runtime_dependency]).await;
+        db.finish().await;
+
+        assert_eq!(fetchable, expected_fetchable);
+        assert_eq!(incomplete, expected_incomplete);
     }
 }

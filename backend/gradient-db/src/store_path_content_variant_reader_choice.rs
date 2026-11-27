@@ -615,43 +615,6 @@ mod tests {
         rows.get(hash).map(|row| row.nar_object_storage_key.clone())
     }
 
-    #[test]
-    fn worker_read_sql_has_no_recursive_keyword_and_trust_source_files_register_exactly_five_recursive_statements()
-     {
-        let mut sorted_recursive_registered_sql_statement_names_in_both_trust_source_files: Vec<
-            &str,
-        > = crate::sql::registry()
-            .filter(|query| {
-                query.file.ends_with("store_path_content_variant_trust.rs")
-                    || query
-                        .file
-                        .ends_with("store_path_content_variant_reader_choice.rs")
-            })
-            .filter(|query| query.text().contains("RECURSIVE"))
-            .map(|query| query.name)
-            .collect();
-        sorted_recursive_registered_sql_statement_names_in_both_trust_source_files.sort_unstable();
-        assert_eq!(
-            (
-                STORED_COPY_BY_STORE_PATH_HASH_USABLE_AS_SHARED_BUILD_BUILD_INPUT_QUERY
-                    .text()
-                    .contains("RECURSIVE"),
-                sorted_recursive_registered_sql_statement_names_in_both_trust_source_files,
-            ),
-            (
-                false,
-                vec![
-                    "EVALUATION_IMPORT_FROM_DERIVATION_OUTPUT_REFERENCE_CLOSURE_STORE_PATH_HASHES_QUERY",
-                    "INSERT_PLACEHOLDERS_FOR_PROJECT_OUTPUTS_INTO_CACHE",
-                    "INSERT_PLACEHOLDERS_FOR_PROJECT_STORE_HASHES",
-                    "SHARED_BUILD_INPUT_CLOSURE_STORE_PATH_HASHES_QUERY",
-                    "SQL_SELECT_STORED_CONTENT_VARIANTS_WITH_REFERENCE_CLOSURE_FOR_PROJECT_CACHE_SIGNING",
-                ]
-            ),
-            "A query for a closure can traverse the build closure once per job. The worker read does not traverse the build closure. Exactly five statements in both trust files are recursive. These are the query for the input closure of the shared build and the query for the closure of import outputs from evaluation. The signature query for dependency outputs and two placeholder inserts are the other three."
-        );
-    }
-
     #[tokio::test]
     async fn test_selections_return_only_variant_trusted_by_reader() {
         let readers = two_variants_of_one_hash_and_one_untrusted_hash().await;

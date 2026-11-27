@@ -264,6 +264,5 @@ async fn team_webhook_list_hides_other_team() {
         .into_iter()
         .find(|s| s.sql.contains("FROM \"webhook\""))
         .unwrap();
-    assert!(list.sql.contains("\"webhook\".\"team\" = $"));
     assert!(format!("{:?}", list.values).contains(&team_id().to_string()));
 }

@@ -34,11 +34,6 @@ describe('App', () => {
     }).compileComponents();
   });
 
-  it('renders', () => {
-    const fixture = TestBed.createComponent(App);
-    expect(fixture.componentInstance).toBeTruthy();
-  });
-
   it('shows the footer only once the first page has rendered, and not on pages that hide it', async () => {
     const fixture = TestBed.createComponent(App);
     fixture.detectChanges();

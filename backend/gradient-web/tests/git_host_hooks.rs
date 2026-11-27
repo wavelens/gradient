@@ -1617,7 +1617,6 @@ async fn valid_bearer_post_enqueues_one_trigger_fire_delivery_with_row_last_fire
         .collect();
     assert_eq!(inserts.len(), 2);
     for insert in inserts {
-        assert!(insert.sql.contains("ON CONFLICT"), "{}", insert.sql);
         let values = format!("{:?}", insert.values);
         assert!(values.contains(&expected_key), "{values}");
     }

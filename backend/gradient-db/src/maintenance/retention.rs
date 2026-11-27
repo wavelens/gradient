@@ -316,55 +316,119 @@ mod tests {
             .unwrap_or_else(|| panic!("token sweep: {log:?}"));
         assert_eq!(cutoff(token_sweep), Value::from(now));
     }
-
     #[tokio::test]
-    async fn a_cluster_job_is_pruned_once_finished_and_old_or_orphaned() {
-        let db = mock_db()
-            .append_exec_results(affected(&[0]))
-            .into_connection();
+    async fn retention_prunes_old_or_orphaned_finished_cluster_jobs_and_only_superseded_open_worker_connections()
+     {
+        use gradient_entity::cluster_job::Model as ClusterJob;
+        use gradient_entity::cluster_member::Model as ClusterMember;
+        use gradient_entity::worker_connection::Model as WorkerConnection;
+        use gradient_types::{ClusterJobId, ClusterMemberId, WorkerConnectionId};
 
-        prune_all(&db, &[&PRUNE_CLUSTER_JOB], gradient_types::now()).await;
+        let evaluations = [(); 3].map(|_| gradient_types::EvaluationId::now_v7());
+        let db = evaluations
+            .iter()
+            .fold(gradient_fixtures::shape::shape(), |seed, e| {
+                seed.evaluation(*e)
+            })
+            .into_database()
+            .await;
+        let mut members = evaluations.into_iter();
+        let conn = db.connection();
+        let now = gradient_types::now();
+        let (old, fresh) = (now - chrono::Duration::days(2), now);
+        let cutoff = now - chrono::Duration::days(1);
 
-        let log = raw_statements(db.into_transaction_log());
-        let sql = &deleting(&log, "cluster_job").expect("one delete").sql;
-        let finished = [
-            ClusterJobStatus::Completed,
-            ClusterJobStatus::Failed,
-            ClusterJobStatus::Aborted,
-        ]
-        .map(|s| i16::from(s).to_string())
-        .join(", ");
-        assert!(
-            sql.contains(&format!("c.status IN ({finished}) AND ")),
-            "an active cluster job is never taken: {sql}"
-        );
-        assert!(
-            sql.contains(
-                "(c.updated_at < $1 \
-                 OR NOT EXISTS (SELECT 1 FROM cluster_member m WHERE m.cluster_job = c.id))"
-            ),
-            "a finished cluster job goes past the cutoff, or right away once its members are gone: {sql}"
-        );
-    }
+        let mut jobs = Vec::new();
+        for (status, updated_at, has_member) in [
+            (ClusterJobStatus::Completed, old, true),
+            (ClusterJobStatus::Completed, fresh, true),
+            (ClusterJobStatus::Completed, fresh, false),
+            (ClusterJobStatus::Running, old, false),
+            (ClusterJobStatus::Queued, old, true),
+        ] {
+            let id = ClusterJobId::now_v7();
+            jobs.push(id);
+            crate::rows::insert::<gradient_entity::cluster_job::Entity, _>(
+                &conn,
+                ClusterJob {
+                    id,
+                    status,
+                    created_at: updated_at,
+                    updated_at,
+                    ..Default::default()
+                },
+            )
+            .await
+            .expect("the cluster job is written");
+            if has_member {
+                crate::rows::insert::<gradient_entity::cluster_member::Entity, _>(
+                    &conn,
+                    ClusterMember {
+                        id: ClusterMemberId::now_v7(),
+                        cluster_job: id,
+                        role: "member".into(),
+                        evaluation: members.next(),
+                        ..Default::default()
+                    },
+                )
+                .await
+                .expect("the member is written");
+            }
+        }
 
-    #[tokio::test]
-    async fn an_open_worker_connection_is_pruned_only_once_superseded() {
-        let db = mock_db()
-            .append_exec_results(affected(&[0]))
-            .into_connection();
+        let mut connections = Vec::new();
+        for (worker, connected_at, disconnected_at) in [
+            ("w1", old, Some(old)),
+            ("w2", old, Some(fresh)),
+            ("w3", old, None),
+            ("w3", fresh, None),
+            ("w4", old, None),
+        ] {
+            let id = WorkerConnectionId::now_v7();
+            connections.push(id);
+            crate::rows::insert::<gradient_entity::worker_connection::Entity, _>(
+                &conn,
+                WorkerConnection {
+                    id,
+                    worker_id: worker.into(),
+                    connected_at,
+                    disconnected_at,
+                    capabilities: serde_json::json!({}),
+                    reason: None,
+                },
+            )
+            .await
+            .expect("the connection is written");
+        }
 
-        prune_all(&db, &[&PRUNE_WORKER_CONNECTION], gradient_types::now()).await;
+        prune_all(
+            &conn,
+            &[&PRUNE_CLUSTER_JOB, &PRUNE_WORKER_CONNECTION],
+            cutoff,
+        )
+        .await;
 
-        let log = raw_statements(db.into_transaction_log());
-        let sql = &deleting(&log, "worker_connection").expect("one delete").sql;
-        let open_arm = sql
-            .split(" OR ")
-            .find(|arm| arm.contains("disconnected_at IS NULL"))
-            .expect("an arm for open connections");
-        assert!(
-            open_arm.contains("n.worker_id = c.worker_id AND n.connected_at > c.connected_at"),
-            "an open connection is taken only behind a newer one of its worker: {sql}"
-        );
+        let mut kept_jobs: Vec<_> = db
+            .rows::<gradient_entity::cluster_job::Entity>()
+            .await
+            .into_iter()
+            .map(|job| job.id)
+            .collect();
+        let mut kept_connections: Vec<_> = db
+            .rows::<gradient_entity::worker_connection::Entity>()
+            .await
+            .into_iter()
+            .map(|connection| connection.id)
+            .collect();
+        let mut expected_jobs = vec![jobs[1], jobs[3], jobs[4]];
+        let mut expected_connections = vec![connections[1], connections[3], connections[4]];
+        kept_jobs.sort();
+        kept_connections.sort();
+        expected_jobs.sort();
+        expected_connections.sort();
+        assert_eq!(kept_jobs, expected_jobs);
+        assert_eq!(kept_connections, expected_connections);
+        db.finish().await;
     }
 
     #[tokio::test]

@@ -207,80 +207,105 @@ pub(crate) fn dead_member_of_cluster() -> SelectStatement {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use gradient_fixtures::mock::{all_statements, empty_db, mock_db};
+    use gradient_fixtures::mock::{all_statements, empty_db};
 
     use gradient_entity::ids::{ClusterMemberId, EvaluationId};
 
-    fn membership_row(
-        member: ClusterMemberId,
-        cluster: ClusterJobId,
-        evaluation: EvaluationId,
-        count: i64,
-    ) -> std::collections::BTreeMap<&'static str, sea_orm::Value> {
-        let now = chrono::Utc::now().naive_utc();
-        std::collections::BTreeMap::from([
-            ("member_id", member.into_inner().into()),
-            ("cluster_job", cluster.into_inner().into()),
-            ("evaluation", Some(evaluation.into_inner()).into()),
-            ("derivation_build", Option::<uuid::Uuid>::None.into()),
-            ("exec_job", Option::<uuid::Uuid>::None.into()),
-            ("role", "server".into()),
-            ("primary", true.into()),
-            ("pin", Option::<String>::None.into()),
-            ("eval_index", Option::<i16>::None.into()),
-            ("min_free_ram_mb", Option::<i32>::None.into()),
-            (
-                "dissolve_after",
-                Option::<chrono::NaiveDateTime>::None.into(),
-            ),
-            ("status", i16::from(ClusterJobStatus::Queued).into()),
-            ("same_zone", true.into()),
-            ("attempts", 0i32.into()),
-            ("attempts_outside_budget", 0i32.into()),
-            ("retry_budget", 2i32.into()),
-            ("created_at", now.into()),
-            ("updated_at", now.into()),
-            ("member_count", count.into()),
-        ])
-    }
-
     #[tokio::test]
-    async fn membership_maps_each_member_to_its_cluster_and_size() {
-        let (member, cluster, evaluation) = (
-            ClusterMemberId::now_v7(),
-            ClusterJobId::now_v7(),
-            EvaluationId::now_v7(),
-        );
-        let (node, exec_job) = (ClusterMemberId::now_v7(), ExecJobId::now_v7());
-        let mut exec_row = membership_row(node, cluster, evaluation, 3);
-        exec_row.insert("evaluation", Option::<uuid::Uuid>::None.into());
-        exec_row.insert("exec_job", Some(exec_job.into_inner()).into());
-        let db = mock_db()
-            .append_query_results([vec![
-                membership_row(member, cluster, evaluation, 3),
-                exec_row,
-            ]])
-            .into_connection();
+    async fn test_cluster_membership_lookup_returns_members_for_evaluations_and_jobs_have_cluster_fields_and_member_count()
+     {
+        use gradient_entity::cluster_member;
+        use gradient_entity::exec_job;
+        use gradient_fixtures::shape::shape;
 
-        let found = cluster_membership(&db, &[evaluation], &[], &[exec_job])
+        const BUILD: &str = "/nix/store/0123456789abcdfghijklmnpqrsvwxyz-a.drv";
+        let (cluster, quiet) = (ClusterJobId::now_v7(), ClusterJobId::now_v7());
+        let (evaluation, quiet_evaluation) = (EvaluationId::now_v7(), EvaluationId::now_v7());
+        let now = gradient_types::now();
+        let db = shape()
+            .evaluation(evaluation)
+            .derivation(BUILD)
+            .entry_point("pkg.a")
+            .cluster(cluster, true, 2, ClusterJobStatus::Queued, 0, now)
+            .evaluation_member_of(cluster, "server", true, None)
+            .build_member_of(cluster, "client", false, None)
+            .evaluation(quiet_evaluation)
+            .cluster(quiet, false, 1, ClusterJobStatus::Queued, 0, now)
+            .evaluation_member_of(quiet, "server", true, None)
+            .into_database()
+            .await;
+        let conn = db.connection();
+        let point = db
+            .entry_point(evaluation, "pkg.a")
+            .await
+            .expect("the entry point");
+        let exec = ExecJobId::now_v7();
+        crate::rows::insert::<exec_job::Entity, _>(
+            &conn,
+            exec_job::Model {
+                id: exec,
+                evaluation,
+                entry_point: point.id,
+                program_derivation: point.derivation,
+                requirement: serde_json::json!({}),
+                spec: serde_json::json!({}),
+                created_at: now,
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("the exec job is written");
+        crate::rows::insert::<cluster_member::Entity, _>(
+            &conn,
+            cluster_member::Model {
+                id: ClusterMemberId::now_v7(),
+                cluster_job: cluster,
+                exec_job: Some(exec),
+                role: "node".into(),
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("the exec member is written");
+        let build = db.shared_build(BUILD).await.id;
+
+        let by_evaluation_and_exec = cluster_membership(&conn, &[evaluation], &[], &[exec])
+            .await
+            .expect("membership");
+        let by_build = cluster_membership(&conn, &[], &[build], &[])
             .await
             .expect("membership");
 
-        assert_eq!(found.len(), 2);
-        assert_eq!(found[1].member.exec_job, Some(exec_job));
-        assert_eq!(found[1].member.evaluation, None);
-        assert_eq!(found[0].member.id, member);
-        assert_eq!(found[0].member.evaluation, Some(evaluation));
-        assert_eq!(found[0].cluster.id, cluster);
-        assert!(found[0].cluster.same_zone);
-        assert_eq!(found[0].member_count, 3);
-        let sql = &all_statements(db.into_transaction_log())[0].sql;
-        assert!(sql.contains("\"evaluation\" = ANY($1::uuid[])"), "{sql}");
-        assert!(
-            sql.contains("\"derivation_build\" = ANY($2::uuid[])"),
-            "{sql}"
+        db.finish().await;
+        let mut found: Vec<_> = by_evaluation_and_exec
+            .iter()
+            .map(|m| {
+                (
+                    m.member.role.as_str(),
+                    m.member.evaluation,
+                    m.member.exec_job,
+                    m.member_count,
+                )
+            })
+            .collect();
+        found.sort();
+        assert_eq!(
+            found,
+            [
+                ("node", None, Some(exec), 3),
+                ("server", Some(evaluation), None, 3)
+            ]
         );
-        assert!(sql.contains("\"exec_job\" = ANY($3::uuid[])"), "{sql}");
+        assert!(
+            by_evaluation_and_exec
+                .iter()
+                .all(|m| m.cluster.id == cluster
+                    && m.cluster.same_zone
+                    && m.cluster.retry_budget == 2)
+        );
+        assert_eq!(by_build.len(), 1);
+        assert_eq!(by_build[0].member.derivation_build, Some(build));
+        assert_eq!(by_build[0].member.role, "client");
     }
 
     #[tokio::test]

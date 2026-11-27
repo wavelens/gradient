@@ -362,192 +362,258 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::graph::walks::WALK_WORK_MEM;
-    use gradient_fixtures::mock::{mock_db, statements};
-    use sea_orm::{MockExecResult, Value};
-    use std::collections::BTreeMap;
+    use gradient_entity::build::BuildStatus;
 
-    fn norm(s: &str) -> String {
-        s.split_whitespace().collect::<Vec<_>>().join(" ")
+    fn path(key: &str) -> String {
+        format!("/nix/store/{}-adopt.drv", key.repeat(32))
     }
 
-    fn exec() -> MockExecResult {
-        MockExecResult {
-            last_insert_id: 0,
-            rows_affected: 0,
+    async fn sorted_pairs(
+        db: &gradient_fixtures::database::TestDatabase,
+        expected: &[(EvaluationId, &str)],
+    ) -> Vec<(EvaluationId, DerivationId)> {
+        let mut pairs = Vec::new();
+        for (evaluation, key) in expected {
+            pairs.push((*evaluation, db.id_of(&path(key)).await));
         }
+        pairs.sort_unstable();
+
+        pairs
     }
 
-    fn pair(e: EvaluationId, d: DerivationId) -> BTreeMap<String, Value> {
-        BTreeMap::from([
-            ("evaluation".to_owned(), Value::from(e.into_inner())),
-            ("derivation".to_owned(), Value::from(d.into_inner())),
-        ])
+    fn sorted(adopted: Adopted) -> Vec<(EvaluationId, DerivationId)> {
+        let mut pairs = adopted.pairs;
+        pairs.sort_unstable();
+
+        pairs
     }
 
-    #[tokio::test]
-    async fn adoption_names_every_open_shared_build_a_live_evaluation_reaches() {
-        let e = EvaluationId::now_v7();
-        let d = DerivationId::now_v7();
-        let db = mock_db()
-            .append_exec_results([exec()])
-            .append_query_results([vec![pair(e, d)]])
-            .into_connection();
+    #[test]
+    fn adopted_evaluations_and_derivations_are_sorted_and_deduplicated() {
+        let (first, second) = (EvaluationId::now_v7(), EvaluationId::now_v7());
+        let (a, b) = (DerivationId::now_v7(), DerivationId::now_v7());
+        let adopted = Adopted {
+            pairs: vec![(second, b), (first, b), (second, a), (first, a)],
+        };
 
-        let adopted = adopt_pending_closures(&db).await.unwrap();
-
-        assert_eq!(adopted.pairs, vec![(e, d)]);
-        assert_eq!(adopted.evaluations(), vec![e]);
-        assert_eq!(adopted.derivations(), vec![d]);
-        let log = statements(db.into_transaction_log());
-        assert_eq!(log.len(), 2, "{log:?}");
-        assert!(log[0].contains(WALK_WORK_MEM), "{log:?}");
-        let sql = norm(&log[1]);
-        assert!(
-            sql.contains(
-                "WITH RECURSIVE pending(evaluation, derivation, builder) AS \
-                 (SELECT bj.evaluation, bj.derivation, (w.walked AND db.probed \
-                 AND NOT db.cache_available AND db.status IN (0, 1, 2, 8)) FROM build_job bj"
-            ),
-            "{sql}"
-        );
-        assert!(
-            sql.contains(&format!(
-                "WHERE EXISTS (SELECT 1 FROM evaluation ev WHERE ev.id = bj.evaluation \
-                 AND ev.status IN ({})) AND (NOT db.fetchable AND db.status NOT IN (4, 6, 9))",
-                crate::sql::status::eval_in(&EvaluationStatus::ACTIVE)
-            )),
-            "{sql}"
-        );
-        assert!(
-            sql.contains(
-                "INSERT INTO build_job (id, evaluation, derivation, derivation_build, \
-                 score, score_breakdown, created_at) \
-                 SELECT uuidv7(), p.evaluation, p.derivation, db.id, 0, '{}'::jsonb, \
-                 (now() AT TIME ZONE 'UTC') \
-                 FROM pending p JOIN derivation_build db ON db.derivation = p.derivation \
-                 ON CONFLICT (evaluation, derivation) DO NOTHING \
-                 RETURNING evaluation, derivation"
-            ),
-            "{sql}"
-        );
+        assert_eq!(adopted.evaluations(), vec![first, second]);
+        assert_eq!(adopted.derivations(), vec![a, b]);
     }
 
     #[tokio::test]
-    async fn a_batch_names_below_its_roots_and_stops_at_a_name() {
-        let d = DerivationId::now_v7();
-        let db = mock_db()
-            .append_exec_results([exec()])
-            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
-            .into_connection();
+    async fn adopt_pending_closures_names_open_builds_and_skips_finished_evaluations() {
+        let [named, unnamed, deeper_named, deeper_unnamed, closed, failed] =
+            ["1", "2", "3", "4", "5", "6"];
+        let [live_root, live_below, done_root, done_below] = ["7", "8", "9", "a"];
+        let (first, second, finished) = (
+            EvaluationId::now_v7(),
+            EvaluationId::now_v7(),
+            EvaluationId::now_v7(),
+        );
+        let db = gradient_fixtures::shape::shape()
+            .evaluation(first)
+            .evaluation_status(EvaluationStatus::Building)
+            .derivation(&path(named))
+            .walked()
+            .probed()
+            .job()
+            .depends_on(&path(unnamed))
+            .depends_on(&path(closed))
+            .derivation(&path(unnamed))
+            .walked()
+            .probed()
+            .depends_on(&path(deeper_named))
+            .depends_on(&path(failed))
+            .derivation(&path(deeper_named))
+            .walked()
+            .probed()
+            .job()
+            .depends_on(&path(deeper_unnamed))
+            .derivation(&path(deeper_unnamed))
+            .derivation(&path(closed))
+            .output(&closed.repeat(32))
+            .build_status(BuildStatus::Completed)
+            .cached_path(&closed.repeat(32), "closed")
+            .derivation(&path(failed))
+            .build_status(BuildStatus::FailedPermanent)
+            .evaluation(second)
+            .evaluation_status(EvaluationStatus::Building)
+            .derivation(&path(live_root))
+            .walked()
+            .probed()
+            .job()
+            .depends_on(&path(live_below))
+            .derivation(&path(live_below))
+            .evaluation(finished)
+            .evaluation_status(EvaluationStatus::Completed)
+            .derivation(&path(done_root))
+            .walked()
+            .probed()
+            .job()
+            .depends_on(&path(done_below))
+            .derivation(&path(done_below))
+            .into_database()
+            .await;
+        db.execute("UPDATE derivation_build SET fetchable = (status = 3)")
+            .await;
+        let connection = db.connection();
 
-        assert!(
-            adopt_unnamed_below(&db, &[d])
-                .await
-                .unwrap()
-                .pairs
-                .is_empty()
+        let one_evaluation = adopt_pending_closure(&connection, first).await.unwrap();
+        let live = adopt_pending_closures(&connection).await.unwrap();
+        let again = adopt_pending_closures(&connection).await.unwrap();
+        let expected_one = sorted_pairs(&db, &[(first, unnamed), (first, deeper_unnamed)]).await;
+        let expected_live = sorted_pairs(&db, &[(second, live_below)]).await;
+        let (one_evaluation, live) = (sorted(one_evaluation), sorted(live));
+        db.finish().await;
+
+        assert_eq!(one_evaluation, expected_one);
+        assert_eq!(live, expected_live);
+        assert!(again.pairs.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_adoption_below_rules_for_named_and_unnamed_parents() {
+        let [wanted_parent, below_wanted, unwanted_parent, below_unwanted] = ["1", "2", "3", "4"];
+        let [
+            named_root,
+            below_named_root,
+            finished_root,
+            below_finished_root,
+        ] = ["5", "6", "7", "8"];
+        let (live, finished) = (EvaluationId::now_v7(), EvaluationId::now_v7());
+        let db = gradient_fixtures::shape::shape()
+            .evaluation(live)
+            .evaluation_status(EvaluationStatus::Building)
+            .derivation(&path(wanted_parent))
+            .walked()
+            .probed()
+            .job()
+            .depends_on(&path(below_wanted))
+            .derivation(&path(below_wanted))
+            .derivation(&path(unwanted_parent))
+            .walked()
+            .probed()
+            .job()
+            .depends_on(&path(below_unwanted))
+            .derivation(&path(below_unwanted))
+            .derivation(&path(named_root))
+            .walked()
+            .probed()
+            .job()
+            .depends_on(&path(below_named_root))
+            .derivation(&path(below_named_root))
+            .evaluation(finished)
+            .evaluation_status(EvaluationStatus::Completed)
+            .derivation(&path(finished_root))
+            .walked()
+            .probed()
+            .job()
+            .depends_on(&path(below_finished_root))
+            .derivation(&path(below_finished_root))
+            .into_database()
+            .await;
+        db.execute(&format!(
+            "UPDATE derivation_build SET wanted = true; \
+             UPDATE derivation_build SET wanted = false WHERE derivation = '{}'",
+            db.id_of(&path(unwanted_parent)).await
+        ))
+        .await;
+        let connection = db.connection();
+        let below_both = [
+            db.id_of(&path(below_wanted)).await,
+            db.id_of(&path(below_unwanted)).await,
+        ];
+        let roots = [
+            db.id_of(&path(named_root)).await,
+            db.id_of(&path(finished_root)).await,
+        ];
+
+        let below_wanted_parents = adopt_below_named(&connection, &below_both).await.unwrap();
+        let ignoring_wanted = adopt_unnamed_below_for_live_evaluations(&connection, &below_both)
+            .await
+            .unwrap();
+        let below_roots = adopt_unnamed_below(&connection, &roots).await.unwrap();
+        let expected_wanted = sorted_pairs(&db, &[(live, below_wanted)]).await;
+        let expected_ignoring = sorted_pairs(&db, &[(live, below_unwanted)]).await;
+        let expected_roots = sorted_pairs(&db, &[(live, below_named_root)]).await;
+        let results = (
+            sorted(below_wanted_parents),
+            sorted(ignoring_wanted),
+            sorted(below_roots),
         );
-        let log = statements(db.into_transaction_log());
-        let sql = norm(&log[1]);
-        let live = crate::sql::status::eval_in(&EvaluationStatus::ACTIVE);
-        assert!(
-            sql.contains(&format!(
-                "FROM build_job bj JOIN derivation_build db ON db.derivation = bj.derivation \
-                 JOIN derivation w ON w.id = db.derivation \
-                 WHERE bj.derivation = ANY($1::uuid[]) AND EXISTS (SELECT 1 FROM evaluation ev \
-                 WHERE ev.id = bj.evaluation AND ev.status IN ({live})) AND (NOT db.fetchable"
-            )),
-            "a named root seeds its own evaluations: {sql}"
-        );
-        assert!(
-            sql.contains(
-                "UNION SELECT parent.evaluation, db.derivation, (w.walked AND db.probed \
-                 AND NOT db.cache_available AND db.status IN (0, 1, 2, 8)) \
-                 FROM unnest($1::uuid[]) AS g(derivation)"
-            ) && sql.contains("CROSS JOIN LATERAL (SELECT pj.evaluation FROM derivation_build p"),
-            "a root below a named wanted parent seeds that parent's evaluations, the parent \
-             looked up by key from the gained row: {sql}"
-        );
-        assert!(
-            sql.contains(
-                "AND NOT (EXISTS (SELECT 1 FROM build_job x WHERE x.evaluation = c.evaluation \
-                 AND x.derivation = e.dependency)) OFFSET 0) s)"
-            ),
-            "the walk stops at what the evaluation already names: {sql}"
-        );
-        assert!(
-            sql.contains(
-                "ON CONFLICT (evaluation, derivation) DO NOTHING RETURNING evaluation, derivation"
-            ),
-            "{sql}"
-        );
-        assert!(
-            !norm(&ADOPT_BELOW_NAMED).contains("x.evaluation = c.evaluation"),
-            "the full walk below a gained shared build keeps naming everything it reaches"
+        db.finish().await;
+
+        assert_eq!(
+            results,
+            (expected_wanted, expected_ignoring, expected_roots)
         );
     }
 
     #[tokio::test]
-    async fn one_evaluation_adopts_from_its_own_names() {
-        let e = EvaluationId::now_v7();
-        let db = mock_db()
-            .append_exec_results([exec()])
-            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
-            .into_connection();
+    async fn test_open_builds_without_build_job_are_reported_and_closed_or_out_of_scope_builds_are_ignored()
+     {
+        let [orphan, failed, named, fetchable, outside_scope] = ["1", "2", "3", "4", "5"];
+        let db = gradient_fixtures::shape::shape()
+            .evaluation(EvaluationId::now_v7())
+            .derivation(&path(orphan))
+            .derivation(&path(failed))
+            .build_status(BuildStatus::FailedPermanent)
+            .derivation(&path(named))
+            .job()
+            .derivation(&path(fetchable))
+            .output(&fetchable.repeat(32))
+            .build_status(BuildStatus::Completed)
+            .cached_path(&fetchable.repeat(32), "fetchable")
+            .derivation(&path(outside_scope))
+            .into_database()
+            .await;
+        db.execute("UPDATE derivation_build SET fetchable = (status = 3)")
+            .await;
+        let connection = db.connection();
+        let mut ids = Vec::new();
+        for key in [orphan, failed, named, fetchable, outside_scope] {
+            ids.push(db.id_of(&path(key)).await);
+        }
 
-        assert!(
-            adopt_pending_closure(&db, e)
-                .await
-                .unwrap()
-                .pairs
-                .is_empty()
-        );
-        let log = statements(db.into_transaction_log());
-        let sql = norm(&log[1]);
-        assert!(
-            sql.contains(
-                "FROM build_job bj JOIN derivation_build db ON db.derivation = bj.derivation \
-                 JOIN derivation w ON w.id = db.derivation WHERE bj.evaluation = $1 \
-                 AND (NOT db.fetchable"
-            ),
-            "{sql}"
-        );
-        assert!(!sql.contains("FROM evaluation ev"), "{sql}");
-        assert!(
-            sql.contains(
-                "AND NOT (EXISTS (SELECT 1 FROM build_job x WHERE x.evaluation = c.evaluation \
-                 AND x.derivation = e.dependency)) OFFSET 0) s)"
-            ),
-            "Evaluation traversals stop at dependencies with an existing name from that evaluation. {sql}"
-        );
-    }
+        let with_orphan = pending_orphans_among(&connection, &ids[..4]).await.unwrap();
+        let without_orphan = pending_orphans_among(&connection, &ids[1..4])
+            .await
+            .unwrap();
+        let empty_scope = pending_orphans_among(&connection, &[]).await.unwrap();
+        let nil = DerivationId::new(uuid::Uuid::nil());
+        let whole = read_open_build_window_without_build_job(&connection, nil, 100)
+            .await
+            .unwrap();
+        let mut open = [ids[0], ids[2], ids[4]];
+        open.sort_unstable();
+        let first_two = read_open_build_window_without_build_job(&connection, nil, 2)
+            .await
+            .unwrap();
+        let after_all = read_open_build_window_without_build_job(&connection, open[2], 100)
+            .await
+            .unwrap();
+        db.finish().await;
 
-    #[tokio::test]
-    async fn the_orphan_probes_read_one_row_and_bind_their_scope() {
-        let d = DerivationId::now_v7();
-        let db = mock_db()
-            .append_query_results([vec![BTreeMap::from([(
-                "?column?".to_owned(),
-                Value::Int(Some(1)),
-            )])]])
-            .into_connection();
-
-        assert!(pending_orphans_among(&db, &[d]).await.unwrap());
-        assert!(
-            !pending_orphans_among(&db, &[]).await.unwrap(),
-            "an empty scope asks nothing"
+        assert_eq!(
+            (with_orphan, without_orphan, empty_scope),
+            (true, false, false)
         );
-        let log = statements(db.into_transaction_log());
-        assert_eq!(log.len(), 1, "{log:?}");
-        let sql = norm(&log[0]);
-        assert!(
-            sql.contains(
-                "(NOT db.fetchable AND db.status NOT IN (4, 6, 9)) AND NOT EXISTS \
-                 (SELECT 1 FROM build_job bj WHERE bj.derivation = db.derivation) LIMIT 1"
+        let mut orphans = whole.derivation_ids_without_build_job.clone();
+        orphans.sort_unstable();
+        let mut expected_orphans = vec![ids[0], ids[4]];
+        expected_orphans.sort_unstable();
+        assert_eq!(orphans, expected_orphans);
+        assert_eq!(
+            (whole.open_build_count_in_window, whole.last_derivation_id),
+            (3, Some(open[2]))
+        );
+        assert_eq!(
+            (
+                first_two.open_build_count_in_window,
+                first_two.last_derivation_id
             ),
-            "{sql}"
+            (2, Some(open[1]))
         );
-        assert!(sql.contains("db.derivation = ANY($1::uuid[])"), "{sql}");
+        assert_eq!(after_all, OpenBuildWindowScanResult::default());
     }
 }
