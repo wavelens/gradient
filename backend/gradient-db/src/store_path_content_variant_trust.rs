@@ -55,10 +55,13 @@ crate::sql_fn! {
     ),
         params = [ProjectId, CacheId],
         tier = Sweep,
-        budget = crate::sql::Budget::sweep().buffers(1_500_000)
-            .because("The background pass for signature-backfill can run this one-time insertion after the start of signing for the cache subscription. \
-                      This pass can write one unsigned placeholder for each project output to the cache. \
-                      End-to-end row counts read 17k buffers with all rows marked, 420k buffers with 4% of rows unmarked and 720k buffers after one delete.");
+        budget = crate::sql::Budget::sweep().buffers(2_000_000)
+            .because("The background path of signature backfill can run this one-time insert after the cache subscription received its signature. \
+                      This path can write one unsigned placeholder per project output to the cache. \
+                      End-to-end row counts record 17k buffers with all rows marked. \
+                      The same counts read 420k buffers with 4% of rows unmarked. \
+                      They read 720k buffers after one delete. \
+                      They can read up to 1.53 million buffers when the gate can execute before backfill marked rows again.");
 
     INSERT_PLACEHOLDERS_FOR_PROJECT_STORE_HASHES = || unsigned_placeholders_insert(
         "SELECT DISTINCT pushed.hash, $1::uuid FROM unnest($2::text[]) pushed(hash)",
@@ -5605,10 +5608,10 @@ ORDER BY selected_content_variant_for_signing.cache, selected_content_variant_fo
                 backfill.tier,
                 backfill.budget.buffers,
                 backfill.budget.reason.is_some_and(|reason| {
-                    reason.contains("signature-backfill") && !reason.contains("/projects/")
+                    reason.contains("signature backfill") && !reason.contains("/projects/")
                 }),
             ),
-            (crate::sql::Tier::Sweep, 1_500_000, true),
+            (crate::sql::Tier::Sweep, 2_000_000, true),
             "Backfill statements execute on a background path on tier Sweep. Those statements name that path, not a web request. The path name is the reason."
         );
         assert_eq!(
