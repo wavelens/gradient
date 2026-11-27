@@ -20,7 +20,7 @@ use serde_json::json;
 use super::fixtures::{action_with, make_ctx_with};
 use crate::CiContext;
 
-const REFUSAL_MESSAGE_SEEN_BY_TEAM_MEMBERS_FOR_INTERNAL_EXAMPLE_HOST: &str = "The server cannot connect to internal.example. The name does not resolve, or the address is private and the configuration does not allow that address. An admin can allow this host in setting `outbound.allowedNonPublicNetworkTargets` (`GRADIENT_OUTBOUND_ALLOWED_NON_PUBLIC_NETWORK_TARGETS`).";
+const REFUSAL_MESSAGE_SEEN_BY_TEAM_MEMBERS_FOR_INTERNAL_EXAMPLE_HOST: &str = "The server can't connect to internal.example. The name doesn't resolve, or the address is private and not allowed. An admin can allow the host in setting `outbound.allowedNonPublicNetworkTargets` (`GRADIENT_OUTBOUND_ALLOWED_NON_PUBLIC_NETWORK_TARGETS`).";
 
 fn ci_context_with_mock_database_http_client_resolving_every_host_name_to_loopback(
     db: sea_orm::MockDatabase,

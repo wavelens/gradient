@@ -38,7 +38,9 @@ impl From<HostError> for ProvisionError {
             error = %gradient_util::error_cause_chain_formatting::error_chain(&e),
             "The Git host rejected the provisioning request."
         );
-        if let Some(refusal) = e.allowlist_refusal() {
+        if let Some(refusal) =
+            gradient_util::http_validation::find_allowlist_rejection_in_error_chain(&e)
+        {
             return Self::Host(refusal.to_string());
         }
         Self::Host(match e.status() {

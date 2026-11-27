@@ -26,7 +26,10 @@ pub use gitlab::GitlabReporter;
 
 fn author_or_bot(resolved: Result<CommitIdent>, base_url: &str) -> CommitIdent {
     resolved.unwrap_or_else(|e| {
-        warn!(error = %e, "resolving Git host commit author; using Gradient bot default");
+        warn!(
+            error = format!("{e:#}"),
+            "resolving Git host commit author; using Gradient bot default"
+        );
         CommitIdent::gradient_bot(base_url)
     })
 }
