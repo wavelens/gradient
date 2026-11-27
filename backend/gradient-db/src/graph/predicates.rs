@@ -385,17 +385,53 @@ pub fn content_variant_trusted_by_all_projects_with_live_job_on_shared_build(
     )
 }
 
-pub fn stored_copy_in_input_closure_or_trusted_by_every_project_with_live_job_on_shared_build_sql_condition(
+/// Jobs in running evaluations decide which project inputs a shared build can read. Completed and failed evaluations take over once no running jobs remain. They still want rebuilds of retired outputs. The scheduler can dispatch those rebuilds.
+fn not_aborted_build_jobs_with_unfinished_or_finished_evaluation_sql_for_derivation_build_inputs(
+    shared_build: &str,
+) -> String {
+    format!(
+        "FROM build_job input_reader_job \
+         JOIN evaluation input_reader_evaluation ON input_reader_evaluation.id = input_reader_job.evaluation \
+         JOIN task input_reader_task ON input_reader_task.id = input_reader_evaluation.task \
+         WHERE input_reader_job.derivation_build = {shared_build}.id AND NOT input_reader_job.aborted \
+           AND input_reader_evaluation.status <> {aborted} \
+           AND (input_reader_evaluation.status NOT IN ({terminal}) OR NOT {live})",
+        aborted = crate::sql::status::eval(EvaluationStatus::Aborted),
+        terminal = crate::sql::status::eval_in(&EvaluationStatus::TERMINAL),
+        live = derivation_build_has_build_job_not_aborted_and_evaluation_not_finished_sql_predicate(
+            shared_build
+        ),
+    )
+}
+
+pub fn shared_build_has_build_job_not_aborted_and_evaluation_not_aborted_sql_predicate(
+    shared_build: &str,
+) -> String {
+    format!(
+        "EXISTS (SELECT 1 {jobs})",
+        jobs =
+            not_aborted_build_jobs_with_unfinished_or_finished_evaluation_sql_for_derivation_build_inputs(
+                shared_build
+            ),
+    )
+}
+
+pub fn stored_copy_in_input_closure_or_trusted_by_every_project_with_build_job_on_shared_build_sql_condition(
     variant: &str,
     shared_build: &str,
     store_path_hash_in_input_closure_sql_condition: &str,
 ) -> String {
     format!(
-        "({store_path_hash_in_input_closure_sql_condition} OR {trusted})",
-        trusted = content_variant_trusted_by_all_projects_with_live_job_on_shared_build(
-            variant,
-            shared_build,
-        ),
+        "({store_path_hash_in_input_closure_sql_condition} OR NOT EXISTS (SELECT 1 {jobs} AND NOT {trusted}))",
+        jobs =
+            not_aborted_build_jobs_with_unfinished_or_finished_evaluation_sql_for_derivation_build_inputs(
+                shared_build
+            ),
+        trusted =
+            crate::store_path_content_variant_trust::project_trusts_content_variant_exists_sql(
+                variant,
+                "input_reader_task.project"
+            ),
     )
 }
 
