@@ -24,13 +24,13 @@ pub enum DestinationUrlRejectedError {
     #[error("URL must include a host")]
     MissingHost,
     #[error(
-        "The URL points to a private address ({0}) that the server administrator didn't allow."
+        "The URL points to a private address ({0}). An administrator can allow this through the setting `outbound.allowedNonPublicNetworkTargets` (`GRADIENT_OUTBOUND_ALLOWED_NON_PUBLIC_NETWORK_TARGETS`)."
     )]
     UnsafeAddress(std::net::IpAddr),
     #[error("URL host is empty")]
     EmptyHost,
     #[error(
-        "The URL host `localhost` is unavailable without approval from the server administrator."
+        "Only an administrator can approve URL host `localhost`. The same administrator can allow that host in setting `outbound.allowedNonPublicNetworkTargets` (`GRADIENT_OUTBOUND_ALLOWED_NON_PUBLIC_NETWORK_TARGETS`)."
     )]
     Localhost,
     #[error("Stopped after {0} redirect responses")]
@@ -65,10 +65,18 @@ pub struct InvalidAdminAllowListEntryError(String);
 /// Error messages use the same wording for a name that DNS lookup can't resolve and for a name with refused addresses. Users then can't tell which internal names exist, or which addresses belong to the server. Debug-level logs record the cause.
 #[derive(Debug, thiserror::Error)]
 #[error(
-    "The server cannot connect to {host}. The name does not resolve, or the server administrator does not allow that address."
+    "The server cannot connect to {host}. The name does not resolve, or the address is private and the configuration does not allow that address. An admin can allow this host in setting `outbound.allowedNonPublicNetworkTargets` (`GRADIENT_OUTBOUND_ALLOWED_NON_PUBLIC_NETWORK_TARGETS`)."
 )]
 pub struct HostHasNoAllowedAddressError {
     host: String,
+}
+
+pub fn find_allowlist_rejection_in_error_chain<'a>(
+    error: &'a (dyn std::error::Error + 'static),
+) -> Option<&'a (dyn std::error::Error + 'static)> {
+    std::iter::successors(Some(error), |cause| cause.source()).find(|cause| {
+        cause.is::<DestinationUrlRejectedError>() || cause.is::<HostHasNoAllowedAddressError>()
+    })
 }
 
 impl HostHasNoAllowedAddressError {

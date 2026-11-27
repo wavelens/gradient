@@ -8,7 +8,9 @@ use gradient_util::http::{
     HttpClientForUserSuppliedUrls, ResponseBodyReadWithLimitError, read_response_body_with_limit,
 };
 use gradient_util::http_base_url::ValidatedHttpBaseUrl;
-use gradient_util::http_validation::DestinationUrlRejectedError;
+use gradient_util::http_validation::{
+    DestinationUrlRejectedError, find_allowlist_rejection_in_error_chain,
+};
 use gradient_util::outbound_http_status_error::OutboundHttpNonSuccessStatusError;
 use reqwest::{Method, Response, StatusCode};
 use serde::{Serialize, de::DeserializeOwned};
@@ -414,6 +416,14 @@ impl HostError {
     pub(crate) fn status(&self) -> Option<StatusCode> {
         match self.failure {
             Failure::Status(ref rejection) => Some(rejection.status),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn allowlist_refusal(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match &self.failure {
+            Failure::Refused(refusal) => Some(refusal),
+            Failure::Transport(source) => find_allowlist_rejection_in_error_chain(source),
             _ => None,
         }
     }
