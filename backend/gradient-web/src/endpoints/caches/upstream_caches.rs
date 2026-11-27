@@ -731,7 +731,7 @@ mod tests {
                     .expect_err("a host without addresses is refused");
             let text = format!("{refusal} {refusal:?}");
             assert!(
-                text.contains("The server cannot connect to empty.example"),
+                text.contains("The server can't connect to empty.example"),
                 "{text}"
             );
         }

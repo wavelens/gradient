@@ -620,7 +620,7 @@ The server connects only to public IP addresses for upstream cache URLs, Git hos
 - A failed read of the addresses of the network interfaces can block every destination. Manual server units and worker units need `AF_NETLINK` in `RestrictAddressFamilies`.
 
 ```text
-The server cannot connect to <host>. The name does not resolve, or the address is private and the configuration does not allow that address. An admin can allow this host in setting `outbound.allowedNonPublicNetworkTargets` (`GRADIENT_OUTBOUND_ALLOWED_NON_PUBLIC_NETWORK_TARGETS`).
+The server can't connect to <host>. The name doesn't resolve, or the address is private and not allowed. An admin can allow the host in setting `outbound.allowedNonPublicNetworkTargets` (`GRADIENT_OUTBOUND_ALLOWED_NON_PUBLIC_NETWORK_TARGETS`).
 ```
 
 ### CLI Downloads

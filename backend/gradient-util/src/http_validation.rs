@@ -24,13 +24,13 @@ pub enum DestinationUrlRejectedError {
     #[error("URL must include a host")]
     MissingHost,
     #[error(
-        "The URL points to a private address ({0}). An administrator can allow this through the setting `outbound.allowedNonPublicNetworkTargets` (`GRADIENT_OUTBOUND_ALLOWED_NON_PUBLIC_NETWORK_TARGETS`)."
+        "The URL target is a private address ({0}). An admin can allow the private address in setting `outbound.allowedNonPublicNetworkTargets` (`GRADIENT_OUTBOUND_ALLOWED_NON_PUBLIC_NETWORK_TARGETS`)."
     )]
     UnsafeAddress(std::net::IpAddr),
     #[error("URL host is empty")]
     EmptyHost,
     #[error(
-        "Only an administrator can approve URL host `localhost`. The same administrator can allow that host in setting `outbound.allowedNonPublicNetworkTargets` (`GRADIENT_OUTBOUND_ALLOWED_NON_PUBLIC_NETWORK_TARGETS`)."
+        "URL host `localhost` isn't allowed. An admin can allow the host in setting `outbound.allowedNonPublicNetworkTargets` (`GRADIENT_OUTBOUND_ALLOWED_NON_PUBLIC_NETWORK_TARGETS`)."
     )]
     Localhost,
     #[error("Stopped after {0} redirect responses")]
@@ -65,7 +65,7 @@ pub struct InvalidAdminAllowListEntryError(String);
 /// Error messages use the same wording for a name that DNS lookup can't resolve and for a name with refused addresses. Users then can't tell which internal names exist, or which addresses belong to the server. Debug-level logs record the cause.
 #[derive(Debug, thiserror::Error)]
 #[error(
-    "The server cannot connect to {host}. The name does not resolve, or the address is private and the configuration does not allow that address. An admin can allow this host in setting `outbound.allowedNonPublicNetworkTargets` (`GRADIENT_OUTBOUND_ALLOWED_NON_PUBLIC_NETWORK_TARGETS`)."
+    "The server can't connect to {host}. The name doesn't resolve, or the address is private and not allowed. An admin can allow the host in setting `outbound.allowedNonPublicNetworkTargets` (`GRADIENT_OUTBOUND_ALLOWED_NON_PUBLIC_NETWORK_TARGETS`)."
 )]
 pub struct HostHasNoAllowedAddressError {
     host: String,

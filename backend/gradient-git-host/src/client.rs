@@ -8,9 +8,7 @@ use gradient_util::http::{
     HttpClientForUserSuppliedUrls, ResponseBodyReadWithLimitError, read_response_body_with_limit,
 };
 use gradient_util::http_base_url::ValidatedHttpBaseUrl;
-use gradient_util::http_validation::{
-    DestinationUrlRejectedError, find_allowlist_rejection_in_error_chain,
-};
+use gradient_util::http_validation::DestinationUrlRejectedError;
 use gradient_util::outbound_http_status_error::OutboundHttpNonSuccessStatusError;
 use reqwest::{Method, Response, StatusCode};
 use serde::{Serialize, de::DeserializeOwned};
@@ -419,14 +417,6 @@ impl HostError {
             _ => None,
         }
     }
-
-    pub(crate) fn allowlist_refusal(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match &self.failure {
-            Failure::Refused(refusal) => Some(refusal),
-            Failure::Transport(source) => find_allowlist_rejection_in_error_chain(source),
-            _ => None,
-        }
-    }
 }
 
 impl fmt::Display for HostError {
@@ -437,9 +427,9 @@ impl fmt::Display for HostError {
             failure,
         } = self;
         match failure {
-            Failure::Refused(source) => write!(f, "{method} {url}: {source}"),
-            Failure::Transport(source) => write!(f, "{method} {url}: {source}"),
-            Failure::Status(_) => write!(f, "{method} {url}"),
+            Failure::Refused(_) | Failure::Transport(_) | Failure::Status(_) => {
+                write!(f, "{method} {url}")
+            }
             Failure::Body(source) => write!(f, "{method} {url}: Reading the Response: {source}"),
             Failure::Decode(source) => write!(f, "{method} {url}: decoding response: {source}"),
         }
@@ -449,6 +439,8 @@ impl fmt::Display for HostError {
 impl std::error::Error for HostError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match &self.failure {
+            Failure::Refused(refusal) => Some(refusal),
+            Failure::Transport(source) => Some(source),
             Failure::Status(rejection) => Some(rejection),
             _ => None,
         }
