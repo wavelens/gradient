@@ -15,6 +15,7 @@ use super::response::TaskEvaluationNotStartedReason;
 use gradient_ci::CiContext;
 use gradient_ci::pull_request_summary::enable_pull_request_summary;
 use gradient_db::WebDb;
+use gradient_db::evaluations::branch::active_on_branch;
 use gradient_db::fork_pull_request_approvals as approvals;
 use gradient_scheduler::Scheduler;
 use gradient_types::input::InputError;
@@ -199,10 +200,7 @@ pub(super) async fn handle_issue_comment(
         }
     }
     if !action_taken {
-        debug!(
-            pr_number,
-            "The `/gradient` comment has no pending approval. No new evaluation started."
-        );
+        debug!(pr_number, "The /gradient comment ran no operation.");
     }
 }
 
@@ -318,8 +316,12 @@ async fn handle_comment_for_connection(ctx: &CommentRoute<'_>) -> bool {
         PullRequestCommentCommandOutcome::ValidMaintainerCommand => {}
     }
 
-    if matches!(ctx.cmd, GradientCommand::Summary) {
-        return enable_summaries(ctx, &task_ids).await;
+    match ctx.cmd {
+        GradientCommand::Summary => return enable_summaries(ctx, &task_ids).await,
+        GradientCommand::Abort => {
+            return abort_running_evaluations_for_pull_request(ctx, &task_ids).await;
+        }
+        GradientCommand::Run { .. } | GradientCommand::Approve { .. } => {}
     }
     let Some(snapshot) =
         fetch_pr_snapshot(ctx.ci, &task_ids, ctx.owner, ctx.repo, ctx.pr_number).await
@@ -639,6 +641,31 @@ async fn enable_summaries(ctx: &CommentRoute<'_>, task_ids: &[TaskId]) -> bool {
     enabled_any
 }
 
+async fn abort_running_evaluations_for_pull_request(
+    ctx: &CommentRoute<'_>,
+    task_ids: &[TaskId],
+) -> bool {
+    let pull_request_branch = branch_key::pull_request(ctx.pr_number);
+    let mut aborted_any = false;
+    for task_id in task_ids {
+        let running = match active_on_branch(&ctx.ci.db.web_db, *task_id, &pull_request_branch)
+            .await
+        {
+            Ok(running) => running,
+            Err(e) => {
+                warn!(error = %e, %task_id, pr_number = ctx.pr_number, "/gradient abort: failed to load the running evaluations of the pull request");
+                continue;
+            }
+        };
+        for evaluation in running {
+            info!(evaluation_id = %evaluation.id, %task_id, pr_number = ctx.pr_number, "/gradient abort: Aborting the evaluation still running for the pull request");
+            ctx.scheduler.abort_evaluation(evaluation, None).await;
+            aborted_any = true;
+        }
+    }
+    aborted_any
+}
+
 async fn approve_fork_pull_request_commit_and_start_evaluations(
     ctx: &CommentRoute<'_>,
     task_ids: &[TaskId],
@@ -904,6 +931,7 @@ pub(super) enum GradientCommand {
         commit_named_in_comment: CommitSpecifiedInCommentCommand,
     },
     Summary,
+    Abort,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -923,7 +951,9 @@ impl GradientCommand {
             | GradientCommand::Approve {
                 commit_named_in_comment,
             } => commit_named_in_comment,
-            GradientCommand::Summary => &CommitSpecifiedInCommentCommand::NoCommitHashSpecified,
+            GradientCommand::Summary | GradientCommand::Abort => {
+                &CommitSpecifiedInCommentCommand::NoCommitHashSpecified
+            }
         }
     }
 }
@@ -1000,6 +1030,8 @@ pub(super) fn parse_gradient_command(body: &str) -> Option<GradientCommand> {
         }
         let bare = if verb.eq_ignore_ascii_case("summary") {
             GradientCommand::Summary
+        } else if verb.eq_ignore_ascii_case("abort") {
+            GradientCommand::Abort
         } else {
             return None;
         };
@@ -1623,6 +1655,15 @@ mod tests {
             Some(GradientCommand::Summary)
         );
         assert!(parse_gradient_command("/gradient summary packages.*").is_none());
+    }
+
+    #[test]
+    fn parse_gradient_abort_takes_no_arguments() {
+        assert_eq!(
+            parse_gradient_command("/gradient ABORT"),
+            Some(GradientCommand::Abort)
+        );
+        assert!(parse_gradient_command("/gradient abort packages.*").is_none());
     }
 
     #[test]

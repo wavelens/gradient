@@ -7475,7 +7475,7 @@ paths:
         - `merge_group` - `checks_requested` evaluates the merge group head on every push
           trigger whose branch filter matches the queue's base branch.
         - `check_run` - the "Approve and Run" action clears a fork-PR approval gate.
-        - `issue_comment` - `/gradient run` / `/gradient approve` / `/gradient summary` maintainer commands.
+        - `issue_comment` - `/gradient run` / `/gradient approve` / `/gradient summary` / `/gradient abort` maintainer commands.
         - `pull_request_review` - a maintainer's approving review clears a fork-PR approval gate.
         - `installation` / `installation_repositories` - Create or update the connection to the Git host for the installation's instance. Delete that connection after installation removal.
         - `ping` - always returns 200.

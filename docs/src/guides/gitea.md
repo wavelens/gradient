@@ -197,6 +197,7 @@ services.gradient.state.tasks.app = {
 | Comment `/gradient approve <commit>` | Maintainers approve and evaluate that commit on a fork pull request with pending approval. Use the full 40-character hash. |
 | Approve the review | Maintainers with write permission approve the commit from their latest approving review if pending approvals sit on that commit. Gradient read that commit only from the reviews API, never from the webhook. Newer reviews with a change request from that same maintainer approve nothing. Newer comments-only reviews from that maintainer keep the approval. |
 | Comment `/gradient summary` | One comment with the built, failed and unchanged packages, updated after every push |
+| Comment `/gradient abort` | Abort of all evaluations in progress on a pull request |
 
 The endpoint of the review API can return 404, omit the `commit_id` or `dismissed` field, fail, or take more than 4 seconds. These cases leave the review unapproved. A dismissal of the latest approving review can block approval. A pull request with more than 500 reviews can block approval too. Next, post `/gradient approve <commit>` as a comment with the full 40-character hash.
 

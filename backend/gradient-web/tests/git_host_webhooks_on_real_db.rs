@@ -1165,6 +1165,66 @@ async fn approve_comment_from_read_permission_user_approves_nothing_and_posts_no
 }
 
 #[tokio::test]
+async fn maintainer_posts_abort_comment_on_pull_request_7_aborts_its_running_evaluations_but_not_pull_request_8_or_completed_evaluation()
+ {
+    use evaluation::EvaluationStatus::{Aborted, Building, Completed, Queued};
+
+    let secret = "webhook-secret-plaintext";
+    let s =
+        set_up_test_database_and_mock_gitea_repository_for_pull_request_with_required_approval_and_write_permission(
+            secret, 1,
+        )
+        .await;
+    let conn = s.db.connection();
+    let commit =
+        gradient_db::rows::insert::<commit::Entity, _>(&conn, rows::build_request_commit())
+            .await
+            .unwrap();
+    let mut evaluation_ids = Vec::new();
+    for (branch, status, concurrent) in [
+        (branch_key::pull_request(7), Building, false),
+        (branch_key::pull_request(7), Queued, true),
+        (branch_key::pull_request(7), Completed, false),
+        (branch_key::pull_request(8), Building, false),
+    ] {
+        let inserted = gradient_db::rows::insert::<evaluation::Entity, _>(
+            &conn,
+            evaluation::Model {
+                branch,
+                status,
+                concurrent,
+                ..rows::queued_evaluation(task_id(), commit.id)
+            },
+        )
+        .await
+        .unwrap();
+        evaluation_ids.push(inserted.id);
+    }
+
+    send_signed_gitea_issue_comment_webhook_with_comment_created_at(
+        &s,
+        secret,
+        "/gradient abort",
+        gradient_types::now(),
+    )
+    .await;
+
+    let mut statuses = std::collections::HashMap::new();
+    for row in s.db.rows::<evaluation::Entity>().await {
+        statuses.insert(row.id, row.status);
+    }
+    assert_eq!(
+        evaluation_ids
+            .iter()
+            .map(|id| statuses[id])
+            .collect::<Vec<_>>(),
+        vec![Aborted, Aborted, Completed, Building]
+    );
+    s.git_host.verify().await;
+    s.db.finish().await;
+}
+
+#[tokio::test]
 async fn approve_comment_with_full_head_hash_approves_five_seconds_after_recorded_commit() {
     let secret = "webhook-secret-plaintext";
     let s =
