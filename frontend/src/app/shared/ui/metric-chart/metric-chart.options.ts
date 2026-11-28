@@ -111,9 +111,21 @@ export function buildMetricChartOption(requested: MetricChartConfig, theme: Char
     },
   };
 
-  if (cfg.type === 'radar') return { ...base, ...radarOption(cfg, theme) };
-  if (cfg.type === 'heatmap') return { ...base, ...heatmapOption(cfg, format, theme) };
-  return { ...base, ...cartesianOption(cfg, format, theme) };
+  if (cfg.type === 'radar') return assignStableIdsToEChartsOptionParts({ ...base, ...radarOption(cfg, theme) });
+  if (cfg.type === 'heatmap') return assignStableIdsToEChartsOptionParts({ ...base, ...heatmapOption(cfg, format, theme) });
+  return assignStableIdsToEChartsOptionParts({ ...base, ...cartesianOption(cfg, format, theme) });
+}
+
+export const optionKeysReplacedOnUpdate = ['series', 'xAxis', 'yAxis', 'legend', 'radar'] as const;
+
+function assignStableIdsToEChartsOptionParts(option: EChartsOption): EChartsOption {
+  const withIds: Record<string, unknown> = { ...option };
+  for (const key of optionKeysReplacedOnUpdate) {
+    const parts: unknown = option[key];
+    if (Array.isArray(parts)) withIds[key] = parts.map((part: object, index: number) => ({ ...part, id: `${key}-${index}` }));
+    else if (parts) withIds[key] = { ...parts, id: `${key}-0` };
+  }
+  return withIds as EChartsOption;
 }
 
 const RADAR_CHART_MIN_CATEGORY_COUNT = 3;
