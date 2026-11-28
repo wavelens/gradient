@@ -124,6 +124,7 @@ Push events require the **Push (reporter)** trigger from step 4. Pull Requests r
 | Comment `/gradient approve <commit>` | Evaluation of that commit in a fork pull request awaiting maintainer approval. Use the full 40-character hash for the commit. |
 | Approve the review | Evaluation of the reviewed commit in a fork pull request awaiting maintainer approval. Reviews approve nothing if checks of write access take longer than 4 seconds. Use a `/gradient approve` comment with the full commit hash instead. |
 | Comment `/gradient summary` | One comment with the built, failed and unchanged packages, updated after every push |
+| Comment `/gradient abort` | Abort of all evaluations in progress on a pull request |
 
 Commits in pull requests from forks wait for maintainer approval before the start of evaluation. The `gradient/<task>: Approval` check can show the **Approve and run** button. Each new commit must get a new approval. Set **Require maintainer approval for PRs from non-writers** with the **Pull Request (reporter)** trigger to enable this check.
 
