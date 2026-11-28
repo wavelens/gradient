@@ -9,7 +9,7 @@ import * as echarts from 'echarts/core';
 import { BarChart, HeatmapChart, LineChart, RadarChart } from 'echarts/charts';
 import { GridComponent, LegendComponent, RadarComponent, TooltipComponent, VisualMapComponent } from 'echarts/components';
 import { SVGRenderer } from 'echarts/renderers';
-import { ChartTheme, MetricChartConfig, MetricChartType, MetricPointXY, MetricSeries, buildMetricChartOption } from './metric-chart.options';
+import { ChartTheme, MetricChartConfig, MetricChartType, MetricPointXY, MetricSeries, buildMetricChartOption, optionKeysReplacedOnUpdate } from './metric-chart.options';
 import { ThemeService } from '@core/services/theme.service';
 import { DocLink } from '@core/docs';
 import { LabelHelpComponent } from '../label-help/label-help.component';
@@ -132,7 +132,7 @@ export class MetricChartComponent implements OnDestroy {
     afterRenderEffect(() => {
       const option = this.option();
       if (this.chart) {
-        this.chart.setOption(option, { replaceMerge: ['series', 'xAxis', 'yAxis', 'legend', 'radar'] });
+        this.chart.setOption(option, { replaceMerge: [...optionKeysReplacedOnUpdate] });
         return;
       }
       this.optionWaitingForHostSize = option;

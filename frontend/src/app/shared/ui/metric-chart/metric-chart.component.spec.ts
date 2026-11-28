@@ -64,6 +64,22 @@ describe('MetricChartComponent', () => {
     expect(fixture.nativeElement.querySelector('.metric-chart__plot').innerHTML).not.toBe(before);
   });
 
+  it('updates the drawn series and axes in place when new data arrives', async () => {
+    const fixture = await render();
+    const plot = fixture.nativeElement.querySelector('.metric-chart__plot') as HTMLElement;
+    const model = () => (echarts.getInstanceByDom(plot) as unknown as { getModel(): { getSeriesByIndex(i: number): unknown; getComponent(type: string): unknown } }).getModel();
+    const series = model().getSeriesByIndex(0);
+    const xAxis = model().getComponent('xAxis');
+    const yAxis = model().getComponent('yAxis');
+
+    fixture.componentInstance.series.set([{ name: 'avg', data: [3, 4] }]);
+    await fixture.whenStable();
+
+    expect(model().getSeriesByIndex(0)).toBe(series);
+    expect(model().getComponent('xAxis')).toBe(xAxis);
+    expect(model().getComponent('yAxis')).toBe(yAxis);
+  });
+
   it('says No data over a plot whose series hold no points', async () => {
     const fixture = await render();
     expect(fixture.nativeElement.querySelector('.metric-chart__empty')).toBeNull();
